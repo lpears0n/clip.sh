@@ -1,0 +1,10 @@
+[package]
+name = "clip-ipc"
+description = "Socket protocol between the clip.sh app and the clipsh CLI"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true

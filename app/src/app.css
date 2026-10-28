@@ -1,0 +1,132 @@
+@import '@fontsource-variable/inter';
+@import '@fontsource-variable/archivo/wdth.css';
+@import 'tailwindcss';
+
+@theme {
+  --font-sans: 'Inter Variable', Inter, system-ui, sans-serif;
+  /* Headings, game names and numbers. Semi-expanded for a sportier read. */
+  --font-display: 'Archivo Variable', 'Inter Variable', system-ui, sans-serif;
+
+  --color-canvas: #0d0d0f;
+  --color-panel: #17181b;
+  --color-raised: #1e1f23;
+  --color-line: #26272c;
+  --color-muted: #8b8d96;
+  --color-accent: #ff7a1a;
+  --color-danger: #ff3b5c;
+  --color-ok: #34d399;
+
+  --radius-ctl: 6px;
+  --radius-card: 8px;
+}
+
+@layer base {
+  html,
+  body,
+  #app {
+    height: 100%;
+    overflow: hidden;
+  }
+
+  body {
+    @apply bg-canvas font-sans text-[14px] text-zinc-100 antialiased select-none;
+    color-scheme: dark;
+    font-feature-settings: 'cv11', 'ss01';
+  }
+
+  button:not(:disabled) {
+    cursor: pointer;
+  }
+
+  /* No browser-default focus rings; a clear one for keyboard users only. */
+  :focus {
+    outline: none;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+
+  input:focus-visible,
+  select:focus-visible {
+    outline-offset: 0;
+  }
+
+  /* Native selects, restyled to match the controls. */
+  select {
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='none' stroke='%238b8d96' stroke-width='2' stroke-linecap='round' viewBox='0 0 24 24'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    padding-right: 30px !important;
+  }
+
+  /* Range: orange fill up to the thumb via --fill (0–100%). */
+  input[type='range'] {
+    appearance: none;
+    height: 4px;
+    border-radius: 2px;
+    background: linear-gradient(
+      to right,
+      var(--color-accent) var(--fill, 50%),
+      #34363d var(--fill, 50%)
+    );
+    outline: none;
+  }
+
+  input[type='range']::-webkit-slider-thumb {
+    appearance: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #fff;
+    border: 0;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+    cursor: pointer;
+  }
+
+  kbd {
+    @apply inline-flex h-6 min-w-6 items-center justify-center rounded-[4px] border border-zinc-700 border-b-zinc-600 bg-raised px-1.5 font-sans text-[12px] font-semibold text-zinc-200;
+  }
+}
+
+@utility btn {
+  @apply inline-flex h-9 items-center justify-center gap-2 rounded-[var(--radius-ctl)] border border-line bg-raised px-3.5 text-[14px] font-medium text-zinc-100 transition-colors hover:border-zinc-600 hover:bg-[#25262b] disabled:cursor-default disabled:opacity-40;
+}
+
+@utility btn-primary {
+  @apply inline-flex h-9 items-center justify-center gap-2 rounded-[var(--radius-ctl)] bg-accent px-4 text-[14px] font-semibold text-black transition-colors hover:bg-[#ff8c38] disabled:cursor-default disabled:bg-raised disabled:text-muted disabled:ring-1 disabled:ring-line disabled:ring-inset;
+}
+
+@utility btn-icon {
+  @apply inline-flex size-8 items-center justify-center rounded-[var(--radius-ctl)] text-zinc-300 transition-colors hover:bg-white/10 hover:text-white;
+}
+
+@utility field {
+  @apply h-9 rounded-[var(--radius-ctl)] border border-line bg-canvas px-3 text-[14px] text-zinc-100 outline-none transition-colors hover:border-zinc-600 focus:border-accent;
+}
+
+@utility card {
+  @apply rounded-[var(--radius-card)] border border-line bg-panel;
+}
+
+@utility display-face {
+  font-family: var(--font-display);
+  font-stretch: 112%;
+  letter-spacing: -0.01em;
+}
+
+@utility section-title {
+  @apply display-face text-[15px] font-semibold text-zinc-100;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #2a2b30;
+  border-radius: 5px;
+  border: 3px solid #0d0d0f;
+}
