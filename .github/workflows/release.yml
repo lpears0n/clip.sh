@@ -1,0 +1,87 @@
+# Builds installers and attaches them to a GitHub release whenever a version
+# tag (v0.2.0) is pushed. The Windows installer bundles the GStreamer
+# runtime (scripts/collect-gstreamer.ps1 + tauri.windows.conf.json), so
+# users need nothing else.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build · ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x86_64
+            os: ubuntu-22.04 # oldest glibc we want the AppImage to run on
+            bundles: appimage,deb,rpm
+          - name: Windows x86_64
+            os: windows-latest
+            bundles: nsis
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system libraries (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+            libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf \
+            libxdo-dev libssl-dev
+      - name: Install GStreamer (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install -y --no-progress gstreamer gstreamer-devel pkgconfiglite
+          # The installer records its folder in a machine variable; the job's
+          # own environment predates it, so read it from the registry.
+          $root = [Environment]::GetEnvironmentVariable('GSTREAMER_1_0_ROOT_MSVC_X86_64', 'Machine')
+          if (-not $root) {
+            $root = (Get-ChildItem 'C:\Program Files\gstreamer\1.0', 'C:\gstreamer\1.0' -Directory -Filter msvc_x86_64 -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
+          }
+          if (-not $root) { throw 'GStreamer install folder not found' }
+          $root = $root.TrimEnd('\')
+          Write-Host "GStreamer at $root"
+          "GSTREAMER_1_0_ROOT_MSVC_X86_64=$root" >> $env:GITHUB_ENV
+          "PKG_CONFIG_PATH=$root\lib\pkgconfig" >> $env:GITHUB_ENV
+          "$root\bin" >> $env:GITHUB_PATH
+          # Prefer the pkg-config GStreamer ships over the Chocolatey one.
+          if (Test-Path "$root\bin\pkg-config.exe") { "PKG_CONFIG=$root\bin\pkg-config.exe" >> $env:GITHUB_ENV }
+          if (-not (Test-Path "$root\lib\pkgconfig\glib-2.0.pc")) { throw "no glib-2.0.pc under $root" }
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: '. -> target'
+      - run: pnpm install --frozen-lockfile
+        working-directory: app
+      - name: Collect the GStreamer runtime for bundling (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: pwsh scripts/collect-gstreamer.ps1
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: app
+          args: --bundles ${{ matrix.bundles }}
+          tagName: ${{ github.ref_name }}
+          releaseName: clip.sh ${{ github.ref_name }}
+          releaseBody: See the changelog in the release notes.
+          releaseDraft: true
+          prerelease: ${{ contains(github.ref_name, '-') }}

@@ -1,7 +1,14 @@
 import type { Capabilities, Codec, Settings } from './api'
 
 export const CODEC_LABEL: Record<Codec, string> = { h264: 'H.264', hevc: 'HEVC', av1: 'AV1' }
-export const ENCODER_LABEL = { nvenc: 'NVIDIA NVENC', vaapi: 'VA-API', x264: 'x264 (CPU)' } as const
+export const ENCODER_LABEL = {
+  nvenc: 'NVIDIA NVENC',
+  vaapi: 'VA-API',
+  amf: 'AMD AMF',
+  qsv: 'Intel Quick Sync',
+  mf: 'Media Foundation',
+  x264: 'x264 (CPU)',
+} as const
 
 export const FPS_OPTIONS = [30, 60, 120, 144, 165, 240, 360, 480]
 

@@ -3,7 +3,11 @@
 
 use std::{
     path::Path,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::Duration,
 };
 
 use anyhow::{Context, Result, bail};
@@ -27,6 +31,16 @@ pub struct Edit {
 
 const AAC_BITRATE: i32 = 192_000;
 
+/// Progress reporting and cancellation for a render.
+#[derive(Default)]
+pub struct Control {
+    /// Called with the fraction done (0..=1) a few times a second.
+    pub on_progress: Option<Box<dyn Fn(f64) + Send>>,
+    /// Set to stop; the partial output is removed and `render` returns an
+    /// error whose message contains "cancelled".
+    pub cancel: Option<Arc<AtomicBool>>,
+}
+
 /// Re-encode `input[start..end]` to `output` as H.264 (edits are for sharing,
 /// so they favour compatibility). `encoder` must support H.264. Blocks until
 /// done.
@@ -36,6 +50,18 @@ pub fn render(
     edit: &Edit,
     encoder: Encoder,
     cfg: &VideoConfig,
+) -> Result<()> {
+    render_with(input, output, edit, encoder, cfg, Control::default())
+}
+
+/// [`render`], reporting progress and honouring cancellation.
+pub fn render_with(
+    input: &Path,
+    output: &Path,
+    edit: &Edit,
+    encoder: Encoder,
+    cfg: &VideoConfig,
+    control: Control,
 ) -> Result<()> {
     let cfg = &VideoConfig {
         codec: Codec::H264,
@@ -171,7 +197,7 @@ pub fn render(
         )?;
         wait(&pipeline, gst::MessageType::AsyncDone)?;
         pipeline.set_state(gst::State::Playing)?;
-        wait(&pipeline, gst::MessageType::Eos)
+        run(&pipeline, edit, &control)
     })();
     let _ = pipeline.set_state(gst::State::Null);
     let result = match link_error.lock().unwrap().take() {
@@ -182,6 +208,52 @@ pub fn render(
         let _ = std::fs::remove_file(output);
     }
     result
+}
+
+/// Play to EOS, reporting position as progress and stopping on cancel.
+fn run(pipeline: &gst::Pipeline, edit: &Edit, control: &Control) -> Result<()> {
+    let bus = pipeline.bus().context("no bus")?;
+    let span = (edit.end - edit.start).nseconds().max(1) as f64;
+    let started = std::time::Instant::now();
+    loop {
+        if control
+            .cancel
+            .as_ref()
+            .is_some_and(|c| c.load(Ordering::Relaxed))
+        {
+            bail!("render cancelled");
+        }
+        match bus.timed_pop_filtered(
+            gst::ClockTime::from_mseconds(200),
+            &[gst::MessageType::Eos, gst::MessageType::Error],
+        ) {
+            Some(msg) => match msg.view() {
+                gst::MessageView::Error(e) => bail!(
+                    "{} from {:?}: {:?}",
+                    e.error(),
+                    msg.src().map(|s| s.path_string()),
+                    e.debug()
+                ),
+                _ => {
+                    if let Some(f) = &control.on_progress {
+                        f(1.0);
+                    }
+                    return Ok(());
+                }
+            },
+            None => {
+                if started.elapsed() > Duration::from_secs(600) {
+                    bail!("timed out rendering");
+                }
+                if let Some(f) = &control.on_progress
+                    && let Some(pos) = pipeline.query_position::<gst::ClockTime>()
+                {
+                    let done = pos.saturating_sub(edit.start).nseconds() as f64 / span;
+                    f(done.clamp(0.0, 1.0));
+                }
+            }
+        }
+    }
 }
 
 fn wait(pipeline: &gst::Pipeline, until: gst::MessageType) -> Result<()> {

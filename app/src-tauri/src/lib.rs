@@ -1,4 +1,5 @@
 mod games;
+mod hotkeys;
 mod ipc_server;
 mod library;
 mod media_server;
@@ -6,17 +7,18 @@ mod service;
 mod settings;
 mod storage;
 mod system;
+mod thumbs;
+mod watcher;
 
 use std::{
     path::{Path, PathBuf},
-    sync::{Mutex, OnceLock},
+    sync::{
+        Arc, Mutex, OnceLock,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
-use clip_core::{
-    Codec, Encoder,
-    export::Edit,
-    hotkey::{Hotkey, HotkeyBackend},
-};
+use clip_core::{Codec, Encoder, export::Edit};
 use serde::Serialize;
 
 use service::{Service, Status};
@@ -31,13 +33,30 @@ use tauri_plugin_opener::OpenerExt;
 pub(crate) struct AppState {
     pub(crate) service: Service,
     settings: Mutex<Settings>,
-    /// `None` when KGlobalAccel isn't available (not KDE).
-    /// `None` until registered, and when no hotkey service exists.
-    shortcut: tokio::sync::Mutex<Option<Hotkey>>,
+    hotkeys: hotkeys::Hotkeys,
     encoder: OnceLock<Encoder>,
     /// Which encoders handle which codecs; probing test-encodes, so do it once.
     encoders: tokio::sync::OnceCell<Vec<EncoderSupport>>,
     media: media_server::MediaServer,
+    /// Set by `cancel_render` to stop the render in progress (one at a time).
+    render_cancel: Arc<AtomicBool>,
+    thumbs: thumbs::Thumbnailer,
+    /// Folder watcher for the current clips folder; replaced when it changes.
+    watcher: Mutex<Option<watcher::Handle>>,
+}
+
+/// Emitted a few times a second while an edit renders.
+const RENDER_PROGRESS: &str = "render-progress";
+
+#[derive(Clone, Serialize)]
+struct RenderProgress {
+    path: PathBuf,
+    fraction: f64,
+}
+
+#[tauri::command]
+fn cancel_render(state: State<'_, AppState>) {
+    state.render_cancel.store(true, Ordering::Relaxed);
 }
 
 /// Trimmer playback stats from `HTMLVideoElement.getVideoPlaybackQuality()`,
@@ -64,8 +83,8 @@ async fn choose_screen(state: State<'_, AppState>) -> CmdResult<()> {
 /// How the global hotkey is provided: "kglobalaccel", "portal", or null when
 /// the desktop has neither (the UI then explains `clipsh save`).
 #[tauri::command]
-async fn hotkey_backend(state: State<'_, AppState>) -> CmdResult<Option<HotkeyBackend>> {
-    Ok(state.shortcut.lock().await.as_ref().map(Hotkey::backend))
+async fn hotkey_backend(state: State<'_, AppState>) -> CmdResult<Option<hotkeys::Backend>> {
+    Ok(state.hotkeys.backend().await)
 }
 
 /// Recently played games with clips, sessions and Steam art.
@@ -183,15 +202,33 @@ async fn save_clip(state: State<'_, AppState>) -> CmdResult<PathBuf> {
 #[tauri::command]
 async fn list_clips(state: State<'_, AppState>) -> CmdResult<Vec<library::Clip>> {
     let dir = state.clips_dir();
-    tauri::async_runtime::spawn_blocking(move || library::list(&dir))
+    let clips = tauri::async_runtime::spawn_blocking(move || library::list(&dir))
         .await
-        .map_err(err)
+        .map_err(err)?;
+    // Images are made in the background; each arrives as a thumbnail-ready event.
+    for c in clips.iter().filter(|c| !library::is_cached(c)) {
+        state.thumbs.request(c.path.clone(), c.game.clone());
+    }
+    Ok(clips)
 }
 
 #[tauri::command]
 async fn delete_clip(state: State<'_, AppState>, path: PathBuf) -> CmdResult<()> {
     let use_trash = state.settings.lock().unwrap().use_trash;
     library::delete(&state.clips_dir(), &path, use_trash).map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
+async fn update_clip(
+    state: State<'_, AppState>,
+    path: PathBuf,
+    patch: library::MetaPatch,
+) -> CmdResult<library::Clip> {
+    let dir = state.clips_dir();
+    tauri::async_runtime::spawn_blocking(move || library::update_meta(&dir, &path, patch))
+        .await
+        .map_err(err)?
+        .map_err(|e| format!("{e:#}"))
 }
 
 #[tauri::command]
@@ -205,8 +242,7 @@ async fn get_storage(state: State<'_, AppState>) -> CmdResult<storage::Usage> {
         .map_err(err)
 }
 
-/// Emitted when clips disappear behind the UI's back (storage limit).
-const LIBRARY_CHANGED: &str = "library-changed";
+use watcher::LIBRARY_CHANGED;
 
 /// Apply the storage limit off the async runtime; tell the UI if anything
 /// was removed.
@@ -259,21 +295,13 @@ async fn set_settings(
         system::set_autostart(settings.launch_at_login).map_err(|e| format!("{e:#}"))?;
     }
     if settings.hotkey != old_hotkey {
-        match state.shortcut.lock().await.as_ref() {
-            Some(s) => s
-                .set_keys(&settings.hotkey)
-                .await
-                .map_err(|e| format!("{e:#}"))?,
-            None => {
-                return Err(
-                    "your desktop has no global shortcut service; bind `clipsh save` in its keyboard settings"
-                        .into(),
-                );
-            }
-        }
+        state.hotkeys.set_keys(&app, &settings.hotkey).await?;
     }
     settings.save().map_err(|e| format!("{e:#}"))?;
     allow_clips_dir(&app, &settings.clips_dir);
+    if settings.clips_dir != state.settings.lock().unwrap().clips_dir {
+        watch_clips_dir(&app, &settings.clips_dir);
+    }
     state.service.configure(settings.recorder_config())?;
     *state.settings.lock().unwrap() = settings;
     enforce_storage(&app);
@@ -289,7 +317,7 @@ async fn open_for_edit(
 ) -> CmdResult<library::Clip> {
     app.asset_protocol_scope().allow_file(&path).map_err(err)?;
     state.media.allow(&path);
-    tauri::async_runtime::spawn_blocking(move || {
+    let clip = tauri::async_runtime::spawn_blocking(move || {
         let game = path
             .parent()
             .and_then(Path::file_name)
@@ -299,7 +327,11 @@ async fn open_for_edit(
     })
     .await
     .map_err(err)?
-    .map_err(|e| format!("{e:#}"))
+    .map_err(|e| format!("{e:#}"))?;
+    if !library::is_cached(&clip) {
+        state.thumbs.request(clip.path.clone(), clip.game.clone());
+    }
+    Ok(clip)
 }
 
 /// Trim `path` to `start..end` seconds, mixing audio tracks at `volumes`.
@@ -333,8 +365,24 @@ async fn render_clip(
     };
     let result = out.clone();
     let source = path.clone();
+    let cancel = state.render_cancel.clone();
+    cancel.store(false, Ordering::Relaxed);
+    let progress_app = app.clone();
+    let progress_path = path.clone();
+    let control = clip_core::export::Control {
+        on_progress: Some(Box::new(move |fraction| {
+            let _ = progress_app.emit(
+                RENDER_PROGRESS,
+                RenderProgress {
+                    path: progress_path.clone(),
+                    fraction,
+                },
+            );
+        })),
+        cancel: Some(cancel),
+    };
     tauri::async_runtime::spawn_blocking(move || {
-        clip_core::export::render(&path, &out, &edit, encoder, &cfg)
+        clip_core::export::render_with(&path, &out, &edit, encoder, &cfg, control)
     })
     .await
     .map_err(err)?
@@ -345,6 +393,19 @@ async fn render_clip(
 }
 
 /// Let the webview load videos and thumbnails through the asset protocol.
+/// (Re)start the folder watcher on `dir`.
+fn watch_clips_dir(app: &AppHandle, dir: &std::path::Path) {
+    let state = app.state::<AppState>();
+    let handle = match watcher::watch(app.clone(), dir) {
+        Ok(h) => Some(h),
+        Err(e) => {
+            tracing::warn!("can't watch {}: {e:#}", dir.display());
+            None
+        }
+    };
+    *state.watcher.lock().unwrap() = handle;
+}
+
 fn allow_clips_dir(app: &AppHandle, dir: &std::path::Path) {
     let scope = app.asset_protocol_scope();
     for d in [dir.to_owned(), library::cache_dir()] {
@@ -363,26 +424,6 @@ pub(crate) fn show_main(app: &AppHandle) {
         let _ = w.show();
         let _ = w.unminimize();
         let _ = w.set_focus();
-    }
-}
-
-/// Register the global hotkey and save a clip on every press.
-async fn listen_hotkey(app: AppHandle, keys: String) {
-    // CLIPSH_HOTKEY_PORTAL=1 tests the portal path on KDE.
-    let skip_kde = std::env::var_os("CLIPSH_HOTKEY_PORTAL").is_some();
-    let (shortcut, mut presses) = match Hotkey::register(&keys, skip_kde).await {
-        Ok(v) => v,
-        Err(e) => {
-            tracing::warn!("global hotkey unavailable: {e:#}");
-            return;
-        }
-    };
-    let state = app.state::<AppState>();
-    *state.shortcut.lock().await = Some(shortcut);
-    while presses.recv().await.is_some() {
-        if let Err(e) = state.service.save(state.clips_dir()).await {
-            tracing::warn!("hotkey save failed: {e}");
-        }
     }
 }
 
@@ -407,8 +448,9 @@ fn announce_saved(app: &AppHandle, path: &std::path::Path) {
         } else {
             "Clip saved"
         };
+        let app = app.clone();
         tauri::async_runtime::spawn(async move {
-            if let Err(e) = system::notify(summary, &game).await {
+            if let Err(e) = system::notify(&app, summary, &game).await {
                 tracing::debug!("notify: {e:#}");
             }
         });
@@ -453,6 +495,27 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+/// The installer puts GStreamer's libraries next to the executable (where
+/// the loader finds them) and its plugins under `gst-plugins/`; tell
+/// GStreamer about the latter before it initialises. A machine with its own
+/// GStreamer install, or a dev build, has nothing there and is left alone.
+#[cfg(windows)]
+fn point_gstreamer_at_bundled_plugins() {
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+    let plugins = exe.with_file_name("gst-plugins");
+    if plugins.is_dir() {
+        // SAFETY: called on the main thread before any other thread exists.
+        unsafe {
+            std::env::set_var("GST_PLUGIN_PATH", &plugins);
+            // Only the bundled set: a stray system install of a different
+            // version must not be mixed in.
+            std::env::set_var("GST_PLUGIN_SYSTEM_PATH", &plugins);
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tracing_subscriber::fmt()
@@ -464,13 +527,31 @@ pub fn run() {
         tracing::info!("clip.sh is already running; showed its window");
         return;
     }
+    #[cfg(windows)]
+    point_gstreamer_at_bundled_plugins();
     if let Err(e) = clip_core::init() {
         panic!("GStreamer failed to initialise: {e}");
     }
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_dialog::init());
+    #[cfg(windows)]
+    let builder = builder
+        .plugin(hotkeys::plugin())
+        .plugin(tauri_plugin_notification::init());
+    builder
+        // Remember the window's size and position between launches. The
+        // window starts hidden and VISIBLE is skipped so a tray launch stays
+        // in the tray.
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(
+                    tauri_plugin_window_state::StateFlags::all()
+                        - tauri_plugin_window_state::StateFlags::VISIBLE,
+                )
+                .build(),
+        )
         .setup(|app| {
             let settings = Settings::load();
             let media = tauri::async_runtime::block_on(media_server::MediaServer::start())?;
@@ -487,13 +568,23 @@ pub fn run() {
             app.manage(AppState {
                 service,
                 settings: Mutex::new(settings),
-                shortcut: tokio::sync::Mutex::new(None),
+                hotkeys: hotkeys::Hotkeys::default(),
                 encoder: OnceLock::new(),
                 encoders: tokio::sync::OnceCell::new(),
                 media,
+                render_cancel: Arc::default(),
+                thumbs: thumbs::Thumbnailer::start(app.handle().clone()),
+                watcher: Mutex::new(None),
             });
             allow_clips_dir(app.handle(), &app.state::<AppState>().clips_dir());
-            tauri::async_runtime::spawn(listen_hotkey(app.handle().clone(), hotkey));
+            watch_clips_dir(app.handle(), &app.state::<AppState>().clips_dir());
+            {
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    let state = handle.state::<AppState>();
+                    state.hotkeys.start(handle.clone(), hotkey).await;
+                });
+            }
             {
                 let handle = app.handle().clone();
                 app.listen_any(service::CLIP_SAVED, move |event| {
@@ -545,6 +636,7 @@ pub fn run() {
             save_clip,
             list_clips,
             delete_clip,
+            update_clip,
             get_storage,
             get_capabilities,
             list_games,
@@ -558,6 +650,7 @@ pub fn run() {
             set_settings,
             open_for_edit,
             render_clip,
+            cancel_render,
         ])
         .run(tauri::generate_context!())
         .expect("error while running clip.sh");

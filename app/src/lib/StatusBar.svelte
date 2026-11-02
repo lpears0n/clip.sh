@@ -5,6 +5,7 @@
 
   let {
     status,
+    now,
     hotkey,
     saving,
     flash,
@@ -13,6 +14,8 @@
     onchoosescreen,
   }: {
     status: Status | null
+    /** Wall clock from the app's local tick; the buffer fill is derived from it. */
+    now: number
     hotkey: string
     saving: boolean
     /** Briefly true after a clip is saved; plays the shutter flash. */
@@ -23,25 +26,29 @@
   } = $props()
 
   const recording = $derived(status?.state === 'recording')
+  // The buffer fills from the session start up to the replay length; no
+  // need to ask the backend every second.
+  const buffered = $derived.by(() => {
+    if (!status) return 0
+    const since = status.session_start_ms ? (now - status.session_start_ms) / 1000 : status.buffered_seconds
+    return Math.floor(Math.min(status.replay_seconds, Math.max(status.buffered_seconds, since)))
+  })
 </script>
 
 <div class="flex min-w-0 items-center gap-3">
   <button class="btn-icon" onclick={onopen} title="Open a video to trim" aria-label="Open a video to trim">
     <FolderOpen size={18} />
   </button>
-  <span class="h-5 w-px bg-line"></span>
+  <span class="h-5 w-px bg-line-strong"></span>
 
   {#if recording}
     <div class="flex min-w-0 items-center gap-2.5">
-      <span class="relative flex size-2">
-        <span class="absolute inset-0 animate-ping rounded-full bg-danger opacity-60"></span>
-        <span class="relative size-2 rounded-full bg-danger"></span>
-      </span>
-      <span class="display-face max-w-[260px] truncate text-[14px] font-semibold">{status?.game}</span>
-      <span class="text-[13px] text-muted tabular-nums">{Math.floor(status?.buffered_seconds ?? 0)}s</span>
+      <span class="size-2 flex-none rounded-full bg-danger"></span>
+      <span class="display-face max-w-64 truncate text-body font-semibold">{status?.game}</span>
+      <span class="text-secondary text-muted tabular-nums">{buffered}s</span>
     </div>
     <button class="btn-primary relative h-8 overflow-hidden px-3" onclick={onsave} disabled={saving}>
-      Clip <kbd class="h-5 border-black/20 bg-black/15 text-black">{hotkey}</kbd>
+      Clip <kbd class="h-5 border-black/20 bg-black/15 text-on-accent">{hotkey}</kbd>
       {#if flash}
         <span class="shutter absolute inset-0 bg-white"></span>
       {/if}
@@ -49,17 +56,17 @@
   {:else if status?.needs_screen}
     <button class="btn h-8 border-accent/60 text-accent" onclick={onchoosescreen}>Choose a screen to record</button>
   {:else if status?.state === 'unavailable'}
-    <span class="max-w-[420px] truncate text-[13px] text-danger" title={status.error ?? ''}>
+    <span class="max-w-md truncate text-secondary text-danger" title={status.error ?? ''}>
       Can't capture: {status.error}
     </span>
   {:else}
-    <span class="truncate text-[13px] text-muted">Waiting for a game</span>
+    <span class="truncate text-secondary text-muted">Waiting for a game</span>
   {/if}
 </div>
 
 <style>
   .shutter {
-    animation: shutter 450ms ease-out forwards;
+    animation: shutter 400ms ease-out forwards;
   }
 
   @keyframes shutter {

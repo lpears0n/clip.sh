@@ -1,0 +1,48 @@
+# Maintainer: lpears0n <notlucaspearson@gmail.com>
+# Builds clip.sh from a tagged release. Submit to the AUR as `clip-sh`.
+pkgname=clip-sh
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Instant-replay game clipping for Linux (like ShadowPlay / Medal)"
+arch=('x86_64')
+url="https://github.com/lpears0n/clip.sh"
+license=('GPL-3.0-or-later')
+depends=(
+  'webkit2gtk-4.1' 'libayatana-appindicator' 'gstreamer'
+  'gst-plugins-base' 'gst-plugins-good' 'gst-plugins-bad' 'gst-plugin-pipewire'
+  'gst-plugin-va' 'gst-libav' 'pipewire' 'xdg-desktop-portal'
+)
+optdepends=(
+  'xdg-desktop-portal-kde: prompt-free window capture on KDE Plasma'
+  'xdg-desktop-portal-gnome: screen capture on GNOME'
+  'xdg-desktop-portal-wlr: screen capture on wlroots desktops'
+)
+makedepends=('cargo' 'pnpm' 'nodejs')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP') # updated by the release script
+
+_srcdir="clip.sh-$pkgver"
+
+prepare() {
+  cd "$_srcdir/app"
+  pnpm install --frozen-lockfile
+  cd ..
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+  cd "$_srcdir/app"
+  export CARGO_TARGET_DIR="$srcdir/target"
+  # Build the bare binary; packaging below replaces Tauri's bundlers.
+  pnpm tauri build --no-bundle
+}
+
+package() {
+  cd "$_srcdir"
+  install -Dm755 "$srcdir/target/release/clip-sh" "$pkgdir/usr/bin/clip-sh"
+  install -Dm755 "$srcdir/target/release/clipsh" "$pkgdir/usr/bin/clipsh"
+  install -Dm644 app/src-tauri/icons/128x128.png "$pkgdir/usr/share/icons/hicolor/128x128/apps/clip-sh.png"
+  install -Dm644 app/src-tauri/icons/icon.png "$pkgdir/usr/share/icons/hicolor/512x512/apps/clip-sh.png"
+  install -Dm644 packaging/clip-sh.desktop "$pkgdir/usr/share/applications/clip-sh.desktop"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE" 2>/dev/null || true
+}

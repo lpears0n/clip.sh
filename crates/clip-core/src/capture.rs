@@ -1,8 +1,21 @@
-//! Screen capture → H.264 pipeline branch.
+//! Screen capture → encoder pipeline branch.
+//!
+//! Two ways to get frames from PipeWire to the encoder:
+//!
+//! * **Zero-copy** (`CapturePath::ZeroCopy`): the compositor's DMA-BUF is
+//!   imported straight into GPU memory (`glupload` for NVENC, `vapostproc`
+//!   for VA-API) and encoded there. Nothing crosses to system memory, so a
+//!   game saturating the GPU no longer starves the capture of bandwidth.
+//! * **Copy** (`CapturePath::Copy`): frames arrive in system memory and the
+//!   encoder's upload chain moves them. Works everywhere; costs a copy per
+//!   frame and roughly a third of the frame rate under load.
+//!
+//! The recorder tries zero-copy first and falls back if negotiation fails.
 
+#[cfg(target_os = "linux")]
 use std::os::fd::RawFd;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use gstreamer as gst;
 use gstreamer::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -28,6 +41,7 @@ impl Default for VideoConfig {
 }
 
 /// Where `pipewiresrc` reads frames from.
+#[cfg(target_os = "linux")]
 #[derive(Debug, Clone, Copy)]
 pub enum PipewireTarget {
     /// A portal-provided PipeWire remote and node id. The fd must stay open
@@ -37,59 +51,44 @@ pub enum PipewireTarget {
     Serial(u64),
 }
 
-/// Add `pipewiresrc → even crop → constant fps → encoder → parser` to
+/// What the video source captures, per platform.
+#[derive(Debug, Clone, Copy)]
+pub enum CaptureTarget {
+    #[cfg(target_os = "linux")]
+    Pipewire(PipewireTarget),
+    /// A monitor by `HMONITOR`, through Windows Graphics Capture.
+    #[cfg(windows)]
+    Monitor { handle: isize, cursor: bool },
+}
+
+/// How frames travel from the compositor to the encoder.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CapturePath {
+    /// DMA-BUF import into GPU memory; encoder reads it in place.
+    ZeroCopy,
+    /// Through system memory.
+    Copy,
+}
+
+/// Add `pipewiresrc → constant fps → (even size) → encoder → parser` to
 /// `pipeline` and return the parser for the caller to link onwards. The
 /// parser repeats stream headers on every keyframe so any GOP can start a
 /// file.
 pub fn add_video_branch(
     pipeline: &gst::Pipeline,
-    target: PipewireTarget,
+    target: CaptureTarget,
     encoder: Encoder,
     cfg: &VideoConfig,
+    path: CapturePath,
 ) -> Result<gst::Element> {
-    let src = gst::ElementFactory::make("pipewiresrc")
-        .name("screen")
-        .property("do-timestamp", true)
-        // Compositors only send frames on damage; resend so static scenes
-        // still produce video.
-        .property("keepalive-time", 1000 / cfg.fps as i32);
-    let src = match target {
-        PipewireTarget::Remote { fd, node_id } => {
-            src.property("fd", fd).property("path", node_id.to_string())
-        }
-        PipewireTarget::Serial(serial) => src.property("target-object", serial.to_string()),
+    if path == CapturePath::ZeroCopy && encoder.gpu_memory().is_none() {
+        bail!("{encoder:?} has no zero-copy path");
     }
-    .build()?;
-    // Window streams can have odd sizes, which 4:2:0 encoders reject; trim
-    // the odd row/column whenever the size changes.
-    let crop = gst::ElementFactory::make("videocrop").build()?;
-    {
-        let crop = crop.clone();
-        src.static_pad("src")
-            .context("pipewiresrc has no src pad")?
-            .add_probe(gst::PadProbeType::EVENT_DOWNSTREAM, move |_, info| {
-                if let Some(gst::PadProbeData::Event(ev)) = &info.data
-                    && let gst::EventView::Caps(c) = ev.view()
-                    && let Some(s) = c.caps().structure(0)
-                {
-                    let w = s.get::<i32>("width").unwrap_or(0);
-                    let h = s.get::<i32>("height").unwrap_or(0);
-                    crop.set_property("right", w & 1);
-                    crop.set_property("bottom", h & 1);
-                }
-                gst::PadProbeReturn::Ok
-            });
-    }
+    let src = make_source(target, cfg, path)?;
+
     let rate = gst::ElementFactory::make("videorate")
         .name("rate")
-        .build()?;
-    let rate_caps = gst::ElementFactory::make("capsfilter")
-        .property(
-            "caps",
-            gst::Caps::builder("video/x-raw")
-                .field("framerate", gst::Fraction::new(cfg.fps as i32, 1))
-                .build(),
-        )
         .build()?;
     let queue = gst::ElementFactory::make("queue")
         .property("max-size-buffers", 4u32)
@@ -103,12 +102,177 @@ pub fn add_video_branch(
         .build()?;
     let parse = cfg.codec.make_parser()?;
 
-    let mut chain = vec![src, crop, rate, rate_caps, queue];
-    chain.extend(encoder.upload_chain()?);
+    let mut chain = vec![src.clone()];
+    match path {
+        CapturePath::Copy => {
+            // Window streams can have odd sizes, which 4:2:0 encoders reject;
+            // trim the odd row/column whenever the size changes.
+            let crop = gst::ElementFactory::make("videocrop").build()?;
+            {
+                let crop = crop.clone();
+                on_caps(&src, move |w, h| {
+                    crop.set_property("right", w & 1);
+                    crop.set_property("bottom", h & 1);
+                })?;
+            }
+            let rate_caps = capsfilter(raw_caps(None, |s| {
+                s.set("framerate", gst::Fraction::new(cfg.fps as i32, 1));
+            }))?;
+            chain.extend([crop, rate, rate_caps, queue]);
+            chain.extend(encoder.upload_chain()?);
+        }
+        CapturePath::ZeroCopy => {
+            let memory = encoder.gpu_memory().unwrap();
+            // Only GPU memory leaves the source; a system-memory offer must
+            // fail here so the recorder can fall back instead of silently
+            // copying.
+            let gpu = capsfilter(raw_caps(Some(SOURCE_GPU_MEMORY), |_| {}))?;
+            let rate_caps = capsfilter(raw_caps(Some(SOURCE_GPU_MEMORY), |s| {
+                s.set("framerate", gst::Fraction::new(cfg.fps as i32, 1));
+            }))?;
+            chain.extend([gpu, rate, rate_caps, queue]);
+            chain.extend(encoder.gpu_chain()?);
+            // The GPU converter also scales: ask for an even size so 4:2:0
+            // encoders accept odd window streams.
+            let even = capsfilter(raw_caps(Some(memory), |_| {}))?;
+            {
+                let even = even.clone();
+                on_caps(&src, move |w, h| {
+                    even.set_property(
+                        "caps",
+                        raw_caps(Some(memory), |s| {
+                            s.set("width", w & !1);
+                            s.set("height", h & !1);
+                        }),
+                    );
+                })?;
+            }
+            chain.push(even);
+        }
+    }
     chain.push(enc);
     chain.push(enc_caps);
     chain.push(parse.clone());
     pipeline.add_many(&chain)?;
     gst::Element::link_many(&chain)?;
     Ok(parse)
+}
+
+/// The GPU memory the platform's capture source hands out.
+#[cfg(target_os = "linux")]
+const SOURCE_GPU_MEMORY: &str = "memory:DMABuf";
+#[cfg(windows)]
+const SOURCE_GPU_MEMORY: &str = "memory:D3D11Memory";
+
+/// The capture source element for this platform.
+#[cfg(target_os = "linux")]
+fn make_source(
+    target: CaptureTarget,
+    cfg: &VideoConfig,
+    path: CapturePath,
+) -> Result<gst::Element> {
+    let CaptureTarget::Pipewire(target) = target;
+    let src = gst::ElementFactory::make("pipewiresrc")
+        .name("screen")
+        .property("do-timestamp", true)
+        // Compositors only send frames on damage; resend so static scenes
+        // still produce video.
+        .property("keepalive-time", 1000 / cfg.fps as i32);
+    let src = match target {
+        PipewireTarget::Remote { fd, node_id } => {
+            src.property("fd", fd).property("path", node_id.to_string())
+        }
+        PipewireTarget::Serial(serial) => src.property("target-object", serial.to_string()),
+    }
+    .build()?;
+    if path == CapturePath::ZeroCopy && src.has_property("always-copy") {
+        // Copying can't map a DMA-BUF; it would hand out empty buffers.
+        src.set_property("always-copy", false);
+    }
+    Ok(src)
+}
+
+/// Windows Graphics Capture through `d3d11screencapturesrc`: frames arrive
+/// as D3D11 textures (zero-copy into every Windows hardware encoder) or as
+/// system memory for the copy path. WGC is the API games can't block and
+/// that doesn't hook the game's own swap chain, so it costs the game
+/// nothing beyond the compositor's copy.
+#[cfg(windows)]
+fn make_source(
+    target: CaptureTarget,
+    _cfg: &VideoConfig,
+    _path: CapturePath,
+) -> Result<gst::Element> {
+    let CaptureTarget::Monitor { handle, cursor } = target;
+    let src = gst::ElementFactory::make("d3d11screencapturesrc")
+        .name("screen")
+        .property("monitor-handle", handle as u64)
+        .property("show-cursor", cursor)
+        .build()
+        .context("d3d11screencapturesrc missing (GStreamer d3d11 plugin)")?;
+    if src.has_property("capture-api") {
+        src.set_property_from_str("capture-api", "wgc");
+    }
+    if src.has_property("show-border") {
+        src.set_property("show-border", false);
+    }
+    Ok(src)
+}
+
+/// `video/x-raw` with an optional memory feature (`memory:DMABuf`,
+/// `memory:GLMemory`, …); `None` means system memory. `set` adds fields.
+fn raw_caps(feature: Option<&str>, set: impl FnOnce(&mut gst::StructureRef)) -> gst::Caps {
+    let mut structure = gst::Structure::new_empty("video/x-raw");
+    set(structure.as_mut());
+    let mut caps = gst::Caps::new_empty();
+    caps.get_mut()
+        .unwrap()
+        .append_structure_full(structure, feature.map(|f| gst::CapsFeatures::new([f])));
+    caps
+}
+
+fn capsfilter(caps: gst::Caps) -> Result<gst::Element> {
+    Ok(gst::ElementFactory::make("capsfilter")
+        .property("caps", caps)
+        .build()?)
+}
+
+/// Call `f(width, height)` from the source pad whenever the stream's caps
+/// change (window resizes).
+fn on_caps(src: &gst::Element, f: impl Fn(i32, i32) + Send + Sync + 'static) -> Result<()> {
+    src.static_pad("src")
+        .context("pipewiresrc has no src pad")?
+        .add_probe(gst::PadProbeType::EVENT_DOWNSTREAM, move |_, info| {
+            if let Some(gst::PadProbeData::Event(ev)) = &info.data
+                && let gst::EventView::Caps(c) = ev.view()
+                && let Some(s) = c.caps().structure(0)
+            {
+                let w = s.get::<i32>("width").unwrap_or(0);
+                let h = s.get::<i32>("height").unwrap_or(0);
+                if w > 0 && h > 0 {
+                    f(w, h);
+                }
+            }
+            gst::PadProbeReturn::Ok
+        });
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn caps_carry_memory_features() {
+        crate::init().unwrap();
+        let c = raw_caps(Some("memory:DMABuf"), |s| {
+            s.set("framerate", gst::Fraction::new(60, 1))
+        });
+        assert_eq!(
+            c.to_string(),
+            "video/x-raw(memory:DMABuf), framerate=(fraction)60/1"
+        );
+        let c = raw_caps(None, |_| {});
+        assert_eq!(c.to_string(), "video/x-raw");
+    }
 }

@@ -9,6 +9,7 @@
     "core:default",
     "opener:default",
     "dialog:allow-open",
+    "window-state:default",
     "core:window:allow-set-fullscreen",
     "core:window:allow-is-fullscreen"
   ]

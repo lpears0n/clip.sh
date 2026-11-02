@@ -33,7 +33,7 @@
 
 <div class="flex flex-col items-end gap-1.5">
   <button
-    class="field flex min-w-[200px] items-center justify-center gap-1 {listening ? 'border-accent text-accent' : ''}"
+    class="field flex min-w-48 items-center justify-center gap-1 {listening ? 'border-accent text-accent' : ''}"
     onclick={() => {
       listening = !listening
       error = null
@@ -41,7 +41,7 @@
     onblur={() => (listening = false)}
   >
     {#if listening}
-      <span class="text-[13px] font-medium">Press a key combination…</span>
+      <span class="text-secondary font-medium">Press a key combination…</span>
     {:else}
       {#each value.split('+') as k, i (i)}
         {#if i > 0}<span class="text-muted">+</span>{/if}
@@ -50,6 +50,6 @@
     {/if}
   </button>
   {#if error}
-    <span class="text-[12px] text-danger">{error}</span>
+    <span class="text-caption text-danger">{error}</span>
   {/if}
 </div>

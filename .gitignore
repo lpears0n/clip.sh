@@ -2,3 +2,5 @@
 node_modules/
 dist/
 *.mp4
+# GStreamer runtime collected for the Windows installer
+app/src-tauri/gst/**/*.dll

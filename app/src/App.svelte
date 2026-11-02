@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Clapperboard, Gamepad2, Settings as Gear } from '@lucide/svelte'
+  import { CircleAlert, PanelLeft } from '@lucide/svelte'
   import { getCurrentWebview } from '@tauri-apps/api/webview'
   import { open as openDialog } from '@tauri-apps/plugin-dialog'
   import { onMount } from 'svelte'
@@ -8,26 +8,35 @@
     api,
     type Capabilities,
     type Clip,
+    type ClipPatch,
     type GameEntry,
     initMedia,
     onClipSaved,
     onLibraryChanged,
+    onRenderProgress,
     onStatusChanged,
+    onThumbnailReady,
     type Settings,
     type Status,
     type Usage,
   } from './lib/api'
+  import { readLibraryCache, writeLibraryCache } from './lib/cache'
   import ClipsView from './lib/ClipsView.svelte'
+  import { coalesce } from './lib/coalesce'
   import ClipViewer from './lib/ClipViewer.svelte'
   import GamesView from './lib/GamesView.svelte'
   import GameView from './lib/GameView.svelte'
-  import NavButton from './lib/NavButton.svelte'
+  import { applyPrefs, prefs, setPrefs } from './lib/prefs.svelte'
   import SettingsView, { type Category } from './lib/SettingsView.svelte'
+  import Sidebar, { type NavId } from './lib/Sidebar.svelte'
+  import StateMessage from './lib/StateMessage.svelte'
   import StatusBar from './lib/StatusBar.svelte'
-  import StorageRing from './lib/StorageRing.svelte'
+  import Toast, { type ToastData } from './lib/Toast.svelte'
 
   type View = 'games' | 'game' | 'clips' | 'settings'
   const VIDEO = /\.(mp4|mkv|mov|webm)$/i
+  /** How long a deleted clip can be brought back from the toast. */
+  const UNDO_MS = 6000
 
   let view = $state<View>('games')
   /** The game page being shown, by name (entries are refreshed often). */
@@ -40,23 +49,47 @@
   let settings = $state<Settings | null>(null)
   let usage = $state<Usage | null>(null)
   let caps = $state<Capabilities | null>(null)
-  let clips = $state<Clip[]>([])
-  let games = $state<GameEntry[]>([])
+  // Raw: replaced wholesale on every refresh; a deep proxy over thousands of
+  // clips is slow and unnecessary.
+  let allClips = $state.raw<Clip[]>([])
+  let games = $state.raw<GameEntry[]>([])
   let loading = $state(true)
+  /** Wall clock for live counters (buffer fill, "playing for"); ticks once
+   *  a second while recording, otherwise once a minute. No IPC involved. */
+  let now = $state(Date.now())
+  /** Why the library couldn't be read, shown in place of the views. */
+  let libraryError = $state<string | null>(null)
   let rendering = $state(false)
+  let renderProgress = $state(0)
   let dragging = $state(false)
   let saving = $state(false)
   let flash = $state(false)
-  let toast = $state<{ text: string; error?: boolean } | null>(null)
+  let toast = $state<ToastData | null>(null)
   let toastTimer: ReturnType<typeof setTimeout>
+
+  // Deletes are deferred so they can be undone; the clips vanish from the
+  // UI at once and are only removed from disk when the toast expires.
+  // Raw state: entries are compared by identity when undone or committed,
+  // which a deep proxy would break. The array is always reassigned.
+  let pending = $state.raw<{ clips: Clip[]; timer: ReturnType<typeof setTimeout> }[]>([])
+  const hidden = $derived(new Set(pending.flatMap((p) => p.clips.map((c) => c.path))))
+  const clips = $derived(hidden.size ? allClips.filter((c) => !hidden.has(c.path)) : allClips)
 
   const game = $derived(games.find((g) => g.name === gameName) ?? null)
   const hotkey = $derived(settings?.hotkey ?? 'F8')
+  const nav = $derived<NavId>(view === 'game' ? 'games' : view)
+  const title = $derived(
+    view === 'games' ? 'Games' : view === 'game' ? (game?.name ?? 'Games') : view === 'clips' ? 'All clips' : 'Settings',
+  )
 
   function notify(text: string, error = false) {
-    toast = { text, error }
+    showToast({ text, error })
+  }
+
+  function showToast(t: ToastData, ms = 3000) {
+    toast = t
     clearTimeout(toastTimer)
-    toastTimer = setTimeout(() => (toast = null), 3000)
+    toastTimer = setTimeout(() => (toast = null), ms)
   }
 
   function go(v: View) {
@@ -64,16 +97,27 @@
     viewing = null
   }
 
-  async function refreshLibrary() {
+  async function loadLibrary() {
     try {
-      // Fetch clips first: listing them generates the thumbnails games use.
-      clips = await api.clips()
+      allClips = await api.clips()
       games = await api.games()
+      libraryError = null
+      writeLibraryCache(allClips, games)
     } catch (e) {
-      notify(String(e), true)
+      libraryError = String(e)
     } finally {
       loading = false
     }
+  }
+
+  // Saves, the folder watcher and storage enforcement can all fire within
+  // the same second; they cost one fetch.
+  const refreshLibrary = coalesce(loadLibrary)
+
+  /** A clip's images and duration arrived from the thumbnail pool. */
+  function thumbnailReady(c: Clip) {
+    allClips = allClips.map((x) => (x.path === c.path ? { ...x, ...c, title: x.title, favorite: x.favorite, labels: x.labels } : x))
+    if (viewing?.path === c.path) viewing = { ...viewing, ...c, title: viewing.title, favorite: viewing.favorite, labels: viewing.labels }
   }
 
   async function refreshStatus() {
@@ -88,7 +132,7 @@
     try {
       usage = await api.storage()
     } catch {
-      // Not critical; the ring just stays as it was.
+      // Not critical; the bar just stays as it was.
     }
   }
 
@@ -122,23 +166,68 @@
   async function render(start: number, end: number, volumes: number[]) {
     if (!viewing) return
     rendering = true
+    renderProgress = 0
     try {
       await api.render(viewing.path, start, end, volumes)
     } catch (e) {
-      notify(String(e), true)
+      if (!/cancelled/.test(String(e))) notify(String(e), true)
     } finally {
       rendering = false
     }
   }
 
-  async function remove(clip: Clip) {
+  /** Hide the clips now; delete them for real when the undo window closes. */
+  function remove(list: Clip[]) {
+    if (!list.length) return
+    if (viewing && list.some((c) => c.path === viewing!.path)) viewing = null
+    const entry = { clips: list, timer: setTimeout(() => commit(entry), UNDO_MS) }
+    pending = [...pending, entry]
+    const label = list.length === 1 ? `Deleted ${list[0].title ?? list[0].game} clip` : `Deleted ${list.length} clips`
+    showToast({ text: label, action: { label: 'Undo', run: () => undo(entry) } }, UNDO_MS)
+  }
+
+  function undo(entry: (typeof pending)[number]) {
+    clearTimeout(entry.timer)
+    pending = pending.filter((p) => p !== entry)
+    toast = null
+  }
+
+  async function commit(entry: (typeof pending)[number]) {
+    pending = pending.filter((p) => p !== entry)
+    const failed: string[] = []
+    for (const c of entry.clips) {
+      try {
+        await api.deleteClip(c.path)
+      } catch (e) {
+        failed.push(String(e))
+      }
+    }
+    if (failed.length) notify(failed[0], true)
+    refreshLibrary()
+    refreshUsage()
+  }
+
+  /** Only library clips carry user metadata; opened files are read-only. */
+  const inLibrary = (c: Clip) => !!settings && c.path.startsWith(settings.clips_dir + '/')
+
+  /** Title, favourite or labels. Applies optimistically, then takes the
+   *  server's tidied version. */
+  async function update(clip: Clip, patch: ClipPatch) {
+    const optimistic: Clip = {
+      ...clip,
+      title: patch.title === undefined ? clip.title : patch.title.trim() || null,
+      favorite: patch.favorite ?? clip.favorite,
+      labels: patch.labels ?? clip.labels,
+    }
+    const put = (c: Clip) => {
+      allClips = allClips.map((x) => (x.path === c.path ? c : x))
+      if (viewing?.path === c.path) viewing = c
+    }
+    put(optimistic)
     try {
-      await api.deleteClip(clip.path)
-      clips = clips.filter((c) => c.path !== clip.path)
-      if (viewing?.path === clip.path) viewing = null
-      refreshLibrary()
-      refreshUsage()
+      put(await api.updateClip(clip.path, patch))
     } catch (e) {
+      put(clip)
       notify(String(e), true)
     }
   }
@@ -161,21 +250,54 @@
     }
   }
 
-  function manageStorage() {
-    category = 'Storage'
+  function openSettings(c: Category) {
+    category = c
     go('settings')
   }
 
+  function onkeydown(e: KeyboardEvent) {
+    const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement
+    if ((e.ctrlKey || e.metaKey) && e.key === 'b') {
+      e.preventDefault()
+      setPrefs({ sidebarCollapsed: !prefs.sidebarCollapsed })
+    } else if (!typing && !viewing && !e.ctrlKey && !e.altKey && !e.metaKey) {
+      if (e.key === '1') go('games')
+      else if (e.key === '2') go('clips')
+      else if (e.key === '3') go('settings')
+    }
+  }
+
+  $effect(() => applyPrefs(prefs))
+
   onMount(() => {
     initMedia()
+    // Paint the last known library at once; the real listing replaces it.
+    const cached = readLibraryCache()
+    if (cached) {
+      allClips = cached.clips
+      games = cached.games
+      loading = false
+    }
     refreshStatus()
-    refreshLibrary()
+    loadLibrary()
     refreshUsage()
     api.settings().then((s) => (settings = s))
     // Probing encoders takes a moment; settings fill in when it's done.
     api.capabilities().then((c) => (caps = c))
-    // State changes arrive as events; polls keep buffer, disk and play time fresh.
-    const polls = [setInterval(refreshStatus, 2000), setInterval(refreshUsage, 15000), setInterval(refreshLibrary, 60000)]
+    // Everything else arrives as events. Coming back to the window is the one
+    // moment worth re-checking, in case an event was missed while hidden.
+    const onFocus = () => {
+      if (document.visibilityState !== 'visible') return
+      refreshStatus()
+      refreshLibrary()
+      refreshUsage()
+    }
+    window.addEventListener('focus', onFocus)
+    document.addEventListener('visibilitychange', onFocus)
+    const tick = setInterval(() => {
+      const recording = status?.state === 'recording'
+      if (recording || Date.now() - now >= 60_000) now = Date.now()
+    }, 1000)
     const unlisten = [
       onStatusChanged((s) => {
         status = s
@@ -185,13 +307,17 @@
       onClipSaved((path) => {
         notify(`Saved ${path.split('/').pop()}`)
         flash = true
-        setTimeout(() => (flash = false), 500)
+        setTimeout(() => (flash = false), 400)
         refreshLibrary()
         refreshUsage()
       }),
       onLibraryChanged(() => {
         refreshLibrary()
         refreshUsage()
+      }),
+      onThumbnailReady(thumbnailReady),
+      onRenderProgress((p) => {
+        if (viewing?.path === p.path) renderProgress = p.fraction
       }),
       getCurrentWebview().onDragDropEvent((e) => {
         const p = e.payload
@@ -202,53 +328,67 @@
         }
       }),
     ]
+    const motion = matchMedia('(prefers-reduced-motion: reduce)')
+    const onMotion = () => applyPrefs(prefs)
+    motion.addEventListener('change', onMotion)
     return () => {
-      polls.forEach(clearInterval)
+      clearInterval(tick)
+      window.removeEventListener('focus', onFocus)
+      document.removeEventListener('visibilitychange', onFocus)
       unlisten.forEach((u) => u.then((f) => f()))
+      motion.removeEventListener('change', onMotion)
     }
   })
 </script>
 
-<div class="flex h-full flex-col">
-  <header class="flex h-14 flex-none items-center gap-4 border-b border-line bg-panel pr-4 pl-[22px]">
-    <span class="display-face flex-none text-[19px] font-bold">clip<span class="text-accent">.sh</span></span>
-    <div class="min-w-0 flex-1"></div>
-    <StatusBar {status} {flash} {saving} {hotkey} onsave={save} onopen={pickVideo} onchoosescreen={chooseScreen} />
-  </header>
+<svelte:window {onkeydown} />
 
-  <div class="flex min-h-0 flex-1">
-    <nav class="flex w-[72px] flex-none flex-col items-center gap-1.5 border-r border-line bg-panel py-3">
-      <NavButton
-        icon={Gamepad2}
-        label="Games"
-        active={!viewing && (view === 'games' || view === 'game')}
-        onclick={() => go('games')}
-      />
-      <NavButton icon={Clapperboard} label="All clips" active={!viewing && view === 'clips'} onclick={() => go('clips')} />
-      <div class="flex-1"></div>
-      <StorageRing {usage} onmanage={manageStorage} />
-      <NavButton icon={Gear} label="Settings" active={!viewing && view === 'settings'} onclick={() => go('settings')} />
-    </nav>
+<div class="flex h-full">
+  <Sidebar active={nav} collapsed={prefs.sidebarCollapsed} {usage} onnavigate={go} onstorage={() => openSettings('Storage')} />
 
-    <main class="flex min-w-0 flex-1 flex-col bg-canvas">
+  <div class="flex min-w-0 flex-1 flex-col">
+    <header class="flex h-14 flex-none items-center gap-3 border-b border-line bg-panel pr-4 pl-3">
+      <button
+        class="btn-icon text-muted"
+        onclick={() => setPrefs({ sidebarCollapsed: !prefs.sidebarCollapsed })}
+        aria-label={prefs.sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        title="Toggle sidebar (Ctrl+B)"
+      >
+        <PanelLeft size={18} />
+      </button>
+      <h1 class="display-face truncate text-title font-semibold">{title}</h1>
+      <div class="min-w-0 flex-1"></div>
+      <StatusBar {status} {now} {flash} {saving} {hotkey} onsave={save} onopen={pickVideo} onchoosescreen={chooseScreen} />
+    </header>
+
+    <main class="flex min-h-0 flex-1 flex-col bg-canvas">
       <div class="min-h-0 flex-1 overflow-y-auto p-6">
         {#if viewing}
           <ClipViewer
             clip={viewing}
             {rendering}
+            progress={renderProgress}
             onback={() => (viewing = null)}
             onrender={render}
-            ondelete={() => viewing && remove(viewing)}
+            oncancel={() => api.cancelRender()}
+            ondelete={() => viewing && remove([viewing])}
             onshare={() => viewing && api.reveal(viewing.path)}
+            onupdate={inLibrary(viewing) ? (p) => viewing && update(viewing, p) : undefined}
           />
+        {:else if libraryError && view !== 'settings'}
+          <StateMessage icon={CircleAlert} title="Couldn't read the clips folder" body={libraryError} error>
+            <button class="btn" onclick={() => openSettings('Storage')}>Storage settings</button>
+            <button class="btn-primary" onclick={refreshLibrary}>Try again</button>
+          </StateMessage>
         {:else if view === 'game' && game}
           <GameView
             {game}
             {clips}
             onback={() => go('games')}
             onopen={(c) => open(c.path)}
-            ondelete={remove}
+            ondelete={(c) => remove([c])}
             onshare={(c) => api.reveal(c.path)}
+            onfavorite={(c) => update(c, { favorite: !c.favorite })}
           />
         {:else if view === 'clips'}
           <ClipsView
@@ -256,8 +396,10 @@
             {loading}
             {hotkey}
             onopen={(c) => open(c.path)}
-            ondelete={remove}
+            ondelete={(c) => remove([c])}
+            ondeletemany={remove}
             onshare={(c) => api.reveal(c.path)}
+            onfavorite={(c) => update(c, { favorite: !c.favorite })}
           />
         {:else if view === 'settings' && settings}
           <SettingsView {settings} {usage} {caps} {status} bind:category onchange={changeSettings} onchoosescreen={chooseScreen} />
@@ -266,10 +408,15 @@
             {games}
             {loading}
             {hotkey}
+            {status}
+            {settings}
+            {now}
             onopen={(g) => {
               gameName = g.name
               go('game')
             }}
+            onchoosescreen={chooseScreen}
+            onsettings={openSettings}
           />
         {/if}
       </div>
@@ -284,17 +431,10 @@
 
 {#if dragging}
   <div class="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-canvas/85">
-    <div class="display-face rounded-[var(--radius-card)] border-2 border-accent px-10 py-6 text-[22px] font-semibold">
-      Drop to open
-    </div>
+    <div class="display-face rounded-surface border-2 border-accent px-10 py-6 text-page font-semibold">Drop to open</div>
   </div>
 {/if}
 
 {#if toast}
-  <div
-    class="fixed right-5 bottom-5 z-40 rounded-[var(--radius-card)] border bg-raised px-4 py-2.5 text-[14px] font-medium shadow-xl shadow-black/40
-      {toast.error ? 'border-danger/50 text-danger' : 'border-line'}"
-  >
-    {toast.text}
-  </div>
+  <Toast data={toast} onclose={() => (toast = null)} />
 {/if}

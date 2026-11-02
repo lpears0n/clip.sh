@@ -1,0 +1,98 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  frontend:
+    name: Frontend (svelte-check, build)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+        working-directory: app
+      - run: pnpm check
+        working-directory: app
+      - run: pnpm build
+        working-directory: app
+      - name: UI smoke test (Chromium, Tauri bridge mocked)
+        run: npx playwright install --with-deps chromium && pnpm test:ui
+        working-directory: app
+
+  rust:
+    name: Rust (clippy, test) · Linux
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+            gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav \
+            libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf ffmpeg
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+
+  windows:
+    name: Rust (clippy, test) · Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install GStreamer (MSVC runtime + development)
+        shell: pwsh
+        run: |
+          choco install -y --no-progress gstreamer gstreamer-devel pkgconfiglite ffmpeg
+          # The installer records its folder in a machine variable; the job's
+          # own environment predates it, so read it from the registry.
+          $root = [Environment]::GetEnvironmentVariable('GSTREAMER_1_0_ROOT_MSVC_X86_64', 'Machine')
+          if (-not $root) {
+            $root = (Get-ChildItem 'C:\Program Files\gstreamer\1.0', 'C:\gstreamer\1.0' -Directory -Filter msvc_x86_64 -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
+          }
+          if (-not $root) { throw 'GStreamer install folder not found' }
+          $root = $root.TrimEnd('\')
+          Write-Host "GStreamer at $root"
+          "GSTREAMER_1_0_ROOT_MSVC_X86_64=$root" >> $env:GITHUB_ENV
+          "PKG_CONFIG_PATH=$root\lib\pkgconfig" >> $env:GITHUB_ENV
+          "$root\bin" >> $env:GITHUB_PATH
+          # Prefer the pkg-config GStreamer ships over the Chocolatey one.
+          if (Test-Path "$root\bin\pkg-config.exe") { "PKG_CONFIG=$root\bin\pkg-config.exe" >> $env:GITHUB_ENV }
+          if (-not (Test-Path "$root\lib\pkgconfig\glib-2.0.pc")) { throw "no glib-2.0.pc under $root" }
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      # tauri::generate_context! needs the built frontend to exist.
+      - run: pnpm install --frozen-lockfile
+        working-directory: app
+      - run: pnpm build
+        working-directory: app
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test -p clip-core -p clip-ipc -p clip-sh

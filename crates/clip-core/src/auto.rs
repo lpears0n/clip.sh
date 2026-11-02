@@ -15,7 +15,6 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail};
-use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 
 use crate::{
@@ -30,12 +29,7 @@ use crate::{
 /// How often the portal backend scans for running games.
 const SCAN_INTERVAL: Duration = Duration::from_secs(2);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Backend {
-    Kwin,
-    Portal,
-}
+pub use crate::backend::Backend;
 
 /// Input for [`AutoRecorder::handle`].
 #[derive(Debug, Clone)]
@@ -96,7 +90,7 @@ impl AutoRecorder {
         let state = match prefer {
             Some(Backend::Portal) => portal_state(tx, token_path),
             Some(Backend::Kwin) => kwin_state(tx)?,
-            None => match kwin_state(tx.clone()) {
+            Some(Backend::Windows) | None => match kwin_state(tx.clone()) {
                 Ok(s) => s,
                 Err(e) => {
                     tracing::info!(

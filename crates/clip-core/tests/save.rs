@@ -8,15 +8,25 @@ use gstreamer as gst;
 use gstreamer::prelude::*;
 use gstreamer_app as gst_app;
 
+/// First AAC encoder on this machine, in the recorder's own preference
+/// order (Debian builds GStreamer without fdk-aac; Arch has it).
+fn aac_encoder() -> &'static str {
+    ["fdkaacenc", "avenc_aac", "voaacenc"]
+        .into_iter()
+        .find(|n| gst::ElementFactory::find(n).is_some())
+        .expect("an AAC encoder (gst-libav or fdk-aac) is required")
+}
+
 /// Encode `seconds` of test video (and audio) into a ring with `window`.
 fn fill_ring(seconds: u64, window: u64) -> ReplayBuffer {
     clip_core::init().unwrap();
     let fps = 30;
+    let aac = aac_encoder();
     let pipeline = gst::parse::launch(&format!(
         "videotestsrc num-buffers={n} is-live=false ! video/x-raw,width=320,height=240,framerate={fps}/1,format=BGRx \
          ! videoconvert ! x264enc name=enc ! video/x-h264,profile=high ! h264parse config-interval=-1 ! appsink name=v sync=false \
          audiotestsrc num-buffers={an} samplesperbuffer=1024 ! audio/x-raw,rate=48000,channels=2 \
-         ! audioconvert ! fdkaacenc ! aacparse ! appsink name=a sync=false",
+         ! audioconvert ! {aac} ! aacparse ! appsink name=a sync=false",
         n = seconds * fps,
         an = seconds * 48_000 / 1024,
     ))
@@ -110,7 +120,20 @@ fn saves_last_n_seconds_as_mp4() {
 
     let info = clip_core::media::inspect(&path).unwrap();
     assert!((2.9..=3.2).contains(&info.duration.seconds_f64()));
-    assert_eq!(&info.thumbnail[..2], &[0xFF, 0xD8], "not a JPEG");
+    let magic: &[u8] = match info.format {
+        clip_core::media::ImageFormat::Webp => b"RIFF",
+        clip_core::media::ImageFormat::Jpeg => &[0xFF, 0xD8],
+    };
+    assert!(
+        info.thumbnail.starts_with(magic),
+        "thumbnail is not {:?}",
+        info.format
+    );
+    assert!(
+        info.sprite.starts_with(magic),
+        "sprite is not {:?}",
+        info.format
+    );
 
     assert_eq!(info.audio_tracks, 1);
 

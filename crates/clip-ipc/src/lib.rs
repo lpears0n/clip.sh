@@ -4,9 +4,7 @@
 
 use std::{
     io::{BufRead, BufReader, Write},
-    os::unix::net::UnixStream,
     path::PathBuf,
-    time::Duration,
 };
 
 use serde::{Deserialize, Serialize};
@@ -53,29 +51,54 @@ impl Response {
     }
 }
 
-/// `$XDG_RUNTIME_DIR/clipsh.sock` (per user, cleaned up at logout).
+/// Linux: `$XDG_RUNTIME_DIR/clipsh.sock` (per user, cleaned up at logout).
+/// Windows: the named pipe `\\.\pipe\clipsh-<user>`.
 pub fn socket_path() -> PathBuf {
-    let dir = std::env::var_os("XDG_RUNTIME_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            let user = std::env::var("USER").unwrap_or_else(|_| "user".into());
-            std::env::temp_dir().join(format!("clipsh-{user}"))
-        });
-    dir.join("clipsh.sock")
+    #[cfg(windows)]
+    {
+        let user = std::env::var("USERNAME").unwrap_or_else(|_| "user".into());
+        PathBuf::from(format!("\\\\.\\pipe\\clipsh-{user}"))
+    }
+    #[cfg(not(windows))]
+    {
+        let dir = std::env::var_os("XDG_RUNTIME_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                let user = std::env::var("USER").unwrap_or_else(|_| "user".into());
+                std::env::temp_dir().join(format!("clipsh-{user}"))
+            });
+        dir.join("clipsh.sock")
+    }
 }
 
 /// Send one request to the running app and wait for its answer. Saving can
 /// take a few seconds (muxing the clip), so the read timeout is generous.
 pub fn request(req: &Request) -> std::io::Result<Response> {
-    let mut sock = UnixStream::connect(socket_path())?;
-    sock.set_read_timeout(Some(Duration::from_secs(60)))?;
-    sock.set_write_timeout(Some(Duration::from_secs(5)))?;
+    let mut sock = connect()?;
     let mut line = serde_json::to_string(req)?;
     line.push('\n');
     sock.write_all(line.as_bytes())?;
     let mut answer = String::new();
     BufReader::new(sock).read_line(&mut answer)?;
     Ok(serde_json::from_str(&answer)?)
+}
+
+#[cfg(not(windows))]
+fn connect() -> std::io::Result<std::os::unix::net::UnixStream> {
+    use std::time::Duration;
+    let sock = std::os::unix::net::UnixStream::connect(socket_path())?;
+    sock.set_read_timeout(Some(Duration::from_secs(60)))?;
+    sock.set_write_timeout(Some(Duration::from_secs(5)))?;
+    Ok(sock)
+}
+
+/// A named pipe opens like a file; reads block until the app answers.
+#[cfg(windows)]
+fn connect() -> std::io::Result<std::fs::File> {
+    std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(socket_path())
 }
 
 #[cfg(test)]
