@@ -138,7 +138,8 @@ struct EncoderSupport {
 struct Capabilities {
     display_hz: Option<f64>,
     encoders: Vec<EncoderSupport>,
-    mic_devices: Vec<clip_core::InputDevice>,
+    mic_devices: Vec<clip_core::AudioDevice>,
+    output_devices: Vec<clip_core::AudioDevice>,
 }
 
 #[tauri::command]
@@ -163,10 +164,11 @@ async fn get_capabilities(state: State<'_, AppState>) -> CmdResult<Capabilities>
         })
         .await
         .clone();
-    let (display_hz, mic_devices) = tauri::async_runtime::spawn_blocking(|| {
+    let (display_hz, mic_devices, output_devices) = tauri::async_runtime::spawn_blocking(|| {
         (
             clip_core::display::max_refresh_hz().ok().flatten(),
             clip_core::input_devices(),
+            clip_core::output_devices(),
         )
     })
     .await
@@ -175,6 +177,7 @@ async fn get_capabilities(state: State<'_, AppState>) -> CmdResult<Capabilities>
         display_hz,
         encoders,
         mic_devices,
+        output_devices,
     })
 }
 

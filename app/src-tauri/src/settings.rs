@@ -35,6 +35,9 @@ pub struct Settings {
 
     // Audio
     pub desktop_audio: bool,
+    /// Output whose sound is recorded (PipeWire node name / WASAPI id);
+    /// `None` = the system default output, followed when it changes.
+    pub desktop_device: Option<String>,
     pub mic: bool,
     /// PipeWire node name; `None` = system default input.
     pub mic_device: Option<String>,
@@ -76,6 +79,7 @@ impl Default for Settings {
             cursor: true,
             zero_copy: cfg!(windows),
             desktop_audio: true,
+            desktop_device: None,
             mic: false,
             mic_device: None,
             audio_bitrate_kbps: 160,
@@ -122,7 +126,7 @@ impl Settings {
     pub fn recorder_config(&self) -> RecorderConfig {
         let mut audio = Vec::new();
         if self.desktop_audio {
-            audio.push(AudioSource::Desktop);
+            audio.push(AudioSource::Desktop(self.desktop_device.clone()));
         }
         if self.mic {
             audio.push(AudioSource::Mic(self.mic_device.clone()));

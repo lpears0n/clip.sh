@@ -341,8 +341,29 @@
       <section class="space-y-2">
         <h3 class="section-title px-1">Sources</h3>
         <div class="card divide-y divide-line">
-          <Row title="Game and desktop audio" description="Everything playing through your default output.">
+          <Row title="Game and desktop audio" description="Everything playing through the output below.">
             <Toggle label="Game and desktop audio" checked={settings.desktop_audio} onchange={(desktop_audio) => update({ desktop_audio })} />
+          </Row>
+          <Row
+            title="Output device"
+            description="Pick your headset to leave out sound from other outputs."
+            disabled={!settings.desktop_audio}
+          >
+            <select
+              class="field w-64"
+              aria-label="Output device"
+              disabled={!settings.desktop_audio}
+              value={settings.desktop_device ?? ''}
+              onchange={(e) => update({ desktop_device: e.currentTarget.value || null })}
+            >
+              <option value="">System default</option>
+              {#each caps?.output_devices ?? [] as d (d.id)}
+                <option value={d.id}>{d.name}</option>
+              {/each}
+              {#if settings.desktop_device && caps && !caps.output_devices.some((d) => d.id === settings.desktop_device)}
+                <option value={settings.desktop_device}>Not connected</option>
+              {/if}
+            </select>
           </Row>
           <Row title="Microphone" description="Saved as its own track, so you can mix it when trimming.">
             <Toggle label="Microphone" checked={settings.mic} onchange={(mic) => update({ mic })} />
@@ -350,6 +371,7 @@
           <Row title="Input device" disabled={!settings.mic}>
             <select
               class="field w-64"
+              aria-label="Input device"
               disabled={!settings.mic}
               value={settings.mic_device ?? ''}
               onchange={(e) => update({ mic_device: e.currentTarget.value || null })}
@@ -358,9 +380,15 @@
               {#each caps?.mic_devices ?? [] as d (d.id)}
                 <option value={d.id}>{d.name}</option>
               {/each}
+              {#if settings.mic_device && caps && !caps.mic_devices.some((d) => d.id === settings.mic_device)}
+                <option value={settings.mic_device}>Not connected</option>
+              {/if}
             </select>
           </Row>
         </div>
+        <p class="px-1 text-secondary text-muted">
+          A device that isn’t connected when a game starts is swapped for the default until it’s back.
+        </p>
       </section>
       <section class="space-y-2">
         <h3 class="section-title px-1">Quality</h3>

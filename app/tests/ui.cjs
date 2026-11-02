@@ -52,13 +52,13 @@ function fixtures(scenario) {
     get_settings: {
       replay_seconds: 30, mic: true, clips_dir: '/home/u/Videos/clip.sh', hotkey: 'F8', screenshot_hotkey: 'F9', capture_backend: null,
       launch_at_login: false, start_in_tray: true, close_to_tray: true, notify_on_save: true, sound_on_save: true,
-      fps: 60, bitrate_kbps: 20000, codec: 'h264', encoder: null, cursor: true, zero_copy: true, desktop_audio: true,
+      fps: 60, bitrate_kbps: 20000, codec: 'h264', encoder: null, cursor: true, zero_copy: true, desktop_audio: true, desktop_device: 'out-headset',
       mic_device: null, audio_bitrate_kbps: 160, storage_limit_gb: 25, protect_edits: true, use_trash: true, ads: false,
     },
     list_clips: empty ? [] : clips,
     list_games: empty ? [] : games,
     get_storage: { clips_bytes: 3.7e9, clip_count: clips.length, disk_free: 120e9, disk_total: 500e9, limit_bytes: 25e9 },
-    get_capabilities: { display_hz: 144, encoders: [{ encoder: 'nvenc', codecs: ['h264', 'hevc', 'av1'] }, { encoder: 'x264', codecs: ['h264'] }], mic_devices: [{ id: 'mic1', name: 'Blue Yeti' }] },
+    get_capabilities: { display_hz: 144, encoders: [{ encoder: 'nvenc', codecs: ['h264', 'hevc', 'av1'] }, { encoder: 'x264', codecs: ['h264'] }], mic_devices: [{ id: 'mic1', name: 'Blue Yeti' }], output_devices: [{ id: 'out-speakers', name: 'Speakers (Realtek Audio)' }, { id: 'out-headset', name: 'Headset Earphone (Arctis Nova 7)' }] },
     media_base: 'http://127.0.0.1:1/x/',
     hotkey_backend: 'kglobalaccel',
   }
@@ -194,6 +194,11 @@ async function runScenario(scenario, browser) {
   await page.getByRole('button', { name: 'Recording' }).click()
   await page.waitForTimeout(150)
   await shot('settings-recording-blue')
+  await page.getByRole('button', { name: 'Audio' }).click()
+  await page.waitForTimeout(150)
+  assert.equal(await page.getByLabel('Output device').inputValue(), 'out-headset', 'chosen output is selected')
+  assert.equal(await page.getByLabel('Output device').locator('option').count(), 3, 'default + two outputs')
+  await shot('settings-audio')
   await page.getByRole('button', { name: 'Hotkeys' }).click()
   await page.waitForTimeout(150)
   assert.equal(await page.locator('kbd', { hasText: /^F9$/ }).count(), 1, 'screenshot hotkey row')

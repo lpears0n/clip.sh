@@ -98,6 +98,12 @@
     viewing = null
   }
 
+  // Audio devices come and go (a headset plugged in); re-read them each
+  // time Settings opens. Encoder results are cached, so this is cheap.
+  $effect(() => {
+    if (view === 'settings') api.capabilities().then((c) => (caps = c))
+  })
+
   async function loadLibrary() {
     try {
       allClips = await api.clips()

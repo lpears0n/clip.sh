@@ -56,7 +56,7 @@ mod imp {
         let mut cfg = RecorderConfig {
             replay_seconds: seconds as u32 + 5,
             audio: if std::env::var_os("CLIPSH_AUDIO").is_some() {
-                vec![clip_core::AudioSource::Desktop]
+                vec![clip_core::AudioSource::Desktop(None)]
             } else {
                 vec![]
             },

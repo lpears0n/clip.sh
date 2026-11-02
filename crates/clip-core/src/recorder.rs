@@ -68,7 +68,7 @@ impl Default for RecorderConfig {
             video: VideoConfig::default(),
             encoder: None,
             replay_seconds: 30,
-            audio: vec![AudioSource::Desktop],
+            audio: vec![AudioSource::Desktop(None)],
             audio_bitrate: default_audio_bitrate(),
             cursor: true,
             zero_copy: zero_copy_default(),

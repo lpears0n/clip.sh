@@ -1,5 +1,5 @@
-//! Audio capture → AAC pipeline branch. PipeWire on Linux, WASAPI on
-//! Windows (loopback of the default output for game audio).
+//! Audio capture → AAC pipeline branch. PipeWire on Linux (an output's
+//! monitor for game audio), WASAPI on Windows (loopback of an output).
 
 use anyhow::{Context, Result};
 use gstreamer as gst;
@@ -9,18 +9,31 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AudioSource {
-    /// Monitor of the default output device (game/desktop audio).
-    Desktop,
-    /// An input device by id (PipeWire node name / WASAPI device id), or the
-    /// default input.
+    /// Everything playing through an output device (game/desktop audio), by
+    /// id, or through the default output (which it then follows).
+    Desktop(Option<String>),
+    /// An input device by id, or the default input.
     Mic(Option<String>),
 }
 
 impl AudioSource {
     pub fn name(&self) -> &'static str {
         match self {
-            AudioSource::Desktop => "desktop",
+            AudioSource::Desktop(_) => "desktop",
             AudioSource::Mic(_) => "mic",
+        }
+    }
+
+    fn device(&self) -> Option<&str> {
+        match self {
+            AudioSource::Desktop(d) | AudioSource::Mic(d) => d.as_deref(),
+        }
+    }
+
+    fn kind(&self) -> DeviceKind {
+        match self {
+            AudioSource::Desktop(_) => DeviceKind::Output,
+            AudioSource::Mic(_) => DeviceKind::Input,
         }
     }
 }
@@ -28,23 +41,44 @@ impl AudioSource {
 /// AAC so clips play everywhere (browsers, Discord, the webview).
 const AAC_ENCODERS: [&str; 2] = ["fdkaacenc", "avenc_aac"];
 
-/// A capture device the user can pick for the mic track.
+/// An audio device the user can pick: an input for the mic track, or an
+/// output whose sound is recorded as the game track.
 #[derive(Debug, Clone, Serialize)]
-pub struct InputDevice {
-    /// Stable device id (PipeWire node name / WASAPI id); pass to
-    /// `AudioSource::Mic`.
+pub struct AudioDevice {
+    /// Stable device id (PipeWire node name / WASAPI device id); pass to
+    /// [`AudioSource`].
     pub id: String,
     pub name: String,
 }
 
-/// Audio inputs (microphones, line-in), excluding output monitors.
-pub fn input_devices() -> Vec<InputDevice> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DeviceKind {
+    Input,
+    Output,
+}
+
+/// Audio inputs (microphones, line-in). Output monitors and loopbacks,
+/// which some systems list as inputs too, are left out.
+pub fn input_devices() -> Vec<AudioDevice> {
+    devices(DeviceKind::Input)
+}
+
+/// Audio outputs (speakers, headsets, virtual sinks) that can be recorded.
+pub fn output_devices() -> Vec<AudioDevice> {
+    devices(DeviceKind::Output)
+}
+
+fn devices(kind: DeviceKind) -> Vec<AudioDevice> {
+    let class = match kind {
+        DeviceKind::Input => "Audio/Source",
+        DeviceKind::Output => "Audio/Sink",
+    };
     let monitor = gst::DeviceMonitor::new();
-    monitor.add_filter(Some("Audio/Source"), None);
+    monitor.add_filter(Some(class), None);
     if monitor.start().is_err() {
         return vec![];
     }
-    let devices = monitor
+    let mut devices: Vec<AudioDevice> = monitor
         .devices()
         .into_iter()
         .filter_map(|d| {
@@ -52,25 +86,35 @@ pub fn input_devices() -> Vec<InputDevice> {
             #[cfg(target_os = "linux")]
             let id = {
                 let id = props.get::<String>("node.name").ok()?;
-                let class = props.get::<String>("media.class").unwrap_or_default();
+                let media_class = props.get::<String>("media.class").unwrap_or_default();
                 // Sink monitors also show up as sources.
-                if class != "Audio/Source" || id.ends_with(".monitor") {
+                if media_class != class || id.ends_with(".monitor") {
                     return None;
                 }
                 id
             };
             #[cfg(not(target_os = "linux"))]
-            let id = props
-                .get::<String>("device.id")
-                .or_else(|_| props.get::<String>("device.strid"))
-                .ok()?;
-            Some(InputDevice {
+            let id = {
+                // WASAPI lists a loopback "source" for every output.
+                if props
+                    .get::<bool>("wasapi2.device.loopback")
+                    .unwrap_or(false)
+                {
+                    return None;
+                }
+                props
+                    .get::<String>("device.id")
+                    .or_else(|_| props.get::<String>("device.strid"))
+                    .ok()?
+            };
+            Some(AudioDevice {
                 id,
                 name: d.display_name().to_string(),
             })
         })
         .collect();
     monitor.stop();
+    devices.dedup_by(|a, b| a.id == b.id);
     devices
 }
 
@@ -81,7 +125,7 @@ pub fn add_audio_branch(
     source: &AudioSource,
     bitrate: i32,
 ) -> Result<gst::Element> {
-    let src = make_source(source)?;
+    let src = make_source(&present(source))?;
     let convert = gst::ElementFactory::make("audioconvert").build()?;
     let resample = gst::ElementFactory::make("audioresample").build()?;
     let caps = gst::ElementFactory::make("capsfilter")
@@ -111,15 +155,35 @@ pub fn add_audio_branch(
     Ok(parse)
 }
 
+/// `source`, or the default device of its kind if the one it names isn't
+/// connected right now (an unplugged headset must not stop the recording).
+fn present(source: &AudioSource) -> AudioSource {
+    let Some(id) = source.device() else {
+        return source.clone();
+    };
+    if devices(source.kind()).iter().any(|d| d.id == id) {
+        return source.clone();
+    }
+    tracing::warn!(
+        track = source.name(),
+        device = id,
+        "audio device not connected; recording the default instead"
+    );
+    match source {
+        AudioSource::Desktop(_) => AudioSource::Desktop(None),
+        AudioSource::Mic(_) => AudioSource::Mic(None),
+    }
+}
+
 #[cfg(target_os = "linux")]
 fn make_source(source: &AudioSource) -> Result<gst::Element> {
     let mut src = gst::ElementFactory::make("pipewiresrc").name(source.name());
-    if let AudioSource::Mic(Some(device)) = source {
+    if let Some(device) = source.device() {
         src = src.property("target-object", device);
     }
-    if *source == AudioSource::Desktop {
-        // Without a target, this captures the default sink's monitor and
-        // follows it when the default changes.
+    if let AudioSource::Desktop(_) = source {
+        // Capture an output's monitor: the targeted sink, or without a
+        // target the default sink, following it when the default changes.
         src = src.property(
             "stream-properties",
             gst::Structure::builder("props")
@@ -136,11 +200,13 @@ fn make_source(source: &AudioSource) -> Result<gst::Element> {
     let mut src = gst::ElementFactory::make("wasapi2src")
         .name(source.name())
         .property("low-latency", true);
-    match source {
-        // Loopback of the default render device: everything the user hears.
-        AudioSource::Desktop => src = src.property("loopback", true),
-        AudioSource::Mic(Some(device)) => src = src.property("device", device),
-        AudioSource::Mic(None) => {}
+    if let AudioSource::Desktop(_) = source {
+        // Loopback of a render device: everything playing through it. With
+        // no device named, the default one.
+        src = src.property("loopback", true);
+    }
+    if let Some(device) = source.device() {
+        src = src.property("device", device);
     }
     src.build()
         .context("wasapi2src missing (GStreamer wasapi2 plugin)")
@@ -158,13 +224,37 @@ fn aac_encoder(bitrate: i32) -> Result<gst::Element> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
     fn lists_inputs_without_monitors() {
         crate::init().unwrap();
-        let devices = super::input_devices();
+        let devices = input_devices();
         for d in &devices {
-            println!("{} — {}", d.id, d.name);
+            println!("in: {} — {}", d.id, d.name);
         }
         assert!(devices.iter().all(|d| !d.id.ends_with(".monitor")));
+        for d in output_devices() {
+            println!("out: {} — {}", d.id, d.name);
+        }
+    }
+
+    #[test]
+    fn missing_devices_fall_back_to_the_default() {
+        crate::init().unwrap();
+        let gone = "clip.sh-test-device-that-does-not-exist";
+        assert_eq!(
+            present(&AudioSource::Desktop(Some(gone.into()))),
+            AudioSource::Desktop(None)
+        );
+        assert_eq!(
+            present(&AudioSource::Mic(Some(gone.into()))),
+            AudioSource::Mic(None)
+        );
+        // Defaults stay as they are.
+        assert_eq!(
+            present(&AudioSource::Desktop(None)),
+            AudioSource::Desktop(None)
+        );
     }
 }

@@ -74,6 +74,8 @@ export interface Settings {
   /** Try DMA-BUF capture into GPU memory first; falls back by itself. */
   zero_copy: boolean
   desktop_audio: boolean
+  /** Output whose sound is recorded; null = the system default. */
+  desktop_device: string | null
   mic_device: string | null
   audio_bitrate_kbps: number
   storage_limit_gb: number | null
@@ -89,6 +91,7 @@ export interface Capabilities {
   display_hz: number | null
   encoders: { encoder: Encoder; codecs: Codec[] }[]
   mic_devices: { id: string; name: string }[]
+  output_devices: { id: string; name: string }[]
 }
 
 export interface Session {
