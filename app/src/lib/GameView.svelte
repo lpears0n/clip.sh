@@ -11,6 +11,7 @@
     onopen,
     ondelete,
     onshare,
+    onfavorite,
   }: {
     game: GameEntry
     clips: Clip[]
@@ -18,6 +19,7 @@
     onopen: (c: Clip) => void
     ondelete: (c: Clip) => void
     onshare: (c: Clip) => void
+    onfavorite: (c: Clip) => void
   } = $props()
 
   const own = $derived(clips.filter((c) => c.game === game.name))
@@ -77,11 +79,12 @@
         {#each day.clips as c (c.path)}
           <ClipCard
             clip={c}
-            title={clock(c.created_ms)}
+            fallback={clock(c.created_ms)}
             subtitle={duration(c.duration)}
             onopen={() => onopen(c)}
             ondelete={() => ondelete(c)}
             onshare={() => onshare(c)}
+            onfavorite={() => onfavorite(c)}
           />
         {/each}
       </div>

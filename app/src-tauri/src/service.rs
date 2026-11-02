@@ -166,6 +166,7 @@ async fn run(
                                 let meta = library::ClipMeta {
                                     game: g.name.clone(),
                                     steam_app_id: g.steam_app_id,
+                                    ..Default::default()
                                 };
                                 if let Err(e) = library::write_meta(p, &meta) {
                                     tracing::warn!("clip metadata: {e:#}");

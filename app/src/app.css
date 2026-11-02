@@ -121,6 +121,11 @@
   @apply display-face text-[15px] font-semibold text-zinc-100;
 }
 
+/* Small label tag on cards and in the viewer. */
+@utility chip {
+  @apply inline-flex h-5 max-w-[140px] items-center truncate rounded-full border border-line bg-raised px-2 text-[11px] font-medium text-zinc-300;
+}
+
 /* Clip grids: as many cards as fit at the chosen density (Appearance settings). */
 @utility clip-grid {
   grid-template-columns: repeat(auto-fill, minmax(var(--card-min, 300px), 1fr));

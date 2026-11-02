@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ArrowDownUp, CheckSquare, Search, Trash2, X } from '@lucide/svelte'
+  import { ArrowDownUp, CheckSquare, Search, Star, Tag, Trash2, X } from '@lucide/svelte'
   import type { Clip } from './api'
   import ClipCard from './ClipCard.svelte'
   import { bytes, date } from './format'
@@ -12,6 +12,7 @@
     ondelete,
     ondeletemany,
     onshare,
+    onfavorite,
   }: {
     clips: Clip[]
     loading: boolean
@@ -20,6 +21,7 @@
     ondelete: (c: Clip) => void
     ondeletemany: (cs: Clip[]) => void
     onshare: (c: Clip) => void
+    onfavorite: (c: Clip) => void
   } = $props()
 
   type Sort = 'newest' | 'oldest' | 'longest' | 'largest'
@@ -31,6 +33,8 @@
   ]
 
   let game = $state('')
+  let label = $state('')
+  let favorites = $state(false)
   let query = $state('')
   let sort = $state<Sort>('newest')
   let search: HTMLInputElement | undefined = $state()
@@ -40,12 +44,20 @@
   let selected = $state<Set<string>>(new Set())
 
   const games = $derived([...new Set(clips.map((c) => c.game))].sort((a, b) => a.localeCompare(b)))
+  const labels = $derived(
+    [...new Set(clips.flatMap((c) => c.labels))].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' })),
+  )
+  const anyFavorites = $derived(clips.some((c) => c.favorite))
 
   const shown = $derived.by(() => {
     const q = query.trim().toLowerCase()
-    let list = clips.filter((c) => (!game || c.game === game))
+    let list = clips.filter(
+      (c) => (!game || c.game === game) && (!favorites || c.favorite) && (!label || c.labels.includes(label)),
+    )
     if (q) {
-      list = list.filter((c) => `${c.game} ${c.name} ${date(c.created_ms)}`.toLowerCase().includes(q))
+      list = list.filter((c) =>
+        `${c.title ?? ''} ${c.game} ${c.name} ${c.labels.join(' ')} ${date(c.created_ms)}`.toLowerCase().includes(q),
+      )
     }
     const by: Record<Sort, (a: Clip, b: Clip) => number> = {
       newest: (a, b) => b.created_ms - a.created_ms,
@@ -61,6 +73,8 @@
 
   $effect(() => {
     if (game && !games.includes(game)) game = ''
+    if (label && !labels.includes(label)) label = ''
+    if (favorites && !anyFavorites) favorites = false
   })
 
   // Drop selections for clips that disappeared.
@@ -140,6 +154,29 @@
         {/if}
       </label>
 
+      {#if anyFavorites}
+        <button
+          class="btn {favorites ? 'border-accent/60 text-accent' : ''}"
+          onclick={() => (favorites = !favorites)}
+          aria-pressed={favorites}
+          title="Only favourites"
+        >
+          <Star size={16} fill={favorites ? 'currentColor' : 'none'} />
+        </button>
+      {/if}
+
+      {#if labels.length}
+        <label class="field flex items-center gap-2 pr-0 pl-2.5">
+          <Tag size={15} class="flex-none text-muted" />
+          <select class="h-full max-w-[160px] bg-transparent pr-7 text-[14px] outline-none" bind:value={label} aria-label="Filter by label">
+            <option value="">Any label</option>
+            {#each labels as l (l)}
+              <option value={l}>{l}</option>
+            {/each}
+          </select>
+        </label>
+      {/if}
+
       {#if games.length > 1}
         <select class="field w-[200px]" bind:value={game} aria-label="Filter by game">
           <option value="">All games</option>
@@ -179,13 +216,14 @@
             ondelete={() => ondelete(clip)}
             onshare={() => onshare(clip)}
             onselect={() => toggle(clip)}
+            onfavorite={() => onfavorite(clip)}
           />
         {/each}
       </div>
     {:else}
       <div class="flex flex-col items-center gap-2 py-20 text-center">
         <p class="display-face text-[18px] font-semibold">Nothing matches.</p>
-        <p class="text-[14px] text-muted">Try another search or clear the game filter.</p>
+        <p class="text-[14px] text-muted">Try another search or clear the filters.</p>
       </div>
     {/if}
   </div>

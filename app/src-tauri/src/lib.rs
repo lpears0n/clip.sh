@@ -195,6 +195,19 @@ async fn delete_clip(state: State<'_, AppState>, path: PathBuf) -> CmdResult<()>
 }
 
 #[tauri::command]
+async fn update_clip(
+    state: State<'_, AppState>,
+    path: PathBuf,
+    patch: library::MetaPatch,
+) -> CmdResult<library::Clip> {
+    let dir = state.clips_dir();
+    tauri::async_runtime::spawn_blocking(move || library::update_meta(&dir, &path, patch))
+        .await
+        .map_err(err)?
+        .map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
 async fn get_storage(state: State<'_, AppState>) -> CmdResult<storage::Usage> {
     let (dir, limit) = {
         let s = state.settings.lock().unwrap();
@@ -556,6 +569,7 @@ pub fn run() {
             save_clip,
             list_clips,
             delete_clip,
+            update_clip,
             get_storage,
             get_capabilities,
             list_games,

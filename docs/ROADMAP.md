@@ -80,6 +80,10 @@ Taken from current dark-theme guidance and the apps gamers already use:
   through `tauri-action`, as a draft release. Windows job is written and
   commented out.
 - AUR `PKGBUILD` and a `.desktop` entry under `packaging/`.
+- Favourites, labels and titles, stored in each clip's `.mp4.json` sidecar.
+  Star on cards and in the viewer (`S`), rename inline (`N`), add and
+  remove labels in the viewer; the Clips page filters by favourite and
+  label, and search matches titles and labels.
 
 ## 4. Feature roadmap
 
@@ -88,13 +92,11 @@ ship on its own.
 
 ### Phase 1 — Library you can live in (next)
 
-- **Favourites and labels.** A star on cards and in the viewer; free-text
-  labels. Stored in the existing `<clip>.mp4.json` sidecar so the folder
-  stays the source of truth and survives sync tools. Filters in the Clips
-  header.
-- **Rename / title.** Clips are named by timestamp; let users give them a
-  title (sidecar field), shown on the card instead of the game name on game
-  pages.
+- ~~**Favourites and labels.**~~ Done. Stored in the `<clip>.mp4.json`
+  sidecar so the folder stays the source of truth and survives sync tools.
+- ~~**Rename / title.**~~ Done.
+- **Bulk label / favourite** from selection mode, and label autocompletion
+  from labels already in use.
 - **Timeline scrubbing on hover.** Generate a 10×1 sprite of frames per clip
   alongside the thumbnail (`clip_core::media::inspect` already decodes one
   frame; take ten). Hover position maps to a sprite frame; cheaper than the

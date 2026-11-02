@@ -3,9 +3,9 @@
   Playback controls overlay the video's bottom edge and hide while playing.
 -->
 <script lang="ts">
-  import { ArrowLeft, CircleHelp, Maximize, Minimize, Pause, Play, Repeat, Volume2, VolumeX } from '@lucide/svelte'
+  import { ArrowLeft, CircleHelp, Maximize, Minimize, Pause, Pencil, Play, Plus, Repeat, Star, Volume2, VolumeX, X } from '@lucide/svelte'
   import { getCurrentWindow } from '@tauri-apps/api/window'
-  import { type Clip, videoUrl } from './api'
+  import { type Clip, type ClipPatch, videoUrl } from './api'
   import { clock, dayLabel, size, timecode, trackName } from './format'
   import { playbackStats } from './playbackStats'
   import Timeline from './Timeline.svelte'
@@ -17,6 +17,7 @@
     onrender,
     ondelete,
     onshare,
+    onupdate,
   }: {
     clip: Clip
     rendering: boolean
@@ -24,7 +25,51 @@
     onrender: (start: number, end: number, volumes: number[]) => void
     ondelete: () => void
     onshare: () => void
+    /** Absent for videos opened from outside the library. */
+    onupdate?: (patch: ClipPatch) => void
   } = $props()
+
+  const subtitle = $derived(
+    [
+      clip.title ? clip.game : null,
+      `${dayLabel(clip.created_ms)}, ${clock(clip.created_ms)}`,
+      size(clip.size_bytes),
+      clip.is_edit ? 'edited' : null,
+    ]
+      .filter(Boolean)
+      .join(' · '),
+  )
+
+  // Title editing and label entry.
+  let editingTitle = $state(false)
+  let titleDraft = $state('')
+  let titleInput: HTMLInputElement | undefined = $state()
+  let addingLabel = $state(false)
+  let labelDraft = $state('')
+  let labelInput: HTMLInputElement | undefined = $state()
+
+  function startTitle() {
+    if (!onupdate) return
+    titleDraft = clip.title ?? ''
+    editingTitle = true
+    queueMicrotask(() => titleInput?.select())
+  }
+
+  function commitTitle() {
+    if (!editingTitle) return
+    editingTitle = false
+    if ((clip.title ?? '') !== titleDraft.trim()) onupdate?.({ title: titleDraft })
+  }
+
+  function addLabel() {
+    const l = labelDraft.trim()
+    labelDraft = ''
+    if (l) onupdate?.({ labels: [...clip.labels, l] })
+  }
+
+  function removeLabel(l: string) {
+    onupdate?.({ labels: clip.labels.filter((x) => x !== l) })
+  }
 
   let video: HTMLVideoElement
   let duration = $state(0)
@@ -185,6 +230,11 @@
       poke()
     } else if (e.code === 'KeyT') {
       trimming = !trimming
+    } else if (e.code === 'KeyS' && onupdate) {
+      onupdate({ favorite: !clip.favorite })
+    } else if (e.code === 'KeyN' && onupdate) {
+      e.preventDefault()
+      startTitle()
     } else if (trimming && e.code === 'KeyI') {
       start = Math.min(time, end - 0.1)
     } else if (trimming && e.code === 'KeyO') {
@@ -200,6 +250,8 @@
     ['< / >', 'Slower or faster'],
     ['Home / End', 'Jump to start or end'],
     ['R', 'Repeat'],
+    ['S', 'Star (favourite)'],
+    ['N', 'Rename'],
     ['M', 'Mute'],
     ['F', 'Fullscreen'],
     ['T', 'Trim'],
@@ -229,9 +281,93 @@
       <ArrowLeft size={20} />
     </button>
     <div class="min-w-0 flex-1">
-      <div class="display-face truncate text-[17px] font-semibold">{clip.game}</div>
-      <div class="text-[13px] text-muted tabular-nums">
-        {dayLabel(clip.created_ms)}, {clock(clip.created_ms)} · {size(clip.size_bytes)}{clip.is_edit ? ' · edited' : ''}
+      <div class="flex items-center gap-2">
+        {#if editingTitle}
+          <!-- svelte-ignore a11y_autofocus -->
+          <input
+            bind:this={titleInput}
+            bind:value={titleDraft}
+            class="field display-face h-8 w-full max-w-[520px] text-[16px] font-semibold"
+            placeholder={clip.game}
+            maxlength="120"
+            autofocus
+            onblur={commitTitle}
+            onkeydown={(e) => {
+              e.stopPropagation()
+              if (e.key === 'Enter') commitTitle()
+              else if (e.key === 'Escape') editingTitle = false
+            }}
+            aria-label="Clip title"
+          />
+        {:else}
+          <button
+            class="group/title display-face flex min-w-0 items-center gap-2 truncate text-[17px] font-semibold {onupdate ? '' : 'cursor-default'}"
+            onclick={startTitle}
+            title={onupdate ? 'Rename (N)' : undefined}
+            disabled={!onupdate}
+          >
+            <span class="truncate">{clip.title ?? clip.game}</span>
+            {#if onupdate}<Pencil size={13} class="flex-none text-muted opacity-0 transition-opacity group-hover/title:opacity-100" />{/if}
+          </button>
+        {/if}
+        {#if onupdate}
+          <button
+            class="btn-icon size-7 flex-none {clip.favorite ? 'text-accent' : 'text-muted'}"
+            onclick={() => onupdate({ favorite: !clip.favorite })}
+            title={clip.favorite ? 'Remove from favourites (S)' : 'Add to favourites (S)'}
+            aria-label={clip.favorite ? 'Remove from favourites' : 'Add to favourites'}
+            aria-pressed={clip.favorite}
+          >
+            <Star size={16} fill={clip.favorite ? 'currentColor' : 'none'} />
+          </button>
+        {/if}
+      </div>
+      <div class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-muted tabular-nums">
+        <span class="truncate">{subtitle}</span>
+        {#if onupdate || clip.labels.length}
+          <span class="flex flex-wrap items-center gap-1">
+            {#each clip.labels as l (l)}
+              <span class="chip gap-1 pr-1">
+                {l}
+                {#if onupdate}
+                  <button class="rounded-full hover:text-white" onclick={() => removeLabel(l)} aria-label="Remove label {l}">
+                    <X size={11} />
+                  </button>
+                {/if}
+              </span>
+            {/each}
+            {#if onupdate}
+              {#if addingLabel}
+                <!-- svelte-ignore a11y_autofocus -->
+                <input
+                  bind:this={labelInput}
+                  bind:value={labelDraft}
+                  class="chip h-5 w-[110px] bg-canvas outline-none focus:border-accent"
+                  placeholder="New label"
+                  maxlength="40"
+                  autofocus
+                  onblur={() => {
+                    addLabel()
+                    addingLabel = false
+                  }}
+                  onkeydown={(e) => {
+                    e.stopPropagation()
+                    if (e.key === 'Enter') addLabel()
+                    else if (e.key === 'Escape') {
+                      labelDraft = ''
+                      addingLabel = false
+                    }
+                  }}
+                  aria-label="New label"
+                />
+              {:else}
+                <button class="chip gap-0.5 border-dashed text-muted hover:text-zinc-100" onclick={() => (addingLabel = true)}>
+                  <Plus size={11} /> Label
+                </button>
+              {/if}
+            {/if}
+          </span>
+        {/if}
       </div>
     </div>
     <div class="flex items-center text-[14px] font-medium">

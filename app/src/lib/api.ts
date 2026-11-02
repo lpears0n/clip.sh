@@ -31,6 +31,18 @@ export interface Clip {
   is_edit: boolean
   steam_app_id: number | null
   thumbnail: string | null
+  /** User-given name; show the game or time when null. */
+  title: string | null
+  favorite: boolean
+  labels: string[]
+}
+
+/** Fields of a clip the user can change; omitted ones are left alone. */
+export interface ClipPatch {
+  /** Empty string clears the title. */
+  title?: string
+  favorite?: boolean
+  labels?: string[]
 }
 
 export interface Settings {
@@ -106,6 +118,7 @@ export const api = {
   clips: () => invoke<Clip[]>('list_clips'),
   games: () => invoke<GameEntry[]>('list_games'),
   deleteClip: (path: string) => invoke<void>('delete_clip', { path }),
+  updateClip: (path: string, patch: ClipPatch) => invoke<Clip>('update_clip', { path, patch }),
   reveal: (path: string) => invoke<void>('reveal_clip', { path }),
   openFolder: () => invoke<void>('open_clips_folder'),
   settings: () => invoke<Settings>('get_settings'),

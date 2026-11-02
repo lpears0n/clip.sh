@@ -23,13 +23,66 @@ pub struct Clip {
     pub is_edit: bool,
     pub steam_app_id: Option<u32>,
     pub thumbnail: Option<PathBuf>,
+    /// User-given name; the UI falls back to the game or time.
+    pub title: Option<String>,
+    pub favorite: bool,
+    pub labels: Vec<String>,
 }
 
-/// Saved next to each clip as `<clip>.mp4.json`.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+/// Saved next to each clip as `<clip>.mp4.json`. The folder stays the
+/// source of truth, so anything the user adds to a clip lives here too.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
 pub struct ClipMeta {
     pub game: String,
     pub steam_app_id: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub favorite: bool,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub labels: Vec<String>,
+}
+
+/// What the UI may change on a clip; `None` leaves a field alone.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct MetaPatch {
+    /// `Some("")` clears the title.
+    pub title: Option<String>,
+    pub favorite: Option<bool>,
+    pub labels: Option<Vec<String>>,
+}
+
+const MAX_TITLE: usize = 120;
+const MAX_LABEL: usize = 40;
+const MAX_LABELS: usize = 20;
+
+impl ClipMeta {
+    /// Apply a patch, tidying free text: trimmed, length-capped, labels
+    /// de-duplicated case-insensitively and kept in the order given.
+    pub fn apply(&mut self, patch: MetaPatch) {
+        if let Some(t) = patch.title {
+            let t: String = t.trim().chars().take(MAX_TITLE).collect();
+            self.title = (!t.is_empty()).then_some(t);
+        }
+        if let Some(f) = patch.favorite {
+            self.favorite = f;
+        }
+        if let Some(labels) = patch.labels {
+            let mut out: Vec<String> = Vec::new();
+            for l in labels {
+                let l: String = l.trim().chars().take(MAX_LABEL).collect();
+                if l.is_empty() || out.iter().any(|o| o.eq_ignore_ascii_case(&l)) {
+                    continue;
+                }
+                out.push(l);
+                if out.len() == MAX_LABELS {
+                    break;
+                }
+            }
+            self.labels = out;
+        }
+    }
 }
 
 fn meta_path(clip: &Path) -> PathBuf {
@@ -45,6 +98,28 @@ pub fn write_meta(clip: &Path, meta: &ClipMeta) -> Result<()> {
 
 pub fn read_meta(clip: &Path) -> Option<ClipMeta> {
     serde_json::from_str(&std::fs::read_to_string(meta_path(clip)).ok()?).ok()
+}
+
+/// Change a clip's user metadata, refusing anything outside the library.
+/// Returns the clip as the UI should now show it.
+pub fn update_meta(clips_dir: &Path, path: &Path, patch: MetaPatch) -> Result<Clip> {
+    let root = clips_dir.canonicalize().context("clips folder missing")?;
+    let target = path.canonicalize().context("clip not found")?;
+    if !target.starts_with(&root) || target.extension().is_none_or(|e| e != "mp4") {
+        bail!("not a library clip: {}", path.display());
+    }
+    let mut meta = read_meta(&target).unwrap_or_else(|| ClipMeta {
+        game: target
+            .parent()
+            .and_then(Path::file_name)
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+        ..Default::default()
+    });
+    meta.apply(patch);
+    write_meta(&target, &meta)?;
+    let game = meta.game.clone();
+    load(&target, &game)
 }
 
 /// Give a rendered edit the same metadata as its source.
@@ -182,6 +257,7 @@ pub fn load(path: &Path, game: &str) -> Result<Clip> {
         },
     };
 
+    let user = read_meta(path).unwrap_or_default();
     Ok(Clip {
         path: path.to_owned(),
         game: game.to_owned(),
@@ -194,8 +270,11 @@ pub fn load(path: &Path, game: &str) -> Result<Clip> {
         duration: info.as_ref().map(|c| c.duration),
         audio_tracks: info.as_ref().and_then(|c| c.audio_tracks).unwrap_or(0),
         is_edit: is_edit(path),
-        steam_app_id: read_meta(path).and_then(|m| m.steam_app_id),
+        steam_app_id: user.steam_app_id,
         thumbnail: thumb.exists().then_some(thumb),
+        title: user.title,
+        favorite: user.favorite,
+        labels: user.labels,
     })
 }
 
@@ -255,6 +334,45 @@ pub fn delete(clips_dir: &Path, path: &Path, use_trash: bool) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn patch_tidies_user_fields() {
+        let mut m = ClipMeta::default();
+        m.apply(MetaPatch {
+            title: Some("  Ace  ".into()),
+            favorite: Some(true),
+            labels: Some(vec![
+                "clutch".into(),
+                " Clutch ".into(),
+                "".into(),
+                "funny".into(),
+            ]),
+        });
+        assert_eq!(m.title.as_deref(), Some("Ace"));
+        assert!(m.favorite);
+        assert_eq!(m.labels, ["clutch", "funny"]);
+
+        // Untouched fields stay; an empty title clears it.
+        m.apply(MetaPatch {
+            title: Some("".into()),
+            ..Default::default()
+        });
+        assert_eq!(m.title, None);
+        assert!(m.favorite);
+        assert_eq!(m.labels, ["clutch", "funny"]);
+    }
+
+    #[test]
+    fn meta_round_trips_without_noise() {
+        let m = ClipMeta {
+            game: "Hades".into(),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&m).unwrap();
+        assert_eq!(json, r#"{"game":"Hades","steam_app_id":null}"#);
+        let back: ClipMeta = serde_json::from_str(r#"{"game":"Hades"}"#).unwrap();
+        assert_eq!(back, m);
+    }
 
     #[test]
     fn recognises_edits() {

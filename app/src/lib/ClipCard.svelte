@@ -1,12 +1,12 @@
 <script lang="ts">
-  import { Check, Clapperboard, FolderOpen, Scissors, Trash2 } from '@lucide/svelte'
+  import { Check, Clapperboard, FolderOpen, Scissors, Star, Trash2 } from '@lucide/svelte'
   import { type Clip, fileUrl, videoUrl } from './api'
   import { date, duration } from './format'
   import { prefs } from './prefs.svelte'
 
   let {
     clip,
-    title = clip.game,
+    fallback = clip.game,
     subtitle = date(clip.created_ms),
     selectable = false,
     selected = false,
@@ -14,10 +14,11 @@
     ondelete,
     onshare,
     onselect,
+    onfavorite,
   }: {
     clip: Clip
-    /** Defaults to the game name; game pages show the time instead. */
-    title?: string
+    /** Shown when the clip has no title: the game name, or the time on game pages. */
+    fallback?: string
     subtitle?: string
     /** Selection mode: clicking toggles selection instead of opening. */
     selectable?: boolean
@@ -26,7 +27,11 @@
     ondelete: () => void
     onshare: () => void
     onselect?: () => void
+    /** Absent for clips outside the library, which can't be starred. */
+    onfavorite?: () => void
   } = $props()
+
+  const title = $derived(clip.title ?? fallback)
 
   // First click arms the delete button, second deletes.
   let armed = $state(false)
@@ -115,6 +120,21 @@
         <Check size={14} strokeWidth={3} />
       </span>
     {:else}
+      {#if onfavorite}
+        <button
+          class="btn-icon absolute top-2 left-2 bg-black/70 backdrop-blur-sm transition-opacity
+            {clip.favorite ? 'text-accent' : 'opacity-0 group-focus-within:opacity-100 group-hover:opacity-100'}"
+          onclick={(e) => {
+            e.stopPropagation()
+            onfavorite()
+          }}
+          title={clip.favorite ? 'Remove from favourites' : 'Add to favourites'}
+          aria-label={clip.favorite ? 'Remove from favourites' : 'Add to favourites'}
+          aria-pressed={clip.favorite}
+        >
+          <Star size={16} fill={clip.favorite ? 'currentColor' : 'none'} />
+        </button>
+      {/if}
       <div class="absolute top-2 right-2 flex gap-1 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
         <button
           class="btn-icon bg-black/70 backdrop-blur-sm"
@@ -143,7 +163,17 @@
     {/if}
   </div>
   <div class="mt-2 flex items-baseline justify-between gap-3 px-0.5">
-    <span class="display-face truncate text-[14px] font-semibold">{title}</span>
+    <span class="display-face truncate text-[14px] font-semibold" title={clip.title ? fallback : undefined}>{title}</span>
     <span class="flex-none text-[12px] text-muted tabular-nums">{subtitle}</span>
   </div>
+  {#if clip.labels.length}
+    <div class="mt-1.5 flex flex-wrap gap-1 px-0.5">
+      {#each clip.labels.slice(0, 3) as l (l)}
+        <span class="chip">{l}</span>
+      {/each}
+      {#if clip.labels.length > 3}
+        <span class="chip" title={clip.labels.slice(3).join(', ')}>+{clip.labels.length - 3}</span>
+      {/if}
+    </div>
+  {/if}
 </div>

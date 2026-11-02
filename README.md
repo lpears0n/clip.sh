@@ -40,6 +40,9 @@ To build a release binary instead, use `pnpm tauri build`. There's also a small 
 - Hover a clip for a silent preview; open it to watch or trim. Press `?` in
   the viewer for every keyboard shortcut (speed, frame stepping, in/out
   points, repeat).
+- Star a clip (`S`), rename it (`N`) or add labels in the viewer. Favourites
+  and labels are filters on the clips page, and they live in the small
+  `.json` file next to each clip, so they survive moving the folder.
 - **Settings → Appearance** picks the accent colour and card size, and turns
   off hover previews or motion.
 

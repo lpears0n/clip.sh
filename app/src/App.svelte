@@ -8,6 +8,7 @@
     api,
     type Capabilities,
     type Clip,
+    type ClipPatch,
     type GameEntry,
     initMedia,
     onClipSaved,
@@ -56,7 +57,9 @@
 
   // Deletes are deferred so they can be undone; the clips vanish from the
   // UI at once and are only removed from disk when the toast expires.
-  let pending = $state<{ clips: Clip[]; timer: ReturnType<typeof setTimeout> }[]>([])
+  // Raw state: entries are compared by identity when undone or committed,
+  // which a deep proxy would break. The array is always reassigned.
+  let pending = $state.raw<{ clips: Clip[]; timer: ReturnType<typeof setTimeout> }[]>([])
   const hidden = $derived(new Set(pending.flatMap((p) => p.clips.map((c) => c.path))))
   const clips = $derived(hidden.size ? allClips.filter((c) => !hidden.has(c.path)) : allClips)
 
@@ -176,6 +179,31 @@
     refreshUsage()
   }
 
+  /** Only library clips carry user metadata; opened files are read-only. */
+  const inLibrary = (c: Clip) => !!settings && c.path.startsWith(settings.clips_dir + '/')
+
+  /** Title, favourite or labels. Applies optimistically, then takes the
+   *  server's tidied version. */
+  async function update(clip: Clip, patch: ClipPatch) {
+    const optimistic: Clip = {
+      ...clip,
+      title: patch.title === undefined ? clip.title : patch.title.trim() || null,
+      favorite: patch.favorite ?? clip.favorite,
+      labels: patch.labels ?? clip.labels,
+    }
+    const put = (c: Clip) => {
+      allClips = allClips.map((x) => (x.path === c.path ? c : x))
+      if (viewing?.path === c.path) viewing = c
+    }
+    put(optimistic)
+    try {
+      put(await api.updateClip(clip.path, patch))
+    } catch (e) {
+      put(clip)
+      notify(String(e), true)
+    }
+  }
+
   /** Throws so the hotkey binder can show the reason. */
   async function changeSettings(s: Settings) {
     await api.setSettings(s)
@@ -279,6 +307,7 @@
             onrender={render}
             ondelete={() => viewing && remove([viewing])}
             onshare={() => viewing && api.reveal(viewing.path)}
+            onupdate={inLibrary(viewing) ? (p) => viewing && update(viewing, p) : undefined}
           />
         {:else if view === 'game' && game}
           <GameView
@@ -288,6 +317,7 @@
             onopen={(c) => open(c.path)}
             ondelete={(c) => remove([c])}
             onshare={(c) => api.reveal(c.path)}
+            onfavorite={(c) => update(c, { favorite: !c.favorite })}
           />
         {:else if view === 'clips'}
           <ClipsView
@@ -298,6 +328,7 @@
             ondelete={(c) => remove([c])}
             ondeletemany={remove}
             onshare={(c) => api.reveal(c.path)}
+            onfavorite={(c) => update(c, { favorite: !c.favorite })}
           />
         {:else if view === 'settings' && settings}
           <SettingsView {settings} {usage} {caps} {status} bind:category onchange={changeSettings} onchoosescreen={chooseScreen} />
