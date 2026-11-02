@@ -1,6 +1,6 @@
 # clip.sh: continuity notes
 
-Last updated: 2026-11-02. Current plans live in the repo: `docs/ROADMAP.md`
+Last updated: 2026-11-02 (evening). Current plans live in the repo: `docs/ROADMAP.md`
 (features, platforms), `docs/DESIGN.md` (design system, performance budgets),
 `docs/WINDOWS.md` (Windows build and what is unverified). The notes below
 are the running log; the sections at the end are newest.
@@ -170,3 +170,48 @@ Ad slots: AdSlot component, off unless `"ads": true` in settings.json (728×90 u
 - Harness: `scratchpad/shoot.cjs`-style Playwright script with the Tauri
   bridge mocked screenshots every view; it caught two real bugs (undo not
   restoring, virtual grid feedback loop). Worth checking into `app/tests/`.
+
+## Working agreements (owner's rules, keep following them)
+- Performance is the top priority on both OS stacks: nothing may cost the
+  game frames. Measure before and after any capture change.
+- Branches are named for their purpose (`windows-port`, `fix-release-linux-deps`).
+  No tool or assistant names anywhere: branches, commits, PR text, docs.
+- Commits are authored `lpears0n <lucas.pearson@live.com>` (set in the
+  clone's git config). Earlier commits used `notlucaspearson@gmail.com`;
+  adding that address to the GitHub account attributes them retroactively.
+- PRs: open one when asked; merge with a merge commit once CI is green.
+  Tags and branch deletions are done by the owner from their own machine.
+- Main machine: CachyOS/KDE Plasma 6 Wayland, RTX 5080, 3440×1440 240 Hz.
+  Owner is moving to Windows as the daily driver; Linux testing will be in
+  a VM (no GPU there: capture tests need real hardware).
+
+## State on 2026-11-02 evening
+- `main` = PR #1 (everything above) + PR #2 (release workflow fix).
+- Tag `v0.1.0` first pointed at the PR #1 merge; the Windows release job
+  built `clip.sh_0.1.0_x64-setup.exe` (41.8 MiB, GStreamer runtime bundled:
+  130 libraries, 25 plugins; webp/fdkaac/dxgiscreencap absent by design)
+  into a draft release. The Linux job failed on the 22.04 runner's
+  libunwind conflict, fixed in PR #2; the tag needs moving onto `main`
+  (`git tag -fa v0.1.0 origin/main && git push -f origin v0.1.0`) to get
+  the Linux packages.
+- CI on `windows-latest` compiles, lints and runs the unit and
+  end-to-end save tests against MSVC GStreamer 1.26. It found two real
+  bugs already (pkg-config path, no WebP encoder on Windows).
+- Still never run on a Windows desktop: WGC capture, D3D11 zero-copy,
+  hardware encoders, hotkey. First real run = the next milestone. Logs:
+  `%LOCALAPPDATA%\sh.clip.app\logs` (installer) or the terminal (`pnpm tauri dev`).
+- Installer is unsigned (SmartScreen warns). Options, cheapest first:
+  Azure Trusted Signing (~$10/month, identity validation, works from CI
+  via `signCommand` in tauri.conf.json), SignPath (free for OSS), an OV
+  Authenticode cert (reputation builds slowly), an EV cert (instant
+  SmartScreen trust, hardware token). The `.sig` files are Tauri updater
+  signatures and need `TAURI_SIGNING_PRIVATE_KEY` only once the updater
+  plugin is added.
+
+## Next, in order
+1. First run on Windows; fix what it reports (property names on the d3d11
+   source and AMF/QSV encoders are the likely suspects).
+2. Code signing + `tauri-plugin-updater`.
+3. Marker hotkey (needs clip-core's Linux hotkey layer to take a second
+   binding; Windows plugin already can), then screenshot hotkey.
+4. Roadmap phase 2 (editor) per `docs/ROADMAP.md`.
