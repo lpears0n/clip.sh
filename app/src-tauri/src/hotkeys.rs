@@ -105,8 +105,10 @@ mod imp {
     }
 
     /// The plugin; its handler runs the action bound to the pressed key.
-    pub fn plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
-        tauri_plugin_global_shortcut::Builder::new()
+    /// Tied to the Wry runtime: the handler hands the app to [`super::fire`],
+    /// which takes the app's concrete handle.
+    pub fn plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
+        tauri_plugin_global_shortcut::Builder::<tauri::Wry>::new()
             .with_handler(|app, shortcut, event| {
                 if event.state() != ShortcutState::Pressed {
                     return;
