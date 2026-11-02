@@ -100,7 +100,7 @@
     right: 0;
     height: 4px;
     border-radius: 2px;
-    background: #34363d;
+    background: var(--color-line-strong);
     overflow: hidden;
     transition:
       height 0.12s,
@@ -125,7 +125,6 @@
     margin-left: -6px;
     border-radius: 50%;
     background: #fff;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
     opacity: 0;
     transition: opacity 0.12s;
     pointer-events: none;
@@ -138,9 +137,9 @@
   /* Trim track */
   .track.trim {
     height: 48px;
-    border-radius: 6px;
-    background: #0d0d0f;
-    border: 1px solid #26272c;
+    border-radius: var(--radius-ctl);
+    background: var(--color-canvas);
+    border: 1px solid var(--color-line);
   }
 
   .dim {

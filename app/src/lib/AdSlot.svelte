@@ -13,7 +13,7 @@
 
 {#if enabled}
   <aside
-    class="flex max-w-full flex-none items-center justify-center rounded-[var(--radius-card)] border border-dashed border-zinc-700 bg-panel text-[13px] text-muted"
+    class="flex max-w-full flex-none items-center justify-center rounded-card border border-dashed border-line-strong bg-panel text-secondary text-muted"
     style:width="{width}px"
     style:height="{height}px"
     aria-label="Advertisement"

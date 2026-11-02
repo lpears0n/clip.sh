@@ -80,6 +80,11 @@ Taken from current dark-theme guidance and the apps gamers already use:
   through `tauri-action`, as a draft release. Windows job is written and
   commented out.
 - AUR `PKGBUILD` and a `.desktop` entry under `packaging/`.
+- Design pass from `docs/DESIGN.md`: token-based theme (OKLCH surfaces,
+  six type roles, radii by nesting, one shadow, no blur), labelled
+  collapsible sidebar with the storage row, header carries the view title,
+  `1`/`2`/`3` switch views, skeleton loading, designed empty and error
+  states, render progress with cancel.
 - Favourites, labels and titles, stored in each clip's `.mp4.json` sidecar.
   Star on cards and in the viewer (`S`), rename inline (`N`), add and
   remove labels in the viewer; the Clips page filters by favourite and

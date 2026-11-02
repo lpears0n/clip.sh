@@ -41,8 +41,8 @@
   })
 </script>
 
-<div class="mx-auto max-w-[1400px] space-y-8">
-  <header class="relative h-[clamp(150px,22vh,220px)] overflow-hidden rounded-[var(--radius-card)] bg-panel">
+<div class="mx-auto max-w-(--container-library) space-y-8">
+  <header class="relative h-(--height-banner) overflow-hidden rounded-surface bg-panel">
     {#if banner}
       <img
         src={fileUrl(banner)}
@@ -52,16 +52,16 @@
       />
     {/if}
     <div class="absolute inset-0 bg-gradient-to-t from-black/85 via-black/30 to-transparent"></div>
-    <button class="btn-icon absolute top-4 left-4 bg-black/45 backdrop-blur-sm" onclick={onback} aria-label="Back to games" title="Back">
+    <button class="btn-scrim absolute top-4 left-4" onclick={onback} aria-label="Back to games" title="Back">
       <ArrowLeft size={18} />
     </button>
     <div class="absolute inset-x-6 bottom-5 flex items-end justify-between gap-6">
       {#if game.art.logo}
-        <img src={fileUrl(game.art.logo)} alt={game.name} draggable="false" class="max-h-16 max-w-[300px] object-contain object-left-bottom drop-shadow-lg" />
+        <img src={fileUrl(game.art.logo)} alt={game.name} draggable="false" class="max-h-16 max-w-72 object-contain object-left-bottom" />
       {:else}
-        <h1 class="display-face text-[28px] leading-none font-bold">{game.name}</h1>
+        <h1 class="display-face text-page leading-none font-bold">{game.name}</h1>
       {/if}
-      <p class="flex-none text-[13px] text-zinc-300 tabular-nums">
+      <p class="flex-none text-secondary text-fg-2 tabular-nums">
         {own.length} clip{own.length === 1 ? '' : 's'} · {bytes(own.reduce((n, c) => n + c.size_bytes, 0))}{game.total_play_ms
           ? ` · ${playtime(game.total_play_ms)} played`
           : ''}
@@ -73,7 +73,7 @@
     <section>
       <h2 class="mb-4 flex items-baseline gap-3">
         <span class="section-title">{day.label}</span>
-        {#if day.played}<span class="text-[13px] text-muted">Played {playtime(day.played)}</span>{/if}
+        {#if day.played}<span class="text-secondary text-muted">Played {playtime(day.played)}</span>{/if}
       </h2>
       <div class="clip-grid grid gap-x-4 gap-y-5">
         {#each day.clips as c (c.path)}
@@ -90,6 +90,6 @@
       </div>
     </section>
   {:else}
-    <p class="py-16 text-center text-[15px] text-muted">No clips from {game.name} yet.</p>
+    <p class="py-16 text-center text-body text-muted">No clips from {game.name} yet</p>
   {/each}
 </div>

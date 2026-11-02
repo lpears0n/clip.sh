@@ -9,7 +9,10 @@ mod system;
 
 use std::{
     path::{Path, PathBuf},
-    sync::{Mutex, OnceLock},
+    sync::{
+        Arc, Mutex, OnceLock,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
 use clip_core::{
@@ -38,6 +41,22 @@ pub(crate) struct AppState {
     /// Which encoders handle which codecs; probing test-encodes, so do it once.
     encoders: tokio::sync::OnceCell<Vec<EncoderSupport>>,
     media: media_server::MediaServer,
+    /// Set by `cancel_render` to stop the render in progress (one at a time).
+    render_cancel: Arc<AtomicBool>,
+}
+
+/// Emitted a few times a second while an edit renders.
+const RENDER_PROGRESS: &str = "render-progress";
+
+#[derive(Clone, Serialize)]
+struct RenderProgress {
+    path: PathBuf,
+    fraction: f64,
+}
+
+#[tauri::command]
+fn cancel_render(state: State<'_, AppState>) {
+    state.render_cancel.store(true, Ordering::Relaxed);
 }
 
 /// Trimmer playback stats from `HTMLVideoElement.getVideoPlaybackQuality()`,
@@ -346,8 +365,24 @@ async fn render_clip(
     };
     let result = out.clone();
     let source = path.clone();
+    let cancel = state.render_cancel.clone();
+    cancel.store(false, Ordering::Relaxed);
+    let progress_app = app.clone();
+    let progress_path = path.clone();
+    let control = clip_core::export::Control {
+        on_progress: Some(Box::new(move |fraction| {
+            let _ = progress_app.emit(
+                RENDER_PROGRESS,
+                RenderProgress {
+                    path: progress_path.clone(),
+                    fraction,
+                },
+            );
+        })),
+        cancel: Some(cancel),
+    };
     tauri::async_runtime::spawn_blocking(move || {
-        clip_core::export::render(&path, &out, &edit, encoder, &cfg)
+        clip_core::export::render_with(&path, &out, &edit, encoder, &cfg, control)
     })
     .await
     .map_err(err)?
@@ -515,6 +550,7 @@ pub fn run() {
                 encoder: OnceLock::new(),
                 encoders: tokio::sync::OnceCell::new(),
                 media,
+                render_cancel: Arc::default(),
             });
             allow_clips_dir(app.handle(), &app.state::<AppState>().clips_dir());
             tauri::async_runtime::spawn(listen_hotkey(app.handle().clone(), hotkey));
@@ -583,6 +619,7 @@ pub fn run() {
             set_settings,
             open_for_edit,
             render_clip,
+            cancel_render,
         ])
         .run(tauri::generate_context!())
         .expect("error while running clip.sh");

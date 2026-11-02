@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Clapperboard, Gamepad2, Settings as Gear } from '@lucide/svelte'
+  import { CircleAlert, PanelLeft } from '@lucide/svelte'
   import { getCurrentWebview } from '@tauri-apps/api/webview'
   import { open as openDialog } from '@tauri-apps/plugin-dialog'
   import { onMount } from 'svelte'
@@ -13,6 +13,7 @@
     initMedia,
     onClipSaved,
     onLibraryChanged,
+    onRenderProgress,
     onStatusChanged,
     type Settings,
     type Status,
@@ -22,11 +23,11 @@
   import ClipViewer from './lib/ClipViewer.svelte'
   import GamesView from './lib/GamesView.svelte'
   import GameView from './lib/GameView.svelte'
-  import NavButton from './lib/NavButton.svelte'
-  import { applyPrefs, prefs } from './lib/prefs.svelte'
+  import { applyPrefs, prefs, setPrefs } from './lib/prefs.svelte'
   import SettingsView, { type Category } from './lib/SettingsView.svelte'
+  import Sidebar, { type NavId } from './lib/Sidebar.svelte'
+  import StateMessage from './lib/StateMessage.svelte'
   import StatusBar from './lib/StatusBar.svelte'
-  import StorageRing from './lib/StorageRing.svelte'
   import Toast, { type ToastData } from './lib/Toast.svelte'
 
   type View = 'games' | 'game' | 'clips' | 'settings'
@@ -45,10 +46,15 @@
   let settings = $state<Settings | null>(null)
   let usage = $state<Usage | null>(null)
   let caps = $state<Capabilities | null>(null)
-  let allClips = $state<Clip[]>([])
-  let games = $state<GameEntry[]>([])
+  // Raw: replaced wholesale on every refresh; a deep proxy over thousands of
+  // clips is slow and unnecessary.
+  let allClips = $state.raw<Clip[]>([])
+  let games = $state.raw<GameEntry[]>([])
   let loading = $state(true)
+  /** Why the library couldn't be read, shown in place of the views. */
+  let libraryError = $state<string | null>(null)
   let rendering = $state(false)
+  let renderProgress = $state(0)
   let dragging = $state(false)
   let saving = $state(false)
   let flash = $state(false)
@@ -65,6 +71,10 @@
 
   const game = $derived(games.find((g) => g.name === gameName) ?? null)
   const hotkey = $derived(settings?.hotkey ?? 'F8')
+  const nav = $derived<NavId>(view === 'game' ? 'games' : view)
+  const title = $derived(
+    view === 'games' ? 'Games' : view === 'game' ? (game?.name ?? 'Games') : view === 'clips' ? 'All clips' : 'Settings',
+  )
 
   function notify(text: string, error = false) {
     showToast({ text, error })
@@ -86,8 +96,9 @@
       // Fetch clips first: listing them generates the thumbnails games use.
       allClips = await api.clips()
       games = await api.games()
+      libraryError = null
     } catch (e) {
-      notify(String(e), true)
+      libraryError = String(e)
     } finally {
       loading = false
     }
@@ -105,7 +116,7 @@
     try {
       usage = await api.storage()
     } catch {
-      // Not critical; the ring just stays as it was.
+      // Not critical; the bar just stays as it was.
     }
   }
 
@@ -139,10 +150,11 @@
   async function render(start: number, end: number, volumes: number[]) {
     if (!viewing) return
     rendering = true
+    renderProgress = 0
     try {
       await api.render(viewing.path, start, end, volumes)
     } catch (e) {
-      notify(String(e), true)
+      if (!/cancelled/.test(String(e))) notify(String(e), true)
     } finally {
       rendering = false
     }
@@ -154,7 +166,7 @@
     if (viewing && list.some((c) => c.path === viewing!.path)) viewing = null
     const entry = { clips: list, timer: setTimeout(() => commit(entry), UNDO_MS) }
     pending = [...pending, entry]
-    const label = list.length === 1 ? `Deleted ${list[0].game} clip` : `Deleted ${list.length} clips`
+    const label = list.length === 1 ? `Deleted ${list[0].title ?? list[0].game} clip` : `Deleted ${list.length} clips`
     showToast({ text: label, action: { label: 'Undo', run: () => undo(entry) } }, UNDO_MS)
   }
 
@@ -227,6 +239,18 @@
     go('settings')
   }
 
+  function onkeydown(e: KeyboardEvent) {
+    const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement
+    if ((e.ctrlKey || e.metaKey) && e.key === 'b') {
+      e.preventDefault()
+      setPrefs({ sidebarCollapsed: !prefs.sidebarCollapsed })
+    } else if (!typing && !viewing && !e.ctrlKey && !e.altKey && !e.metaKey) {
+      if (e.key === '1') go('games')
+      else if (e.key === '2') go('clips')
+      else if (e.key === '3') go('settings')
+    }
+  }
+
   $effect(() => applyPrefs(prefs))
 
   onMount(() => {
@@ -248,13 +272,16 @@
       onClipSaved((path) => {
         notify(`Saved ${path.split('/').pop()}`)
         flash = true
-        setTimeout(() => (flash = false), 500)
+        setTimeout(() => (flash = false), 400)
         refreshLibrary()
         refreshUsage()
       }),
       onLibraryChanged(() => {
         refreshLibrary()
         refreshUsage()
+      }),
+      onRenderProgress((p) => {
+        if (viewing?.path === p.path) renderProgress = p.fraction
       }),
       getCurrentWebview().onDragDropEvent((e) => {
         const p = e.payload
@@ -276,39 +303,45 @@
   })
 </script>
 
-<div class="flex h-full flex-col">
-  <header class="flex h-14 flex-none items-center gap-4 border-b border-line bg-panel pr-4 pl-[22px]">
-    <span class="display-face flex-none text-[19px] font-bold">clip<span class="text-accent">.sh</span></span>
-    <div class="min-w-0 flex-1"></div>
-    <StatusBar {status} {flash} {saving} {hotkey} onsave={save} onopen={pickVideo} onchoosescreen={chooseScreen} />
-  </header>
+<svelte:window {onkeydown} />
 
-  <div class="flex min-h-0 flex-1">
-    <nav class="flex w-[72px] flex-none flex-col items-center gap-1.5 border-r border-line bg-panel py-3">
-      <NavButton
-        icon={Gamepad2}
-        label="Games"
-        active={!viewing && (view === 'games' || view === 'game')}
-        onclick={() => go('games')}
-      />
-      <NavButton icon={Clapperboard} label="All clips" active={!viewing && view === 'clips'} onclick={() => go('clips')} />
-      <div class="flex-1"></div>
-      <StorageRing {usage} onmanage={() => openSettings('Storage')} />
-      <NavButton icon={Gear} label="Settings" active={!viewing && view === 'settings'} onclick={() => go('settings')} />
-    </nav>
+<div class="flex h-full">
+  <Sidebar active={nav} collapsed={prefs.sidebarCollapsed} {usage} onnavigate={go} onstorage={() => openSettings('Storage')} />
 
-    <main class="flex min-w-0 flex-1 flex-col bg-canvas">
+  <div class="flex min-w-0 flex-1 flex-col">
+    <header class="flex h-14 flex-none items-center gap-3 border-b border-line bg-panel pr-4 pl-3">
+      <button
+        class="btn-icon text-muted"
+        onclick={() => setPrefs({ sidebarCollapsed: !prefs.sidebarCollapsed })}
+        aria-label={prefs.sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        title="Toggle sidebar (Ctrl+B)"
+      >
+        <PanelLeft size={18} />
+      </button>
+      <h1 class="display-face truncate text-title font-semibold">{title}</h1>
+      <div class="min-w-0 flex-1"></div>
+      <StatusBar {status} {flash} {saving} {hotkey} onsave={save} onopen={pickVideo} onchoosescreen={chooseScreen} />
+    </header>
+
+    <main class="flex min-h-0 flex-1 flex-col bg-canvas">
       <div class="min-h-0 flex-1 overflow-y-auto p-6">
         {#if viewing}
           <ClipViewer
             clip={viewing}
             {rendering}
+            progress={renderProgress}
             onback={() => (viewing = null)}
             onrender={render}
+            oncancel={() => api.cancelRender()}
             ondelete={() => viewing && remove([viewing])}
             onshare={() => viewing && api.reveal(viewing.path)}
             onupdate={inLibrary(viewing) ? (p) => viewing && update(viewing, p) : undefined}
           />
+        {:else if libraryError && view !== 'settings'}
+          <StateMessage icon={CircleAlert} title="Couldn't read the clips folder" body={libraryError} error>
+            <button class="btn" onclick={() => openSettings('Storage')}>Storage settings</button>
+            <button class="btn-primary" onclick={refreshLibrary}>Try again</button>
+          </StateMessage>
         {:else if view === 'game' && game}
           <GameView
             {game}
@@ -359,9 +392,7 @@
 
 {#if dragging}
   <div class="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-canvas/85">
-    <div class="display-face rounded-[var(--radius-card)] border-2 border-accent px-10 py-6 text-[22px] font-semibold">
-      Drop to open
-    </div>
+    <div class="display-face rounded-surface border-2 border-accent px-10 py-6 text-page font-semibold">Drop to open</div>
   </div>
 {/if}
 

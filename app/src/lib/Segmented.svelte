@@ -13,15 +13,15 @@
   } = $props()
 </script>
 
-<div class="inline-flex rounded-[var(--radius-ctl)] border border-line bg-canvas p-0.5" role="radiogroup" aria-label={label}>
+<div class="inline-flex rounded-ctl border border-line bg-canvas p-0.5" role="radiogroup" aria-label={label}>
   {#each options as o (o.value)}
     <button
       role="radio"
       aria-checked={value === o.value}
       disabled={o.disabled}
       title={o.title}
-      class="h-8 rounded-[4px] px-3 text-[13px] font-medium transition-colors disabled:cursor-default disabled:opacity-35
-        {value === o.value ? 'bg-zinc-700 text-white shadow-sm' : 'text-muted hover:text-zinc-100'}"
+      class="h-8 rounded-chip px-3 text-secondary font-medium transition-colors duration-fast disabled:cursor-default disabled:opacity-35
+        {value === o.value ? 'bg-overlay text-fg' : 'text-muted hover:text-fg'}"
       onclick={() => onchange(o.value)}
     >
       {o.label}

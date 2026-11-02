@@ -126,7 +126,11 @@ export const api = {
   openForEdit: (path: string) => invoke<Clip>('open_for_edit', { path }),
   render: (path: string, start: number, end: number, volumes: number[]) =>
     invoke<string>('render_clip', { path, start, end, volumes }),
+  cancelRender: () => invoke<void>('cancel_render'),
 }
+
+export const onRenderProgress = (f: (p: { path: string; fraction: number }) => void): Promise<UnlistenFn> =>
+  listen<{ path: string; fraction: number }>('render-progress', (e) => f(e.payload))
 
 export const onStatusChanged = (f: (s: Status) => void): Promise<UnlistenFn> =>
   listen<Status>('status-changed', (e) => f(e.payload))

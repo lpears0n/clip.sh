@@ -1,13 +1,15 @@
 // Appearance preferences. These only affect this machine's UI, so they live
 // in localStorage rather than the recorder's settings file.
 
+// OKLCH so every accent has the same lightness and a capped chroma (≤ 0.2):
+// none of them glares on the dark surfaces, and dark text reads on all.
 export const ACCENTS = {
-  orange: { label: 'Orange', hex: '#ff7a1a' },
-  blue: { label: 'Blue', hex: '#3b9cff' },
-  green: { label: 'Green', hex: '#2fd27a' },
-  pink: { label: 'Pink', hex: '#ff4d8d' },
-  purple: { label: 'Purple', hex: '#a78bfa' },
-  yellow: { label: 'Yellow', hex: '#ffcc33' },
+  orange: { label: 'Orange', css: 'oklch(72% 0.19 50)' },
+  blue: { label: 'Blue', css: 'oklch(70% 0.16 250)' },
+  green: { label: 'Green', css: 'oklch(74% 0.17 155)' },
+  pink: { label: 'Pink', css: 'oklch(68% 0.2 5)' },
+  purple: { label: 'Purple', css: 'oklch(70% 0.15 295)' },
+  yellow: { label: 'Yellow', css: 'oklch(82% 0.16 90)' },
 } as const
 export type Accent = keyof typeof ACCENTS
 
@@ -15,6 +17,8 @@ export type Density = 'comfortable' | 'compact'
 
 export interface Prefs {
   accent: Accent
+  /** Sidebar collapsed to icons. */
+  sidebarCollapsed: boolean
   /** Play a muted preview when the pointer rests on a clip card. */
   hoverPreviews: boolean
   /** Shorten or disable transitions and animations. */
@@ -27,6 +31,7 @@ const KEY = 'clip.sh/prefs'
 
 const DEFAULTS: Prefs = {
   accent: 'orange',
+  sidebarCollapsed: false,
   hoverPreviews: true,
   reduceMotion: false,
   density: 'comfortable',
@@ -64,7 +69,7 @@ export const CARD_MIN: Record<Density, number> = { comfortable: 300, compact: 22
 /** Push the preferences into CSS custom properties / attributes on <html>. */
 export function applyPrefs(p: Prefs) {
   const root = document.documentElement
-  root.style.setProperty('--color-accent', ACCENTS[p.accent].hex)
+  root.style.setProperty('--color-accent', ACCENTS[p.accent].css)
   root.style.setProperty('--card-min', `${CARD_MIN[p.density]}px`)
   const systemReduce = matchMedia('(prefers-reduced-motion: reduce)').matches
   root.toggleAttribute('data-reduce-motion', p.reduceMotion || systemReduce)

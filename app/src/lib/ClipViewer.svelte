@@ -13,16 +13,21 @@
   let {
     clip,
     rendering,
+    progress = 0,
     onback,
     onrender,
+    oncancel,
     ondelete,
     onshare,
     onupdate,
   }: {
     clip: Clip
     rendering: boolean
+    /** Fraction of the render done, while `rendering`. */
+    progress?: number
     onback: () => void
     onrender: (start: number, end: number, volumes: number[]) => void
+    oncancel: () => void
     ondelete: () => void
     onshare: () => void
     /** Absent for videos opened from outside the library. */
@@ -287,7 +292,7 @@
           <input
             bind:this={titleInput}
             bind:value={titleDraft}
-            class="field display-face h-8 w-full max-w-[520px] text-[16px] font-semibold"
+            class="field display-face h-8 w-full max-w-lg text-title font-semibold"
             placeholder={clip.game}
             maxlength="120"
             autofocus
@@ -301,13 +306,13 @@
           />
         {:else}
           <button
-            class="group/title display-face flex min-w-0 items-center gap-2 truncate text-[17px] font-semibold {onupdate ? '' : 'cursor-default'}"
+            class="group/title display-face flex min-w-0 items-center gap-2 truncate text-title font-semibold {onupdate ? '' : 'cursor-default'}"
             onclick={startTitle}
             title={onupdate ? 'Rename (N)' : undefined}
             disabled={!onupdate}
           >
             <span class="truncate">{clip.title ?? clip.game}</span>
-            {#if onupdate}<Pencil size={13} class="flex-none text-muted opacity-0 transition-opacity group-hover/title:opacity-100" />{/if}
+            {#if onupdate}<Pencil size={13} class="flex-none text-muted opacity-0 transition-opacity duration-fast group-hover/title:opacity-100" />{/if}
           </button>
         {/if}
         {#if onupdate}
@@ -322,7 +327,7 @@
           </button>
         {/if}
       </div>
-      <div class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-muted tabular-nums">
+      <div class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-secondary text-muted tabular-nums">
         <span class="truncate">{subtitle}</span>
         {#if onupdate || clip.labels.length}
           <span class="flex flex-wrap items-center gap-1">
@@ -342,7 +347,7 @@
                 <input
                   bind:this={labelInput}
                   bind:value={labelDraft}
-                  class="chip h-5 w-[110px] bg-canvas outline-none focus:border-accent"
+                  class="chip h-5 w-28 bg-canvas outline-none focus:border-accent"
                   placeholder="New label"
                   maxlength="40"
                   autofocus
@@ -361,7 +366,7 @@
                   aria-label="New label"
                 />
               {:else}
-                <button class="chip gap-0.5 border-dashed text-muted hover:text-zinc-100" onclick={() => (addingLabel = true)}>
+                <button class="chip gap-0.5 border-dashed text-muted hover:text-fg" onclick={() => (addingLabel = true)}>
                   <Plus size={11} /> Label
                 </button>
               {/if}
@@ -370,7 +375,7 @@
         {/if}
       </div>
     </div>
-    <div class="flex items-center text-[14px] font-medium">
+    <div class="flex items-center text-body font-medium">
       <button class="action {trimming ? 'text-accent' : ''}" onclick={() => (trimming = !trimming)} title="Trim (T)">
         {trimming ? 'Done' : 'Trim'}
       </button>
@@ -392,7 +397,7 @@
   <div class="flex min-h-0 flex-1 items-center justify-center [container-type:size]">
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
-      class="player group relative overflow-hidden bg-black {fullscreen ? 'fixed inset-0 z-50' : 'rounded-[var(--radius-card)]'}"
+      class="player group relative overflow-hidden bg-black {fullscreen ? 'fixed inset-0 z-50' : 'rounded-surface'}"
       class:hide-cursor={!showControls}
       style:aspect-ratio={fullscreen ? undefined : aspect}
       style:width={fullscreen ? undefined : `min(100cqw, calc(100cqh * ${aspect}))`}
@@ -416,7 +421,7 @@
 
       {#if !trimming}
         <div
-          class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent px-4 pt-12 pb-2.5 transition-opacity duration-300
+          class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent px-4 pt-12 pb-2.5 transition-opacity duration-normal
             {showControls ? 'opacity-100' : 'pointer-events-none opacity-0'}"
         >
           <Timeline {duration} {time} trim={false} bind:start bind:end onseek={seek} />
@@ -424,11 +429,11 @@
             <button class="glyph" onclick={toggle} aria-label={paused ? 'Play' : 'Pause'} title="Play/Pause (Space)">
               {#if paused}<Play size={20} fill="currentColor" strokeWidth={0} />{:else}<Pause size={20} fill="currentColor" strokeWidth={0} />{/if}
             </button>
-            <span class="ml-1 text-[13px] tabular-nums">
+            <span class="ml-1 text-secondary tabular-nums">
               {timecode(time)}<span class="text-white/55"> / {timecode(duration)}</span>
             </span>
             <div class="flex-1"></div>
-            <button class="glyph w-auto px-2 text-[13px] font-semibold tabular-nums" onclick={cycleSpeed} title="Playback speed (< >)" aria-label="Playback speed {speed}x">
+            <button class="glyph w-auto px-2 text-secondary font-semibold tabular-nums" onclick={cycleSpeed} title="Playback speed (< >)" aria-label="Playback speed {speed}x">
               {speed}×
             </button>
             <button class="glyph {loop ? 'text-accent' : ''}" onclick={() => (loop = !loop)} title="Repeat (R)" aria-label="Repeat" aria-pressed={loop}>
@@ -442,7 +447,7 @@
                 step="0.05"
                 bind:value={volume}
                 oninput={() => (muted = false)}
-                class="slider w-0 opacity-0 transition-all duration-200"
+                class="slider w-0 opacity-0 transition-[width,opacity] duration-normal"
                 style:--fill="{(muted ? 0 : volume) * 100}%"
                 aria-label="Volume"
               />
@@ -470,14 +475,14 @@
         <button class="glyph text-white" onclick={toggle} aria-label={paused ? 'Play' : 'Pause'} title="Play/Pause (Space)">
           {#if paused}<Play size={20} fill="currentColor" strokeWidth={0} />{:else}<Pause size={20} fill="currentColor" strokeWidth={0} />{/if}
         </button>
-        <span class="w-[132px] flex-none text-[13px] tabular-nums">
+        <span class="w-32 flex-none text-secondary tabular-nums">
           {timecode(time)} <span class="text-muted">/ {timecode(duration)}</span>
         </span>
         <div class="min-w-0 flex-1">
           <Timeline {duration} {time} trim bind:start bind:end onseek={seek} />
         </div>
       </div>
-      <div class="flex items-center gap-5 border-t border-line pt-3 text-[13px]">
+      <div class="flex items-center gap-5 border-t border-line pt-3 text-secondary">
         <button class="action -ml-2 tabular-nums" onclick={() => (start = Math.min(time, end - 0.1))} title="Set start to playhead (I)">
           <span class="text-muted">In</span>&nbsp;{timecode(start)}
         </button>
@@ -492,14 +497,20 @@
           </label>
         {/each}
         <div class="flex-1"></div>
-        <span class="text-muted">Length <span class="font-semibold text-zinc-100 tabular-nums">{timecode(end - start)}</span></span>
-        <button
-          class="btn-primary"
-          disabled={rendering || end - start < 0.1}
-          onclick={() => onrender(start, end, levels.map((l) => l / 100))}
-        >
-          {rendering ? 'Rendering…' : 'Render clip'}
-        </button>
+        <span class="text-muted">Length <span class="font-semibold text-fg tabular-nums">{timecode(end - start)}</span></span>
+        {#if rendering}
+          <div class="flex items-center gap-3">
+            <div class="h-1.5 w-32 overflow-hidden rounded-full bg-line-strong" role="progressbar" aria-valuenow={Math.round(progress * 100)} aria-valuemin={0} aria-valuemax={100}>
+              <div class="h-full rounded-full bg-accent transition-[width] duration-normal" style:width="{progress * 100}%"></div>
+            </div>
+            <span class="w-9 text-fg tabular-nums">{Math.round(progress * 100)}%</span>
+            <button class="btn h-9" onclick={oncancel}>Cancel</button>
+          </div>
+        {:else}
+          <button class="btn-primary" disabled={end - start < 0.1} onclick={() => onrender(start, end, levels.map((l) => l / 100))}>
+            Render clip
+          </button>
+        {/if}
       </div>
     </div>
   {/if}
@@ -507,17 +518,17 @@
 
 {#if help}
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-  <div class="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-[2px]" onclick={() => (help = false)}>
-    <div class="card w-[420px] p-5 shadow-2xl shadow-black/60" onclick={(e) => e.stopPropagation()} role="dialog" aria-label="Keyboard shortcuts" tabindex="-1">
-      <div class="display-face mb-3 text-[17px] font-semibold">Keyboard shortcuts</div>
-      <dl class="grid grid-cols-[auto_1fr] gap-x-5 gap-y-1.5 text-[13px]">
+  <div class="fixed inset-0 z-60 flex items-center justify-center bg-black/60" onclick={() => (help = false)}>
+    <div class="floating w-md p-5" onclick={(e) => e.stopPropagation()} role="dialog" aria-label="Keyboard shortcuts" tabindex="-1">
+      <div class="display-face mb-3 text-title font-semibold">Keyboard shortcuts</div>
+      <dl class="grid grid-cols-[auto_1fr] gap-x-5 gap-y-1.5 text-secondary">
         {#each SHORTCUTS as [keys, what] (keys)}
           <dt class="flex gap-1 whitespace-nowrap">
             {#each keys.split(' / ') as k, i (i)}
               {#if i > 0}<span class="text-muted">/</span>{/if}<kbd>{k}</kbd>
             {/each}
           </dt>
-          <dd class="self-center text-zinc-300">{what}</dd>
+          <dd class="self-center text-fg-2">{what}</dd>
         {/each}
       </dl>
     </div>
@@ -529,15 +540,15 @@
   .action {
     padding: 6px 10px;
     border-radius: var(--radius-ctl);
-    color: #c9cbd2;
+    color: var(--color-fg-2);
     transition:
-      color 0.12s,
-      background 0.12s;
+      color var(--duration-fast),
+      background var(--duration-fast);
   }
 
   .action:hover {
-    color: #fff;
-    background: rgba(255, 255, 255, 0.06);
+    color: var(--color-fg);
+    background: var(--color-raised);
   }
 
   /* Bare icon controls on the video. */
@@ -548,7 +559,7 @@
     width: 34px;
     height: 34px;
     opacity: 0.9;
-    transition: opacity 0.12s;
+    transition: opacity var(--duration-fast);
   }
 
   .glyph:hover {

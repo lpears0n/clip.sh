@@ -14,14 +14,14 @@
 </script>
 
 <div
-  class="toast fixed right-5 bottom-5 z-40 flex items-center gap-3 rounded-[var(--radius-card)] border bg-raised py-2 pr-2 pl-4 text-[14px] font-medium shadow-xl shadow-black/40
-    {data.error ? 'border-danger/50 text-danger' : 'border-line'}"
+  class="toast floating fixed right-5 bottom-5 z-40 flex items-center gap-3 py-2 pr-2 pl-4 text-body font-medium
+    {data.error ? 'border-danger/50 text-danger' : ''}"
   role="status"
   aria-live="polite"
 >
-  <span class="max-w-[420px] truncate">{data.text}</span>
+  <span class="max-w-md truncate">{data.text}</span>
   {#if data.action}
-    <button class="rounded-[var(--radius-ctl)] px-2.5 py-1 font-semibold text-accent hover:bg-white/[0.06]" onclick={data.action.run}>
+    <button class="rounded-ctl px-2.5 py-1 font-semibold text-accent hover:bg-raised" onclick={data.action.run}>
       {data.action.label}
     </button>
   {/if}
@@ -32,7 +32,7 @@
 
 <style>
   .toast {
-    animation: rise 180ms ease-out;
+    animation: rise var(--duration-normal) ease-out;
   }
 
   @keyframes rise {

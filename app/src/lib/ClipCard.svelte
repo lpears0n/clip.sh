@@ -63,8 +63,8 @@
 
 <div class="group min-w-0">
   <div
-    class="relative aspect-video cursor-pointer overflow-hidden rounded-[var(--radius-card)] bg-panel ring-1 transition-shadow ring-inset focus-visible:ring-2 focus-visible:ring-accent focus-visible:outline-none
-      {selected ? 'ring-2 ring-accent' : 'ring-line hover:ring-zinc-500'}"
+    class="relative aspect-video cursor-pointer overflow-hidden rounded-card bg-panel ring-1 transition-shadow duration-fast ring-inset focus-visible:ring-2 focus-visible:ring-accent focus-visible:outline-none
+      {selected ? 'ring-2 ring-accent' : 'ring-line hover:ring-line-strong'}"
     onclick={activate}
     onkeydown={(e) => e.key === 'Enter' && activate()}
     onmouseenter={enter}
@@ -80,11 +80,11 @@
         alt=""
         loading="lazy"
         draggable="false"
-        class="size-full object-cover transition-[filter] duration-200 group-hover:brightness-[0.85]"
+        class="size-full object-cover"
       />
     {:else}
-      <div class="flex size-full items-center justify-center text-zinc-700">
-        <Clapperboard size={28} />
+      <div class="thumb-empty flex size-full items-end justify-start p-3 text-muted/50">
+        <Clapperboard size={20} strokeWidth={1.6} />
       </div>
     {/if}
 
@@ -102,19 +102,19 @@
       ></video>
     {/if}
 
-    <span class="absolute right-2 bottom-2 rounded-[4px] bg-black/80 px-1.5 py-0.5 text-[12px] font-medium text-white tabular-nums">
+    <span class="absolute right-2 bottom-2 rounded-chip bg-black/70 px-1.5 py-0.5 text-caption font-medium text-white tabular-nums">
       {duration(clip.duration)}
     </span>
     {#if clip.is_edit}
-      <span class="absolute bottom-2 left-2 rounded-[4px] bg-black/80 p-1 text-zinc-200" title="Edited clip">
+      <span class="absolute bottom-2 left-2 rounded-chip bg-black/70 p-1 text-fg-2" title="Edited clip">
         <Scissors size={12} />
       </span>
     {/if}
 
     {#if selectable}
       <span
-        class="absolute top-2 left-2 flex size-6 items-center justify-center rounded-full border-2 transition-colors
-          {selected ? 'border-accent bg-accent text-black' : 'border-white/70 bg-black/50 text-transparent'}"
+        class="absolute top-2 left-2 flex size-6 items-center justify-center rounded-full border-2 transition-colors duration-fast
+          {selected ? 'border-accent bg-accent text-on-accent' : 'border-white/70 bg-black/50 text-transparent'}"
         aria-hidden="true"
       >
         <Check size={14} strokeWidth={3} />
@@ -122,7 +122,7 @@
     {:else}
       {#if onfavorite}
         <button
-          class="btn-icon absolute top-2 left-2 bg-black/70 backdrop-blur-sm transition-opacity
+          class="btn-scrim absolute top-2 left-2 transition-opacity duration-fast
             {clip.favorite ? 'text-accent' : 'opacity-0 group-focus-within:opacity-100 group-hover:opacity-100'}"
           onclick={(e) => {
             e.stopPropagation()
@@ -135,9 +135,9 @@
           <Star size={16} fill={clip.favorite ? 'currentColor' : 'none'} />
         </button>
       {/if}
-      <div class="absolute top-2 right-2 flex gap-1 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
+      <div class="absolute top-2 right-2 flex gap-1 opacity-0 transition-opacity duration-fast group-focus-within:opacity-100 group-hover:opacity-100">
         <button
-          class="btn-icon bg-black/70 backdrop-blur-sm"
+          class="btn-scrim"
           onclick={(e) => {
             e.stopPropagation()
             onshare()
@@ -148,7 +148,7 @@
           <FolderOpen size={16} />
         </button>
         <button
-          class="btn-icon {armed ? 'bg-danger text-white hover:bg-danger' : 'bg-black/70 backdrop-blur-sm'}"
+          class="btn-scrim {armed ? 'bg-danger text-white hover:bg-danger' : ''}"
           onclick={(e) => {
             e.stopPropagation()
             if (armed) ondelete()
@@ -163,8 +163,8 @@
     {/if}
   </div>
   <div class="mt-2 flex items-baseline justify-between gap-3 px-0.5">
-    <span class="display-face truncate text-[14px] font-semibold" title={clip.title ? fallback : undefined}>{title}</span>
-    <span class="flex-none text-[12px] text-muted tabular-nums">{subtitle}</span>
+    <span class="display-face truncate text-body font-semibold" title={clip.title ? fallback : undefined}>{title}</span>
+    <span class="flex-none text-caption text-muted tabular-nums">{subtitle}</span>
   </div>
   {#if clip.labels.length}
     <div class="mt-1.5 flex flex-wrap gap-1 px-0.5">

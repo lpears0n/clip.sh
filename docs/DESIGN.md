@@ -353,18 +353,19 @@ Plan, by vendor, all inside the existing GStreamer pipeline:
 
 ## 6. Plan
 
-Ordered so each step is visible on its own.
+Ordered so each step is visible on its own. Steps 1–3 landed first (see
+the commit history); the audit table above describes the UI before them.
 
-1. **Tokens and typography pass** (2–3 days). Introduce the role-based
+1. ~~**Tokens and typography pass**~~ Done. Introduce the role-based
    palette in OKLCH, the 4 px scale and the five type sizes as CSS custom
    properties and Tailwind theme values; delete every arbitrary `[…px]`;
    collapse radii to the nesting rule; remove all `backdrop-filter` and all
    but one shadow; remove `animate-ping`. No feature changes, so the diff
    is reviewable screen by screen with the screenshot harness.
-2. **Navigation and header** (2 days). Labelled sidebar with the storage
+2. ~~**Navigation and header**~~ Done. Labelled sidebar with the storage
    row, header carries view title and recorder state, number keys switch
    views.
-3. **States** (1–2 days). Skeleton grid for first load, designed empty and
+3. ~~**States**~~ Done. Skeleton grid for first load, designed empty and
    error states for every view, progress with cancel for renders.
 4. **Event-driven data** (2 days). Folder watcher, `usage-changed`,
    thumbnail-ready events, delete the three intervals, `$state.raw` for the

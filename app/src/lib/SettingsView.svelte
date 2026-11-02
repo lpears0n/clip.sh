@@ -122,13 +122,13 @@
   })
 </script>
 
-<div class="flex h-full gap-8">
-  <nav class="w-[188px] flex-none space-y-0.5">
+<div class="mx-auto flex h-full max-w-(--container-settings) gap-8">
+  <nav class="w-44 flex-none space-y-0.5">
     {#each categories as c (c)}
       {@const Icon = icons[c]}
       <button
-        class="flex h-9 w-full items-center gap-3 rounded-[var(--radius-ctl)] px-3 text-left text-[14px] font-medium transition-colors
-          {category === c ? 'bg-raised text-white' : 'text-muted hover:bg-white/[0.04] hover:text-zinc-100'}"
+        class="flex h-9 w-full items-center gap-3 rounded-ctl px-3 text-left text-body font-medium transition-colors duration-fast
+          {category === c ? 'bg-raised text-fg' : 'text-fg-2 hover:bg-raised hover:text-fg'}"
         onclick={() => (category = c)}
       >
         <Icon size={16} class={category === c ? 'text-accent' : ''} />
@@ -137,8 +137,8 @@
     {/each}
   </nav>
 
-  <div class="max-w-[760px] min-w-0 flex-1 space-y-6 pb-10">
-    <h2 class="display-face text-[24px] font-semibold">{category}</h2>
+  <div class="min-w-0 flex-1 space-y-6 pb-10">
+    <h2 class="display-face text-page font-semibold">{category}</h2>
 
     {#if category === 'General'}
       <section class="space-y-2">
@@ -197,7 +197,7 @@
             title="Frame rate"
             description={hz ? `Your display runs at ${hz} Hz. Higher rates repeat frames.` : 'Frames per second.'}
           >
-            <select class="field w-[180px]" value={settings.fps} onchange={(e) => update({ fps: Number(e.currentTarget.value) })}>
+            <select class="field w-44" value={settings.fps} onchange={(e) => update({ fps: Number(e.currentTarget.value) })}>
               {#each FPS_OPTIONS as f (f)}
                 <option value={f}>{f} FPS{hz && f > hz + 1 ? ' · above display' : ''}</option>
               {/each}
@@ -215,7 +215,7 @@
               onchange={(e) => update({ bitrate_kbps: Number(e.currentTarget.value) * 1000 })}
               oninput={(e) => e.currentTarget.style.setProperty('--fill', `${((Number(e.currentTarget.value) - 5) / 95) * 100}%`)}
             />
-            <span class="w-[74px] text-right text-[14px] font-medium tabular-nums">{settings.bitrate_kbps / 1000} Mbps</span>
+            <span class="w-20 text-right text-body font-medium tabular-nums">{settings.bitrate_kbps / 1000} Mbps</span>
           </Row>
           <Row
             title="Codec"
@@ -239,7 +239,7 @@
           </Row>
           <Row title="Encoder" description="Hardware encoders cost almost no game performance.">
             <select
-              class="field w-[200px]"
+              class="field w-48"
               value={settings.encoder ?? 'auto'}
               onchange={(e) => {
                 const v = e.currentTarget.value
@@ -255,9 +255,9 @@
             </select>
           </Row>
         </div>
-        <p class="px-1 text-[13px] text-muted">
+        <p class="px-1 text-secondary text-muted">
           A {lengthLabel(settings.replay_seconds)} clip is about
-          <span class="font-medium text-zinc-200">{bytes(clipBytes)}</span>, and the replay buffer holds the same in memory.
+          <span class="font-medium text-fg-2">{bytes(clipBytes)}</span>, and the replay buffer holds the same in memory.
           {#if clipBytes > 2e9}
             <span class="text-accent">That’s a lot of RAM; consider a shorter replay or lower bitrate.</span>
           {/if}
@@ -269,7 +269,7 @@
         <div class="card divide-y divide-line">
           <Row title="Replay length" description="How far back a clip reaches when you press the hotkey.">
             <select
-              class="field w-[180px]"
+              class="field w-44"
               value={settings.replay_seconds}
               onchange={(e) => update({ replay_seconds: Number(e.currentTarget.value) })}
             >
@@ -290,7 +290,7 @@
                 : 'How games are captured.'}
           >
             <select
-              class="field w-[200px]"
+              class="field w-48"
               value={settings.capture_backend ?? 'auto'}
               onchange={(e) => {
                 const v = e.currentTarget.value
@@ -315,7 +315,7 @@
             </Row>
           {/if}
         </div>
-        <p class="px-1 text-[13px] text-muted">
+        <p class="px-1 text-secondary text-muted">
           Recording changes apply from the next game you launch; a new capture method applies after restarting clip.sh.
         </p>
       </section>
@@ -331,7 +331,7 @@
           </Row>
           <Row title="Input device" disabled={!settings.mic}>
             <select
-              class="field w-[260px]"
+              class="field w-64"
               disabled={!settings.mic}
               value={settings.mic_device ?? ''}
               onchange={(e) => update({ mic_device: e.currentTarget.value || null })}
@@ -359,7 +359,7 @@
             </select>
           </Row>
         </div>
-        <p class="px-1 text-[13px] text-muted">Recording changes apply from the next game you launch.</p>
+        <p class="px-1 text-secondary text-muted">Recording changes apply from the next game you launch.</p>
       </section>
     {:else if category === 'Hotkeys'}
       <section class="space-y-2">
@@ -381,12 +381,12 @@
               ? 'Your desktop has no global shortcut service. Bind this command to a key in its keyboard settings.'
               : 'Bind this to any key in your desktop’s keyboard settings, or use it from scripts.'}
           >
-            <code class="rounded-[var(--radius-ctl)] border border-line bg-canvas px-2.5 py-1.5 text-[13px] text-zinc-200">clipsh save</code>
+            <code class="rounded-ctl border border-line bg-canvas px-2.5 py-1.5 text-secondary text-fg-2">clipsh save</code>
             <button class="btn" onclick={copyCommand}>{copied ? 'Copied' : 'Copy'}</button>
           </Row>
         </div>
         {#if hotkeyBackend === 'kglobalaccel'}
-          <p class="px-1 text-[13px] text-muted">Also listed in System Settings → Shortcuts, under clip.sh.</p>
+          <p class="px-1 text-secondary text-muted">Also listed in System Settings → Shortcuts, under clip.sh.</p>
         {/if}
       </section>
     {:else if category === 'Storage'}
@@ -402,18 +402,18 @@
           </Row>
           {#if usage && drive}
             <div class="px-4 py-4">
-              <div class="flex items-baseline justify-between text-[13px]">
-                <span class="font-medium text-zinc-100">Drive</span>
+              <div class="flex items-baseline justify-between text-secondary">
+                <span class="font-medium text-fg">Drive</span>
                 <span class="text-muted tabular-nums">{bytes(usage.disk_free)} free of {bytes(usage.disk_total)}</span>
               </div>
-              <div class="mt-2.5 flex h-1.5 overflow-hidden rounded-full bg-zinc-800">
+              <div class="mt-2.5 flex h-1.5 overflow-hidden rounded-full bg-line">
                 <div class="bg-accent" style:width="{Math.max(drive.clips, usage.clips_bytes ? 0.5 : 0)}%"></div>
-                <div class="bg-zinc-500" style:width="{drive.other}%"></div>
+                <div class="bg-line-strong" style:width="{drive.other}%"></div>
               </div>
-              <div class="mt-2.5 flex gap-5 text-[12px] text-muted">
-                <span class="flex items-center gap-1.5"><span class="size-2 rounded-[2px] bg-accent"></span>Clips · {bytes(usage.clips_bytes)}</span>
-                <span class="flex items-center gap-1.5"><span class="size-2 rounded-[2px] bg-zinc-500"></span>Other files</span>
-                <span class="flex items-center gap-1.5"><span class="size-2 rounded-[2px] bg-zinc-800"></span>Free</span>
+              <div class="mt-2.5 flex gap-5 text-caption text-muted">
+                <span class="flex items-center gap-1.5"><span class="size-2 rounded-xs bg-accent"></span>Clips · {bytes(usage.clips_bytes)}</span>
+                <span class="flex items-center gap-1.5"><span class="size-2 rounded-xs bg-line-strong"></span>Other files</span>
+                <span class="flex items-center gap-1.5"><span class="size-2 rounded-xs bg-line"></span>Free</span>
               </div>
             </div>
           {/if}
@@ -436,7 +436,7 @@
                   if (v >= 1) update({ storage_limit_gb: v })
                 }}
               />
-              <span class="text-[13px] text-muted">GB</span>
+              <span class="text-secondary text-muted">GB</span>
             {/if}
             <select class="field w-[140px]" value={limitChoice} onchange={(e) => chooseLimit(e.currentTarget.value)}>
               <option value="none">No limit</option>
@@ -475,9 +475,9 @@
                   aria-checked={prefs.accent === id}
                   aria-label={a.label}
                   title={a.label}
-                  class="flex size-7 items-center justify-center rounded-full text-black ring-offset-2 ring-offset-panel transition-shadow hover:ring-2 hover:ring-zinc-500
+                  class="flex size-7 items-center justify-center rounded-full text-on-accent ring-offset-2 ring-offset-panel transition-shadow duration-fast hover:ring-2 hover:ring-line-strong
                     {prefs.accent === id ? 'ring-2 ring-white' : ''}"
-                  style:background={a.hex}
+                  style:background={a.css}
                   onclick={() => setPrefs({ accent: id as Accent })}
                 >
                   {#if prefs.accent === id}<Check size={14} strokeWidth={3} />{/if}
@@ -509,7 +509,7 @@
           </Row>
         </div>
       </section>
-      <p class="px-1 text-[13px] text-muted">Appearance settings are stored on this computer only.</p>
+      <p class="px-1 text-secondary text-muted">Appearance settings are stored on this computer only.</p>
     {/if}
   </div>
 </div>
