@@ -1,0 +1,62 @@
+# Builds installers and attaches them to a GitHub release whenever a version
+# tag (v0.2.0) is pushed. Linux ships now; the Windows job is wired up and
+# commented out until the Windows capture backend lands (docs/ROADMAP.md).
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build · ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x86_64
+            os: ubuntu-22.04 # oldest glibc we want the AppImage to run on
+            bundles: appimage,deb,rpm
+          # - name: Windows x86_64
+          #   os: windows-latest
+          #   bundles: nsis,msi
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system libraries (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+            libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf \
+            libxdo-dev libssl-dev
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: '. -> target'
+      - run: pnpm install --frozen-lockfile
+        working-directory: app
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: app
+          args: --bundles ${{ matrix.bundles }}
+          tagName: ${{ github.ref_name }}
+          releaseName: clip.sh ${{ github.ref_name }}
+          releaseBody: See the changelog in the release notes.
+          releaseDraft: true
+          prerelease: ${{ contains(github.ref_name, '-') }}

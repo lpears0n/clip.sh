@@ -1,14 +1,15 @@
 <script lang="ts" module>
-  export const categories = ['General', 'Recording', 'Audio', 'Hotkeys', 'Storage'] as const
+  export const categories = ['General', 'Recording', 'Audio', 'Hotkeys', 'Storage', 'Appearance'] as const
   export type Category = (typeof categories)[number]
 </script>
 
 <script lang="ts">
-  import { AudioLines, FolderOpen, HardDrive, Keyboard, SlidersHorizontal, Video } from '@lucide/svelte'
+  import { AudioLines, Check, FolderOpen, HardDrive, Keyboard, Palette, SlidersHorizontal, Video } from '@lucide/svelte'
   import { open as openDialog } from '@tauri-apps/plugin-dialog'
   import { api, type Capabilities, type Codec, type Encoder, type Settings, type Status, type Usage } from './api'
   import { bytes } from './format'
   import HotkeyBinder from './HotkeyBinder.svelte'
+  import { ACCENTS, type Accent, prefs, setPrefs } from './prefs.svelte'
   import {
     CODEC_LABEL,
     ENCODER_LABEL,
@@ -58,6 +59,7 @@
     Audio: AudioLines,
     Hotkeys: Keyboard,
     Storage: HardDrive,
+    Appearance: Palette,
   }
 
   const lengths = [15, 30, 60, 120, 180, 300]
@@ -387,7 +389,7 @@
           <p class="px-1 text-[13px] text-muted">Also listed in System Settings → Shortcuts, under clip.sh.</p>
         {/if}
       </section>
-    {:else}
+    {:else if category === 'Storage'}
       <section class="space-y-2">
         <h3 class="section-title px-1">Location</h3>
         <div class="card divide-y divide-line">
@@ -461,6 +463,53 @@
           </Row>
         </div>
       </section>
+    {:else if category === 'Appearance'}
+      <section class="space-y-2">
+        <h3 class="section-title px-1">Theme</h3>
+        <div class="card divide-y divide-line">
+          <Row title="Accent colour" description="Used for buttons, the record button and the trim range.">
+            <div class="flex items-center gap-2" role="radiogroup" aria-label="Accent colour">
+              {#each Object.entries(ACCENTS) as [id, a] (id)}
+                <button
+                  role="radio"
+                  aria-checked={prefs.accent === id}
+                  aria-label={a.label}
+                  title={a.label}
+                  class="flex size-7 items-center justify-center rounded-full text-black ring-offset-2 ring-offset-panel transition-shadow hover:ring-2 hover:ring-zinc-500
+                    {prefs.accent === id ? 'ring-2 ring-white' : ''}"
+                  style:background={a.hex}
+                  onclick={() => setPrefs({ accent: id as Accent })}
+                >
+                  {#if prefs.accent === id}<Check size={14} strokeWidth={3} />{/if}
+                </button>
+              {/each}
+            </div>
+          </Row>
+          <Row title="Card size" description="How many clips fit across the library.">
+            <Segmented
+              label="Card size"
+              value={prefs.density}
+              onchange={(density) => setPrefs({ density })}
+              options={[
+                { value: 'comfortable', label: 'Comfortable' },
+                { value: 'compact', label: 'Compact' },
+              ]}
+            />
+          </Row>
+        </div>
+      </section>
+      <section class="space-y-2">
+        <h3 class="section-title px-1">Motion</h3>
+        <div class="card divide-y divide-line">
+          <Row title="Preview clips on hover" description="Play a silent preview when the pointer rests on a clip.">
+            <Toggle label="Preview clips on hover" checked={prefs.hoverPreviews} onchange={(hoverPreviews) => setPrefs({ hoverPreviews })} />
+          </Row>
+          <Row title="Reduce motion" description="Turn off animations and transitions. Follows your system setting when off.">
+            <Toggle label="Reduce motion" checked={prefs.reduceMotion} onchange={(reduceMotion) => setPrefs({ reduceMotion })} />
+          </Row>
+        </div>
+      </section>
+      <p class="px-1 text-[13px] text-muted">Appearance settings are stored on this computer only.</p>
     {/if}
   </div>
 </div>

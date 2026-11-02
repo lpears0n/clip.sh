@@ -349,7 +349,15 @@ mod tests {
             .env("SteamAppId", "424242")
             .spawn()
             .unwrap();
-        let games = running_games();
+        // The child may not have exec'd by the first scan; give it a moment.
+        let mut games = Vec::new();
+        for _ in 0..40 {
+            games = running_games();
+            if games.iter().any(|g| g.steam_app_id == Some(424242)) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
         child.kill().unwrap();
         let _ = child.wait();
         assert!(

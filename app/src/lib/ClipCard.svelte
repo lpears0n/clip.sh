@@ -1,38 +1,73 @@
 <script lang="ts">
-  import { Clapperboard, FolderOpen, Scissors, Trash2 } from '@lucide/svelte'
-  import { type Clip, fileUrl } from './api'
+  import { Check, Clapperboard, FolderOpen, Scissors, Trash2 } from '@lucide/svelte'
+  import { type Clip, fileUrl, videoUrl } from './api'
   import { date, duration } from './format'
+  import { prefs } from './prefs.svelte'
 
   let {
     clip,
     title = clip.game,
     subtitle = date(clip.created_ms),
+    selectable = false,
+    selected = false,
     onopen,
     ondelete,
     onshare,
+    onselect,
   }: {
     clip: Clip
     /** Defaults to the game name; game pages show the time instead. */
     title?: string
     subtitle?: string
+    /** Selection mode: clicking toggles selection instead of opening. */
+    selectable?: boolean
+    selected?: boolean
     onopen: () => void
     ondelete: () => void
     onshare: () => void
+    onselect?: () => void
   } = $props()
 
   // First click arms the delete button, second deletes.
   let armed = $state(false)
+
+  // Hover preview: after the pointer rests a moment, a muted video plays
+  // in place of the thumbnail (Medal calls these quick previews).
+  let previewing = $state(false)
+  let previewTimer: ReturnType<typeof setTimeout>
+
+  function enter() {
+    if (!prefs.hoverPreviews || prefs.reduceMotion) return
+    clearTimeout(previewTimer)
+    previewTimer = setTimeout(() => (previewing = true), 450)
+  }
+
+  function leave() {
+    clearTimeout(previewTimer)
+    previewing = false
+    armed = false
+  }
+
+  function activate() {
+    if (selectable) onselect?.()
+    else onopen()
+  }
+
+  $effect(() => () => clearTimeout(previewTimer))
 </script>
 
 <div class="group min-w-0">
   <div
-    class="relative aspect-video cursor-pointer overflow-hidden rounded-[var(--radius-card)] bg-panel ring-1 ring-line transition-shadow ring-inset hover:ring-zinc-500 focus-visible:ring-2 focus-visible:ring-accent focus-visible:outline-none"
-    onclick={onopen}
-    onkeydown={(e) => e.key === 'Enter' && onopen()}
-    onmouseleave={() => (armed = false)}
+    class="relative aspect-video cursor-pointer overflow-hidden rounded-[var(--radius-card)] bg-panel ring-1 transition-shadow ring-inset focus-visible:ring-2 focus-visible:ring-accent focus-visible:outline-none
+      {selected ? 'ring-2 ring-accent' : 'ring-line hover:ring-zinc-500'}"
+    onclick={activate}
+    onkeydown={(e) => e.key === 'Enter' && activate()}
+    onmouseenter={enter}
+    onmouseleave={leave}
     role="button"
     tabindex="0"
-    aria-label="Open {clip.game} clip from {date(clip.created_ms)}"
+    aria-pressed={selectable ? selected : undefined}
+    aria-label="{selectable ? 'Select' : 'Open'} {clip.game} clip from {date(clip.created_ms)}"
   >
     {#if clip.thumbnail}
       <img
@@ -48,6 +83,20 @@
       </div>
     {/if}
 
+    {#if previewing}
+      <!-- svelte-ignore a11y_media_has_caption -->
+      <video
+        src={videoUrl(clip.path)}
+        class="absolute inset-0 size-full object-cover"
+        muted
+        autoplay
+        loop
+        playsinline
+        preload="metadata"
+        draggable="false"
+      ></video>
+    {/if}
+
     <span class="absolute right-2 bottom-2 rounded-[4px] bg-black/80 px-1.5 py-0.5 text-[12px] font-medium text-white tabular-nums">
       {duration(clip.duration)}
     </span>
@@ -57,31 +106,41 @@
       </span>
     {/if}
 
-    <div class="absolute top-2 right-2 flex gap-1 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
-      <button
-        class="btn-icon bg-black/70 backdrop-blur-sm"
-        onclick={(e) => {
-          e.stopPropagation()
-          onshare()
-        }}
-        title="Show in folder"
-        aria-label="Show in folder"
+    {#if selectable}
+      <span
+        class="absolute top-2 left-2 flex size-6 items-center justify-center rounded-full border-2 transition-colors
+          {selected ? 'border-accent bg-accent text-black' : 'border-white/70 bg-black/50 text-transparent'}"
+        aria-hidden="true"
       >
-        <FolderOpen size={16} />
-      </button>
-      <button
-        class="btn-icon {armed ? 'bg-danger text-white hover:bg-danger' : 'bg-black/70 backdrop-blur-sm'}"
-        onclick={(e) => {
-          e.stopPropagation()
-          if (armed) ondelete()
-          else armed = true
-        }}
-        title={armed ? 'Click again to delete' : 'Delete'}
-        aria-label={armed ? 'Confirm delete' : 'Delete'}
-      >
-        <Trash2 size={16} />
-      </button>
-    </div>
+        <Check size={14} strokeWidth={3} />
+      </span>
+    {:else}
+      <div class="absolute top-2 right-2 flex gap-1 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
+        <button
+          class="btn-icon bg-black/70 backdrop-blur-sm"
+          onclick={(e) => {
+            e.stopPropagation()
+            onshare()
+          }}
+          title="Show in folder"
+          aria-label="Show in folder"
+        >
+          <FolderOpen size={16} />
+        </button>
+        <button
+          class="btn-icon {armed ? 'bg-danger text-white hover:bg-danger' : 'bg-black/70 backdrop-blur-sm'}"
+          onclick={(e) => {
+            e.stopPropagation()
+            if (armed) ondelete()
+            else armed = true
+          }}
+          title={armed ? 'Click again to delete' : 'Delete'}
+          aria-label={armed ? 'Confirm delete' : 'Delete'}
+        >
+          <Trash2 size={16} />
+        </button>
+      </div>
+    {/if}
   </div>
   <div class="mt-2 flex items-baseline justify-between gap-3 px-0.5">
     <span class="display-face truncate text-[14px] font-semibold">{title}</span>

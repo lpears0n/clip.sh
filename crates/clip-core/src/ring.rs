@@ -120,6 +120,9 @@ fn is_keyframe(buffer: &gst::BufferRef) -> bool {
     !buffer.flags().contains(gst::BufferFlags::DELTA_UNIT)
 }
 
+/// How far past the requested start a keyframe may sit and still be used.
+const SNAP_TOLERANCE: gst::ClockTime = gst::ClockTime::from_mseconds(1);
+
 /// The replay buffer: one video track plus any number of audio tracks.
 #[derive(Debug)]
 pub struct ReplayBuffer {
@@ -175,7 +178,10 @@ impl ReplayBuffer {
         let video = &self.video;
         let caps = video.caps.clone().context("no video received yet")?;
         let end = video.newest_end().context("no video received yet")?;
-        let want = end.saturating_sub(duration);
+        // Timestamps carry rounding noise (1/30 s isn't a whole number of
+        // nanoseconds), so a keyframe sitting a hair after the exact point
+        // still counts; otherwise it would cost a whole GOP of extra footage.
+        let want = end.saturating_sub(duration) + SNAP_TOLERANCE;
         let start_idx = video
             .keyframe_at_or_before(want)
             .context("no keyframe buffered yet")?;

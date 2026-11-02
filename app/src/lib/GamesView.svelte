@@ -1,18 +1,28 @@
 <script lang="ts">
-  import { type GameEntry, fileUrl } from './api'
+  import { Check, CircleAlert, FolderOpen, Keyboard, MonitorPlay } from '@lucide/svelte'
+  import { type GameEntry, type Settings, type Status, fileUrl } from './api'
   import { ago, playtime } from './format'
   import GameCover from './GameCover.svelte'
+  import type { Category } from './SettingsView.svelte'
 
   let {
     games,
     loading,
     hotkey,
+    status,
+    settings,
     onopen,
+    onchoosescreen,
+    onsettings,
   }: {
     games: GameEntry[]
     loading: boolean
     hotkey: string
+    status: Status | null
+    settings: Settings | null
     onopen: (g: GameEntry) => void
+    onchoosescreen: () => void
+    onsettings: (c: Category) => void
   } = $props()
 
   const hero = $derived(games[0] ?? null)
@@ -43,6 +53,18 @@
     if (g.playing) return `Playing now · ${clips}`
     return g.last_played_ms ? `${ago(g.last_played_ms)} · ${clips}` : clips
   }
+
+  // First-run checklist: capture, hotkey, where clips go.
+  const capture = $derived.by(() => {
+    if (!status) return { ok: false, text: 'Starting the recorder…' }
+    if (status.needs_screen) return { ok: false, text: 'Choose which screen to record.', action: 'screen' as const }
+    if (status.state === 'unavailable') return { ok: false, text: status.error ?? 'Capture unavailable.', action: 'recording' as const }
+    return {
+      ok: true,
+      text: status.backend === 'kwin' ? 'Game windows are captured directly, no prompts.' : 'Capturing the screen you chose.',
+    }
+  })
+  const folder = $derived(settings?.clips_dir.replace(/^\/home\/[^/]+/, '~') ?? '…')
 </script>
 
 {#if hero}
@@ -97,10 +119,47 @@
     </section>
   </div>
 {:else if !loading}
-  <div class="flex h-full flex-col items-center justify-center text-center">
-    <h1 class="display-face text-[28px] font-semibold">Play something.</h1>
-    <p class="mt-3 max-w-[440px] text-[15px] text-muted">
-      Games you play show up here. Press <kbd class="align-[1px]">{hotkey}</kbd> while playing to keep the last moments.
+  <div class="mx-auto flex h-full max-w-[640px] flex-col justify-center">
+    <h1 class="display-face text-[30px] font-semibold">Play something.</h1>
+    <p class="mt-2 text-[15px] text-muted">
+      Games you play show up here. clip.sh keeps the last {settings ? settings.replay_seconds : 30} seconds in memory while
+      you play, so a moment is never lost.
+    </p>
+
+    <ol class="card mt-8 divide-y divide-line">
+      <li class="flex items-center gap-4 px-5 py-4">
+        <span class="flex size-9 flex-none items-center justify-center rounded-full {capture.ok ? 'bg-ok/15 text-ok' : 'bg-accent/15 text-accent'}">
+          {#if capture.ok}<Check size={18} />{:else}<CircleAlert size={18} />{/if}
+        </span>
+        <div class="min-w-0 flex-1">
+          <div class="flex items-center gap-2 text-[14px] font-medium"><MonitorPlay size={15} class="text-muted" /> Capture</div>
+          <div class="mt-0.5 truncate text-[13px] text-muted" title={capture.text}>{capture.text}</div>
+        </div>
+        {#if capture.action === 'screen'}
+          <button class="btn h-8 border-accent/60 text-accent" onclick={onchoosescreen}>Choose screen</button>
+        {:else if capture.action === 'recording'}
+          <button class="btn h-8" onclick={() => onsettings('Recording')}>Recording settings</button>
+        {/if}
+      </li>
+      <li class="flex items-center gap-4 px-5 py-4">
+        <span class="flex size-9 flex-none items-center justify-center rounded-full bg-ok/15 text-ok"><Check size={18} /></span>
+        <div class="min-w-0 flex-1">
+          <div class="flex items-center gap-2 text-[14px] font-medium"><Keyboard size={15} class="text-muted" /> Save a clip</div>
+          <div class="mt-0.5 text-[13px] text-muted">Press <kbd class="align-[1px]">{hotkey}</kbd> in any game. Change it under Hotkeys.</div>
+        </div>
+        <button class="btn h-8" onclick={() => onsettings('Hotkeys')}>Change</button>
+      </li>
+      <li class="flex items-center gap-4 px-5 py-4">
+        <span class="flex size-9 flex-none items-center justify-center rounded-full bg-ok/15 text-ok"><Check size={18} /></span>
+        <div class="min-w-0 flex-1">
+          <div class="flex items-center gap-2 text-[14px] font-medium"><FolderOpen size={15} class="text-muted" /> Clips folder</div>
+          <div class="mt-0.5 truncate text-[13px] text-muted" title={settings?.clips_dir}>{folder}</div>
+        </div>
+        <button class="btn h-8" onclick={() => onsettings('Storage')}>Change</button>
+      </li>
+    </ol>
+    <p class="mt-4 text-[13px] text-muted">
+      You can also drop any video onto this window to trim it.
     </p>
   </div>
 {/if}

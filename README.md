@@ -31,18 +31,36 @@ To build a release binary instead, use `pnpm tauri build`. There's also a small 
 - **ashpd** for the portal calls, and **zbus** for the KDE and notification D-Bus stuff.
 - **Tailwind 4** for styling, plus Lucide icons.
 
+## Using it
+
+- **Games** shows what you've played, with a hero for the most recent game.
+- **All clips** has search (`Ctrl+F`), sorting, a game filter and a selection
+  mode for deleting many clips at once. Deletes can be undone for a few
+  seconds from the toast.
+- Hover a clip for a silent preview; open it to watch or trim. Press `?` in
+  the viewer for every keyboard shortcut (speed, frame stepping, in/out
+  points, repeat).
+- **Settings → Appearance** picks the accent colour and card size, and turns
+  off hover previews or motion.
+
 The whole thing is a Cargo workspace: `crates/clip-core` has the capture and encoding code with no UI, `crates/clip-ipc` and `crates/clip-cli` are the `clipsh` command, and `app/` is the Tauri app.
 
 ## Current state / What's next
 
 It works, but it's a lot of hacky glue and I've only really tested it on my own machine, which is KDE Plasma 6 on Wayland with an NVIDIA card.
 
+There's a roadmap with the research behind it in [docs/ROADMAP.md](docs/ROADMAP.md):
+what's planned for the library and editor, how a Windows port would work
+(GStreamer's Windows Graphics Capture and WASAPI elements, so the ring
+buffer and trimmer carry over), and packaging. CI builds and lints every
+push; tagging `v*` builds AppImage, deb and rpm as a draft release.
+
 Known problems:
 - **Recordings can stutter under heavy GPU load.** When the game is using the GPU hard, the compositor delivers fewer frames, and the encoder duplicates some of them to keep a constant frame rate. The playback in the app is fine, the loss happens during capture.
 - **Only KDE gets prompt-free window capture.** On GNOME and Hyprland you get a one-time screen-share prompt instead. That part is only partly tested.
 - **The portal hotkey path isn't tested** on a real desktop yet.
 - **X11 isn't supported.** There's no capture backend for it.
-- **Not packaged.** No AUR package or AppImage yet, so you build it yourself.
+- **Not packaged yet.** The release workflow and an AUR `PKGBUILD` (under `packaging/`) are in place but no release has been tagged.
 - **Storage limits are a soft cap.** Old clips get deleted after a save if you go over, and the Trash option is on by default so you can recover them.
 
 What I'd do next, if I had more time: zero-copy capture for high frame rates (the current path copies every frame through system memory), the `ext-image-copy-capture` protocol for window capture on wlroots desktops, X11 support, and a proper package.

@@ -471,6 +471,17 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        // Remember the window's size and position between launches. The
+        // window starts hidden and VISIBLE is skipped so a tray launch stays
+        // in the tray.
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(
+                    tauri_plugin_window_state::StateFlags::all()
+                        - tauri_plugin_window_state::StateFlags::VISIBLE,
+                )
+                .build(),
+        )
         .setup(|app| {
             let settings = Settings::load();
             let media = tauri::async_runtime::block_on(media_server::MediaServer::start())?;

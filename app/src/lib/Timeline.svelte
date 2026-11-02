@@ -156,7 +156,7 @@
     bottom: 0;
     border-top: 2px solid var(--color-accent);
     border-bottom: 2px solid var(--color-accent);
-    background: rgba(255, 122, 26, 0.08);
+    background: color-mix(in srgb, var(--color-accent) 8%, transparent);
   }
 
   .handle {

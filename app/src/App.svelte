@@ -22,12 +22,16 @@
   import GamesView from './lib/GamesView.svelte'
   import GameView from './lib/GameView.svelte'
   import NavButton from './lib/NavButton.svelte'
+  import { applyPrefs, prefs } from './lib/prefs.svelte'
   import SettingsView, { type Category } from './lib/SettingsView.svelte'
   import StatusBar from './lib/StatusBar.svelte'
   import StorageRing from './lib/StorageRing.svelte'
+  import Toast, { type ToastData } from './lib/Toast.svelte'
 
   type View = 'games' | 'game' | 'clips' | 'settings'
   const VIDEO = /\.(mp4|mkv|mov|webm)$/i
+  /** How long a deleted clip can be brought back from the toast. */
+  const UNDO_MS = 6000
 
   let view = $state<View>('games')
   /** The game page being shown, by name (entries are refreshed often). */
@@ -40,23 +44,33 @@
   let settings = $state<Settings | null>(null)
   let usage = $state<Usage | null>(null)
   let caps = $state<Capabilities | null>(null)
-  let clips = $state<Clip[]>([])
+  let allClips = $state<Clip[]>([])
   let games = $state<GameEntry[]>([])
   let loading = $state(true)
   let rendering = $state(false)
   let dragging = $state(false)
   let saving = $state(false)
   let flash = $state(false)
-  let toast = $state<{ text: string; error?: boolean } | null>(null)
+  let toast = $state<ToastData | null>(null)
   let toastTimer: ReturnType<typeof setTimeout>
+
+  // Deletes are deferred so they can be undone; the clips vanish from the
+  // UI at once and are only removed from disk when the toast expires.
+  let pending = $state<{ clips: Clip[]; timer: ReturnType<typeof setTimeout> }[]>([])
+  const hidden = $derived(new Set(pending.flatMap((p) => p.clips.map((c) => c.path))))
+  const clips = $derived(hidden.size ? allClips.filter((c) => !hidden.has(c.path)) : allClips)
 
   const game = $derived(games.find((g) => g.name === gameName) ?? null)
   const hotkey = $derived(settings?.hotkey ?? 'F8')
 
   function notify(text: string, error = false) {
-    toast = { text, error }
+    showToast({ text, error })
+  }
+
+  function showToast(t: ToastData, ms = 3000) {
+    toast = t
     clearTimeout(toastTimer)
-    toastTimer = setTimeout(() => (toast = null), 3000)
+    toastTimer = setTimeout(() => (toast = null), ms)
   }
 
   function go(v: View) {
@@ -67,7 +81,7 @@
   async function refreshLibrary() {
     try {
       // Fetch clips first: listing them generates the thumbnails games use.
-      clips = await api.clips()
+      allClips = await api.clips()
       games = await api.games()
     } catch (e) {
       notify(String(e), true)
@@ -131,16 +145,35 @@
     }
   }
 
-  async function remove(clip: Clip) {
-    try {
-      await api.deleteClip(clip.path)
-      clips = clips.filter((c) => c.path !== clip.path)
-      if (viewing?.path === clip.path) viewing = null
-      refreshLibrary()
-      refreshUsage()
-    } catch (e) {
-      notify(String(e), true)
+  /** Hide the clips now; delete them for real when the undo window closes. */
+  function remove(list: Clip[]) {
+    if (!list.length) return
+    if (viewing && list.some((c) => c.path === viewing!.path)) viewing = null
+    const entry = { clips: list, timer: setTimeout(() => commit(entry), UNDO_MS) }
+    pending = [...pending, entry]
+    const label = list.length === 1 ? `Deleted ${list[0].game} clip` : `Deleted ${list.length} clips`
+    showToast({ text: label, action: { label: 'Undo', run: () => undo(entry) } }, UNDO_MS)
+  }
+
+  function undo(entry: (typeof pending)[number]) {
+    clearTimeout(entry.timer)
+    pending = pending.filter((p) => p !== entry)
+    toast = null
+  }
+
+  async function commit(entry: (typeof pending)[number]) {
+    pending = pending.filter((p) => p !== entry)
+    const failed: string[] = []
+    for (const c of entry.clips) {
+      try {
+        await api.deleteClip(c.path)
+      } catch (e) {
+        failed.push(String(e))
+      }
     }
+    if (failed.length) notify(failed[0], true)
+    refreshLibrary()
+    refreshUsage()
   }
 
   /** Throws so the hotkey binder can show the reason. */
@@ -161,10 +194,12 @@
     }
   }
 
-  function manageStorage() {
-    category = 'Storage'
+  function openSettings(c: Category) {
+    category = c
     go('settings')
   }
+
+  $effect(() => applyPrefs(prefs))
 
   onMount(() => {
     initMedia()
@@ -202,9 +237,13 @@
         }
       }),
     ]
+    const motion = matchMedia('(prefers-reduced-motion: reduce)')
+    const onMotion = () => applyPrefs(prefs)
+    motion.addEventListener('change', onMotion)
     return () => {
       polls.forEach(clearInterval)
       unlisten.forEach((u) => u.then((f) => f()))
+      motion.removeEventListener('change', onMotion)
     }
   })
 </script>
@@ -226,7 +265,7 @@
       />
       <NavButton icon={Clapperboard} label="All clips" active={!viewing && view === 'clips'} onclick={() => go('clips')} />
       <div class="flex-1"></div>
-      <StorageRing {usage} onmanage={manageStorage} />
+      <StorageRing {usage} onmanage={() => openSettings('Storage')} />
       <NavButton icon={Gear} label="Settings" active={!viewing && view === 'settings'} onclick={() => go('settings')} />
     </nav>
 
@@ -238,7 +277,7 @@
             {rendering}
             onback={() => (viewing = null)}
             onrender={render}
-            ondelete={() => viewing && remove(viewing)}
+            ondelete={() => viewing && remove([viewing])}
             onshare={() => viewing && api.reveal(viewing.path)}
           />
         {:else if view === 'game' && game}
@@ -247,7 +286,7 @@
             {clips}
             onback={() => go('games')}
             onopen={(c) => open(c.path)}
-            ondelete={remove}
+            ondelete={(c) => remove([c])}
             onshare={(c) => api.reveal(c.path)}
           />
         {:else if view === 'clips'}
@@ -256,7 +295,8 @@
             {loading}
             {hotkey}
             onopen={(c) => open(c.path)}
-            ondelete={remove}
+            ondelete={(c) => remove([c])}
+            ondeletemany={remove}
             onshare={(c) => api.reveal(c.path)}
           />
         {:else if view === 'settings' && settings}
@@ -266,10 +306,14 @@
             {games}
             {loading}
             {hotkey}
+            {status}
+            {settings}
             onopen={(g) => {
               gameName = g.name
               go('game')
             }}
+            onchoosescreen={chooseScreen}
+            onsettings={openSettings}
           />
         {/if}
       </div>
@@ -291,10 +335,5 @@
 {/if}
 
 {#if toast}
-  <div
-    class="fixed right-5 bottom-5 z-40 rounded-[var(--radius-card)] border bg-raised px-4 py-2.5 text-[14px] font-medium shadow-xl shadow-black/40
-      {toast.error ? 'border-danger/50 text-danger' : 'border-line'}"
-  >
-    {toast.text}
-  </div>
+  <Toast data={toast} onclose={() => (toast = null)} />
 {/if}

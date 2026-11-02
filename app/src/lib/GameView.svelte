@@ -73,7 +73,7 @@
         <span class="section-title">{day.label}</span>
         {#if day.played}<span class="text-[13px] text-muted">Played {playtime(day.played)}</span>{/if}
       </h2>
-      <div class="grid grid-cols-1 gap-x-4 gap-y-5 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+      <div class="clip-grid grid gap-x-4 gap-y-5">
         {#each day.clips as c (c.path)}
           <ClipCard
             clip={c}

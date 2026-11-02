@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=clip.sh
+GenericName=Instant Replay Recorder
+Comment=Keep the last moments of your game with one key
+Exec=clip-sh %U
+Icon=clip-sh
+Terminal=false
+Categories=AudioVideo;Video;Recorder;Game;
+Keywords=clip;replay;record;shadowplay;medal;game;
+StartupWMClass=clip.sh
+MimeType=video/mp4;video/x-matroska;video/webm;

@@ -96,7 +96,7 @@
 }
 
 @utility btn-primary {
-  @apply inline-flex h-9 items-center justify-center gap-2 rounded-[var(--radius-ctl)] bg-accent px-4 text-[14px] font-semibold text-black transition-colors hover:bg-[#ff8c38] disabled:cursor-default disabled:bg-raised disabled:text-muted disabled:ring-1 disabled:ring-line disabled:ring-inset;
+  @apply inline-flex h-9 items-center justify-center gap-2 rounded-[var(--radius-ctl)] bg-accent px-4 text-[14px] font-semibold text-black transition-colors hover:brightness-110 disabled:cursor-default disabled:bg-raised disabled:text-muted disabled:ring-1 disabled:ring-line disabled:ring-inset;
 }
 
 @utility btn-icon {
@@ -119,6 +119,22 @@
 
 @utility section-title {
   @apply display-face text-[15px] font-semibold text-zinc-100;
+}
+
+/* Clip grids: as many cards as fit at the chosen density (Appearance settings). */
+@utility clip-grid {
+  grid-template-columns: repeat(auto-fill, minmax(var(--card-min, 300px), 1fr));
+}
+
+/* Reduced motion (system preference or the Appearance toggle): keep layout
+   changes instant, but leave opacity fades, which don't cause discomfort. */
+[data-reduce-motion] *,
+[data-reduce-motion] *::before,
+[data-reduce-motion] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
 }
 
 ::-webkit-scrollbar {

@@ -28,3 +28,4 @@ trash = "5"
 rustix = { version = "1", features = ["fs"] }
 zbus = { version = "5", default-features = false, features = ["tokio"] }
 clip-ipc = { version = "0.1.0", path = "../../crates/clip-ipc" }
+tauri-plugin-window-state = "2"

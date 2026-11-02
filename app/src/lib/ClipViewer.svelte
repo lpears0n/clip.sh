@@ -3,7 +3,7 @@
   Playback controls overlay the video's bottom edge and hide while playing.
 -->
 <script lang="ts">
-  import { ArrowLeft, Maximize, Minimize, Pause, Play, Volume2, VolumeX } from '@lucide/svelte'
+  import { ArrowLeft, CircleHelp, Maximize, Minimize, Pause, Play, Repeat, Volume2, VolumeX } from '@lucide/svelte'
   import { getCurrentWindow } from '@tauri-apps/api/window'
   import { type Clip, videoUrl } from './api'
   import { clock, dayLabel, size, timecode, trackName } from './format'
@@ -40,6 +40,12 @@
   /** Percent per audio track. */
   let levels = $state<number[]>([])
   let armed = $state(false)
+  let speed = $state(1)
+  let loop = $state(false)
+  let help = $state(false)
+  const SPEEDS = [0.25, 0.5, 1, 1.5, 2]
+  /** One frame at 60 fps; fine enough to land on a moment. */
+  const FRAME = 1 / 60
 
   // Controls show while paused, or briefly after the pointer moves.
   let active = $state(true)
@@ -71,9 +77,40 @@
     time = video.currentTime
     // While trimming, preview only the selection.
     if (trimming && !paused && time >= end) {
-      video.pause()
-      video.currentTime = start
+      if (loop) seek(start)
+      else {
+        video.pause()
+        video.currentTime = start
+      }
     }
+  }
+
+  function ended() {
+    if (loop) {
+      seek(trimming ? start : 0)
+      video.play()
+    }
+  }
+
+  function step(frames: number) {
+    video.pause()
+    seek(Math.min(duration, Math.max(0, time + frames * FRAME)))
+    poke()
+  }
+
+  function setSpeed(v: number) {
+    speed = v
+    video.playbackRate = v
+    poke()
+  }
+
+  function cycleSpeed() {
+    setSpeed(SPEEDS[(SPEEDS.indexOf(speed) + 1) % SPEEDS.length])
+  }
+
+  function nudgeSpeed(dir: 1 | -1) {
+    const i = Math.min(SPEEDS.length - 1, Math.max(0, SPEEDS.indexOf(speed) + dir))
+    setSpeed(SPEEDS[i])
   }
 
   function seek(t: number) {
@@ -102,6 +139,7 @@
 
   function onkeydown(e: KeyboardEvent) {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return
+    if (help && e.code !== 'Escape' && e.key !== '?') return
     if (e.code === 'Space' || e.code === 'KeyK') {
       e.preventDefault()
       toggle()
@@ -109,8 +147,11 @@
       setFullscreen(!fullscreen)
     } else if (e.code === 'KeyM') {
       muted = !muted
+    } else if (e.key === '?') {
+      help = !help
     } else if (e.code === 'Escape') {
-      if (fullscreen) setFullscreen(false)
+      if (help) help = false
+      else if (fullscreen) setFullscreen(false)
       else if (trimming) trimming = false
       else onback()
     } else if (e.code === 'ArrowLeft') {
@@ -119,12 +160,53 @@
     } else if (e.code === 'ArrowRight') {
       seek(Math.min(duration, time + 5))
       poke()
+    } else if (e.code === 'KeyJ') {
+      seek(Math.max(0, time - 10))
+      poke()
+    } else if (e.code === 'KeyL') {
+      seek(Math.min(duration, time + 10))
+      poke()
+    } else if (e.code === 'Home') {
+      seek(trimming ? start : 0)
+      poke()
+    } else if (e.code === 'End') {
+      seek(trimming ? end : duration)
+      poke()
+    } else if (e.key === ',') {
+      step(-1)
+    } else if (e.key === '.') {
+      step(1)
+    } else if (e.key === '<') {
+      nudgeSpeed(-1)
+    } else if (e.key === '>') {
+      nudgeSpeed(1)
+    } else if (e.code === 'KeyR') {
+      loop = !loop
+      poke()
+    } else if (e.code === 'KeyT') {
+      trimming = !trimming
     } else if (trimming && e.code === 'KeyI') {
       start = Math.min(time, end - 0.1)
     } else if (trimming && e.code === 'KeyO') {
       end = Math.max(time, start + 0.1)
     }
   }
+
+  const SHORTCUTS: [string, string][] = [
+    ['Space / K', 'Play or pause'],
+    ['J / L', 'Back or forward 10 s'],
+    ['← / →', 'Back or forward 5 s'],
+    [', / .', 'Previous or next frame'],
+    ['< / >', 'Slower or faster'],
+    ['Home / End', 'Jump to start or end'],
+    ['R', 'Repeat'],
+    ['M', 'Mute'],
+    ['F', 'Fullscreen'],
+    ['T', 'Trim'],
+    ['I / O', 'Set trim start / end'],
+    ['Esc', 'Back'],
+    ['?', 'This list'],
+  ]
 
   // The <video> element plays the first audio track; mirror its level when trimming.
   $effect(() => {
@@ -153,7 +235,7 @@
       </div>
     </div>
     <div class="flex items-center text-[14px] font-medium">
-      <button class="action {trimming ? 'text-accent' : ''}" onclick={() => (trimming = !trimming)}>
+      <button class="action {trimming ? 'text-accent' : ''}" onclick={() => (trimming = !trimming)} title="Trim (T)">
         {trimming ? 'Done' : 'Trim'}
       </button>
       <button class="action" onclick={onshare}>Show in folder</button>
@@ -163,6 +245,9 @@
         onmouseleave={() => (armed = false)}
       >
         {armed ? 'Delete clip?' : 'Delete'}
+      </button>
+      <button class="btn-icon ml-1" onclick={() => (help = !help)} title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">
+        <CircleHelp size={18} />
       </button>
     </div>
   </div>
@@ -185,6 +270,7 @@
         src={videoUrl(clip.path)}
         onloadedmetadata={loaded}
         ontimeupdate={tick}
+        onended={ended}
         onclick={toggle}
         ondblclick={() => setFullscreen(!fullscreen)}
         preload="auto"
@@ -206,6 +292,12 @@
               {timecode(time)}<span class="text-white/55"> / {timecode(duration)}</span>
             </span>
             <div class="flex-1"></div>
+            <button class="glyph w-auto px-2 text-[13px] font-semibold tabular-nums" onclick={cycleSpeed} title="Playback speed (< >)" aria-label="Playback speed {speed}x">
+              {speed}×
+            </button>
+            <button class="glyph {loop ? 'text-accent' : ''}" onclick={() => (loop = !loop)} title="Repeat (R)" aria-label="Repeat" aria-pressed={loop}>
+              <Repeat size={17} />
+            </button>
             <div class="volume flex items-center">
               <input
                 type="range"
@@ -276,6 +368,25 @@
     </div>
   {/if}
 </div>
+
+{#if help}
+  <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+  <div class="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-[2px]" onclick={() => (help = false)}>
+    <div class="card w-[420px] p-5 shadow-2xl shadow-black/60" onclick={(e) => e.stopPropagation()} role="dialog" aria-label="Keyboard shortcuts" tabindex="-1">
+      <div class="display-face mb-3 text-[17px] font-semibold">Keyboard shortcuts</div>
+      <dl class="grid grid-cols-[auto_1fr] gap-x-5 gap-y-1.5 text-[13px]">
+        {#each SHORTCUTS as [keys, what] (keys)}
+          <dt class="flex gap-1 whitespace-nowrap">
+            {#each keys.split(' / ') as k, i (i)}
+              {#if i > 0}<span class="text-muted">/</span>{/if}<kbd>{k}</kbd>
+            {/each}
+          </dt>
+          <dd class="self-center text-zinc-300">{what}</dd>
+        {/each}
+      </dl>
+    </div>
+  </div>
+{/if}
 
 <style>
   /* Borderless text actions in the header. */
