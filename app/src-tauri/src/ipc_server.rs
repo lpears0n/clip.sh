@@ -55,9 +55,10 @@ pub fn serve(app: AppHandle) -> anyhow::Result<()> {
     use tokio::net::windows::named_pipe::ServerOptions;
 
     let name = socket_path().to_string_lossy().into_owned();
-    let mut server = ServerOptions::new()
-        .first_pipe_instance(true)
-        .create(&name)?;
+    // Tokio's pipe needs its reactor, and setup runs outside the runtime.
+    let mut server = tauri::async_runtime::block_on(async {
+        ServerOptions::new().first_pipe_instance(true).create(&name)
+    })?;
     tracing::info!(pipe = %name, "control pipe ready");
     tauri::async_runtime::spawn(async move {
         loop {
