@@ -16,6 +16,7 @@ use crate::{games, library};
 /// Event names emitted to the frontend.
 pub const STATUS_CHANGED: &str = "status-changed";
 pub const CLIP_SAVED: &str = "clip-saved";
+pub const SCREENSHOT_SAVED: &str = "screenshot-saved";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -49,6 +50,7 @@ pub struct Status {
 enum Cmd {
     Status(oneshot::Sender<Status>),
     Save(PathBuf, oneshot::Sender<Result<PathBuf, String>>),
+    Screenshot(PathBuf, oneshot::Sender<Result<PathBuf, String>>),
     Configure(RecorderConfig),
     ChooseScreen(oneshot::Sender<Result<(), String>>),
 }
@@ -92,6 +94,13 @@ impl Service {
         rx.await.map_err(|_| "recorder stopped".to_string())?
     }
 
+    /// Save the newest frame as a PNG into `clips_dir/<game>/`.
+    pub async fn screenshot(&self, clips_dir: PathBuf) -> Result<PathBuf, String> {
+        let (tx, rx) = oneshot::channel();
+        self.send(Cmd::Screenshot(clips_dir, tx))?;
+        rx.await.map_err(|_| "recorder stopped".to_string())?
+    }
+
     pub fn configure(&self, cfg: RecorderConfig) -> Result<(), String> {
         self.send(Cmd::Configure(cfg))
     }
@@ -131,7 +140,9 @@ async fn run(
             while let Some(cmd) = cmds.recv().await {
                 match cmd {
                     Cmd::Status(r) => drop(r.send(status.clone())),
-                    Cmd::Save(_, r) => drop(r.send(Err("automatic capture is unavailable".into()))),
+                    Cmd::Save(_, r) | Cmd::Screenshot(_, r) => {
+                        drop(r.send(Err("automatic capture is unavailable".into())))
+                    }
                     Cmd::Configure(_) => {}
                     Cmd::ChooseScreen(r) => {
                         drop(r.send(Err("automatic capture is unavailable".into())))
@@ -176,6 +187,13 @@ async fn run(
                                 }
                             }
                             let _ = app.emit(CLIP_SAVED, p);
+                        }
+                        drop(r.send(res));
+                    }
+                    Cmd::Screenshot(dir, r) => {
+                        let res = auto.screenshot(&dir).await.map_err(|e| format!("{e:#}"));
+                        if let Ok(p) = &res {
+                            let _ = app.emit(SCREENSHOT_SAVED, p);
                         }
                         drop(r.send(res));
                     }

@@ -101,13 +101,8 @@ async fn handle<S: AsyncRead + AsyncWrite + Unpin>(app: AppHandle, sock: S) -> a
 async fn respond(app: &AppHandle, req: Request) -> Response {
     let state = app.state::<AppState>();
     match req {
-        Request::Save => match state.service.save(state.clips_dir()).await {
-            Ok(path) => Response {
-                path: Some(path.display().to_string()),
-                ..Response::ok(format!("saved {}", path.display()))
-            },
-            Err(e) => Response::err(e),
-        },
+        Request::Save => saved(state.service.save(state.clips_dir()).await),
+        Request::Screenshot => saved(state.service.screenshot(state.clips_dir()).await),
         Request::Status => match state.service.status().await {
             Ok(s) => Response {
                 status: serde_json::to_value(&s).ok(),
@@ -119,5 +114,15 @@ async fn respond(app: &AppHandle, req: Request) -> Response {
             crate::show_main(app);
             Response::ok("shown")
         }
+    }
+}
+
+fn saved(result: Result<std::path::PathBuf, String>) -> Response {
+    match result {
+        Ok(path) => Response {
+            path: Some(path.display().to_string()),
+            ..Response::ok(format!("saved {}", path.display()))
+        },
+        Err(e) => Response::err(e),
     }
 }

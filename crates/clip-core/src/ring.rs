@@ -171,6 +171,14 @@ impl ReplayBuffer {
         }
     }
 
+    /// The newest GOP (last keyframe up to the newest packet), video only:
+    /// just enough to decode the most recent frame, for screenshots.
+    pub fn latest_gop(&self) -> Result<Clip> {
+        let mut clip = self.snapshot(gst::ClockTime::ZERO)?;
+        clip.audio.clear();
+        Ok(clip)
+    }
+
     /// Copy out the last `duration` (or everything, if less is buffered) as a
     /// clip starting on a video keyframe, with all timestamps rebased to 0.
     /// Buffer memory is shared with the ring, not copied.
@@ -404,6 +412,22 @@ mod tests {
         assert_eq!(buf.audio[0].oldest_pts(), Some(ms(7000)));
         let clip = buf.snapshot(gst::ClockTime::from_seconds(60)).unwrap();
         assert_eq!(pts_ms(&clip.audio[0].buffers[0]), 0);
+    }
+
+    #[test]
+    fn latest_gop_is_the_last_keyframe_onwards_without_audio() {
+        let mut buf = new_buf(30, 1);
+        fill_video(&mut buf, 0, 10_500);
+        for t in (0..10_500).step_by(20) {
+            buf.push_audio(0, packet(t, 20, true));
+        }
+        let clip = buf.latest_gop().unwrap();
+        let v = &clip.video.buffers;
+        assert!(is_keyframe(&v[0]));
+        assert_eq!(v.len(), 5, "10.0s keyframe, then 10.1..10.4");
+        assert_eq!(pts_ms(&v[0]), 0);
+        assert_eq!(clip.duration, ms(500));
+        assert!(clip.audio.is_empty());
     }
 
     #[test]

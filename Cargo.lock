@@ -522,6 +522,7 @@ dependencies = [
  "gstreamer-video",
  "rustix",
  "serde",
+ "serde_json",
  "tokio",
  "tracing",
  "tracing-subscriber",

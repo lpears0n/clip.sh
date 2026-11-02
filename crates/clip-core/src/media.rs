@@ -23,15 +23,16 @@ pub const SPRITE_FRAMES: usize = 10;
 
 /// Image format of the thumbnail and sprite. WebP where the `webp` plugin
 /// exists (Linux distributions); the Windows GStreamer packages ship no
-/// WebP encoder, so JPEG there.
+/// WebP encoder, so JPEG there. Screenshots are PNG (lossless).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImageFormat {
     Webp,
     Jpeg,
+    Png,
 }
 
 impl ImageFormat {
-    /// Whichever encoder this GStreamer has.
+    /// Whichever lossy encoder this GStreamer has, for thumbnails.
     pub fn available() -> ImageFormat {
         if gst::ElementFactory::find("webpenc").is_some() {
             ImageFormat::Webp
@@ -44,6 +45,7 @@ impl ImageFormat {
         match self {
             ImageFormat::Webp => "webp",
             ImageFormat::Jpeg => "jpg",
+            ImageFormat::Png => "png",
         }
     }
 }
@@ -58,11 +60,11 @@ pub struct ClipInfo {
     pub sprite: Vec<u8>,
 }
 
-struct Frame {
-    width: usize,
-    height: usize,
+pub(crate) struct Frame {
+    pub(crate) width: usize,
+    pub(crate) height: usize,
     /// Tightly packed RGB.
-    rgb: Vec<u8>,
+    pub(crate) rgb: Vec<u8>,
 }
 
 /// Decode the frame about one second in (or the first, for shorter clips)
@@ -141,7 +143,7 @@ pub fn inspect(path: &Path) -> Result<ClipInfo> {
 }
 
 /// Copy a sample's RGB frame into tightly packed rows (GStreamer pads rows).
-fn frame_of(sample: &gst::Sample) -> Result<Frame> {
+pub(crate) fn frame_of(sample: &gst::Sample) -> Result<Frame> {
     let caps = sample.caps().context("frame has no caps")?;
     let info = gst_video::VideoInfo::from_caps(caps)?;
     let buf = sample.buffer().context("empty frame")?;
@@ -198,11 +200,12 @@ fn concat_row(frames: &[Frame]) -> Frame {
     }
 }
 
-/// Encode one RGB frame.
-fn encode_image(f: &Frame, format: ImageFormat, quality: u32) -> Result<Vec<u8>> {
+/// Encode one RGB frame. `quality` is ignored for PNG.
+pub(crate) fn encode_image(f: &Frame, format: ImageFormat, quality: u32) -> Result<Vec<u8>> {
     let encoder = match format {
         ImageFormat::Webp => format!("webpenc quality={quality}"),
         ImageFormat::Jpeg => format!("jpegenc quality={quality}"),
+        ImageFormat::Png => "pngenc".to_owned(),
     };
     let pipeline = gst::parse::launch(&format!(
         "appsrc name=src is-live=false format=time \

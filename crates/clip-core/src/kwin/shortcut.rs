@@ -1,20 +1,21 @@
-//! System-wide hotkey through KDE's KGlobalAccel (D-Bus). Unlike X11 grabs it
-//! fires while a Wayland or XWayland game has focus, and unlike the
-//! GlobalShortcuts portal it needs no confirmation dialog. The binding also
-//! shows up in System Settings → Shortcuts.
+//! System-wide hotkeys through KDE's KGlobalAccel (D-Bus). Unlike X11 grabs
+//! they fire while a Wayland or XWayland game has focus, and unlike the
+//! GlobalShortcuts portal they need no confirmation dialog. The bindings also
+//! show up in System Settings → Shortcuts, one per [`Action`].
 
 use anyhow::{Context, Result, bail};
 use futures_util::StreamExt;
 use tokio::sync::mpsc;
 use zbus::{Connection, Proxy, zvariant::OwnedObjectPath};
 
+use crate::hotkey::{Action, Binding};
+
 const SERVICE: &str = "org.kde.kglobalaccel";
 const COMPONENT: &str = "clip_sh";
-const ACTION: &str = "save-clip";
 /// KGlobalAccel::SetShortcutFlag: SetPresent | NoAutoloading.
 const SET_FLAGS: u32 = 0x2 | 0x4;
 
-/// A registered "save clip" hotkey. Presses arrive on the receiver returned by
+/// The registered hotkeys. Presses arrive on the receiver returned by
 /// [`GlobalShortcut::register`]; dropping this stops listening.
 pub struct GlobalShortcut {
     conn: Connection,
@@ -22,15 +23,22 @@ pub struct GlobalShortcut {
 }
 
 impl GlobalShortcut {
-    /// Register the action and bind it to `keys` (e.g. `"Ctrl+Shift+F8"`).
-    pub async fn register(keys: &str) -> Result<(Self, mpsc::UnboundedReceiver<()>)> {
+    /// Register every action and bind each to its keys (e.g.
+    /// `"Ctrl+Shift+F8"`); empty keys register the action unbound.
+    pub async fn register(bindings: &[Binding]) -> Result<(Self, mpsc::UnboundedReceiver<Action>)> {
         let conn = Connection::session().await?;
         let accel = accel(&conn).await?;
-        accel
-            .call_method("doRegister", &(action_id(),))
-            .await
-            .context("KGlobalAccel unavailable (not KDE?)")?;
-        set_keys(&conn, keys).await?;
+        for b in bindings {
+            accel
+                .call_method("doRegister", &(action_id(b.action),))
+                .await
+                .context("KGlobalAccel unavailable (not KDE?)")?;
+            // A taken key leaves this one action unbound (the user can pick
+            // another in Settings) rather than losing every hotkey.
+            if let Err(e) = set_keys(&conn, b.action, &b.keys).await {
+                tracing::warn!("hotkey for {}: {e:#}", b.action.id());
+            }
+        }
 
         let path: OwnedObjectPath = accel
             .call("getComponent", &(COMPONENT,))
@@ -44,7 +52,9 @@ impl GlobalShortcut {
                 let Ok((_, action, _)) = msg.body().deserialize::<(String, String, i64)>() else {
                     continue;
                 };
-                if action == ACTION && tx.send(()).is_err() {
+                if let Some(action) = Action::from_id(&action)
+                    && tx.send(action).is_err()
+                {
                     break;
                 }
             }
@@ -52,28 +62,35 @@ impl GlobalShortcut {
         Ok((Self { conn, task }, rx))
     }
 
-    /// Rebind the hotkey. Fails if the combination can't be parsed or another
-    /// application already owns it.
-    pub async fn set_keys(&self, keys: &str) -> Result<()> {
-        set_keys(&self.conn, keys).await
+    /// Rebind one action (empty `keys` unbinds it). Fails if the combination
+    /// can't be parsed or another application already owns it.
+    pub async fn set_keys(&self, action: Action, keys: &str) -> Result<()> {
+        set_keys(&self.conn, action, keys).await
     }
 }
 
-async fn set_keys(conn: &Connection, keys: &str) -> Result<()> {
-    {
-        let code = parse(keys)?;
-        let accel = accel(conn).await?;
-        let set: Vec<(Vec<i32>,)> = accel
+async fn set_keys(conn: &Connection, action: Action, keys: &str) -> Result<()> {
+    let accel = accel(conn).await?;
+    if keys.trim().is_empty() {
+        let _: Vec<(Vec<i32>,)> = accel
             .call(
                 "setShortcutKeys",
-                &(action_id(), vec![(vec![code],)], SET_FLAGS),
+                &(action_id(action), Vec::<(Vec<i32>,)>::new(), SET_FLAGS),
             )
             .await?;
-        if set.first().and_then(|(k,)| k.first()) != Some(&code) {
-            bail!("{keys} is already used by another shortcut");
-        }
-        Ok(())
+        return Ok(());
     }
+    let code = parse(keys)?;
+    let set: Vec<(Vec<i32>,)> = accel
+        .call(
+            "setShortcutKeys",
+            &(action_id(action), vec![(vec![code],)], SET_FLAGS),
+        )
+        .await?;
+    if set.first().and_then(|(k,)| k.first()) != Some(&code) {
+        bail!("{keys} is already used by another shortcut");
+    }
+    Ok(())
 }
 
 impl Drop for GlobalShortcut {
@@ -87,8 +104,8 @@ async fn accel(conn: &Connection) -> Result<Proxy<'static>> {
 }
 
 /// [componentUnique, actionUnique, componentFriendly, actionFriendly]
-fn action_id() -> Vec<&'static str> {
-    vec![COMPONENT, ACTION, "clip.sh", "Save clip"]
+fn action_id(action: Action) -> Vec<&'static str> {
+    vec![COMPONENT, action.id(), "clip.sh", action.description()]
 }
 
 /// Parse `"Ctrl+Shift+F8"` into a Qt key combination (`Qt::Key | modifiers`).

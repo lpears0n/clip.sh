@@ -200,6 +200,11 @@ async fn save_clip(state: State<'_, AppState>) -> CmdResult<PathBuf> {
 }
 
 #[tauri::command]
+async fn save_screenshot(state: State<'_, AppState>) -> CmdResult<PathBuf> {
+    state.service.screenshot(state.clips_dir()).await
+}
+
+#[tauri::command]
 async fn list_clips(state: State<'_, AppState>) -> CmdResult<Vec<library::Clip>> {
     let dir = state.clips_dir();
     let clips = tauri::async_runtime::spawn_blocking(move || library::list(&dir))
@@ -287,15 +292,17 @@ async fn set_settings(
     state: State<'_, AppState>,
     settings: Settings,
 ) -> CmdResult<()> {
-    let (old_hotkey, old_autostart) = {
+    let (old_bindings, old_autostart) = {
         let s = state.settings.lock().unwrap();
-        (s.hotkey.clone(), s.launch_at_login)
+        (s.hotkey_bindings(), s.launch_at_login)
     };
     if settings.launch_at_login != old_autostart {
         system::set_autostart(settings.launch_at_login).map_err(|e| format!("{e:#}"))?;
     }
-    if settings.hotkey != old_hotkey {
-        state.hotkeys.set_keys(&app, &settings.hotkey).await?;
+    for b in settings.hotkey_bindings() {
+        if !old_bindings.contains(&b) {
+            state.hotkeys.set_keys(&app, b.action, &b.keys).await?;
+        }
     }
     settings.save().map_err(|e| format!("{e:#}"))?;
     allow_clips_dir(&app, &settings.clips_dir);
@@ -427,8 +434,8 @@ pub(crate) fn show_main(app: &AppHandle) {
     }
 }
 
-/// Notification + sound for a newly saved clip, as configured.
-fn announce_saved(app: &AppHandle, path: &std::path::Path) {
+/// Notification + sound for a newly saved clip or screenshot, as configured.
+fn announce_saved(app: &AppHandle, summary: &'static str, path: &std::path::Path) {
     let (notify, sound) = {
         let state = app.state::<AppState>();
         let s = state.settings.lock().unwrap();
@@ -443,11 +450,6 @@ fn announce_saved(app: &AppHandle, path: &std::path::Path) {
             .and_then(std::path::Path::file_name)
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
-        let summary = if library::is_edit(path) {
-            "Edit rendered"
-        } else {
-            "Clip saved"
-        };
         let app = app.clone();
         tauri::async_runtime::spawn(async move {
             if let Err(e) = system::notify(&app, summary, &game).await {
@@ -460,8 +462,9 @@ fn announce_saved(app: &AppHandle, path: &std::path::Path) {
 fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, "open", "Open clip.sh", true, None::<&str>)?;
     let save = MenuItem::with_id(app, "save", "Save clip", true, None::<&str>)?;
+    let shot = MenuItem::with_id(app, "screenshot", "Save screenshot", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open, &save, &quit])?;
+    let menu = Menu::with_items(app, &[&open, &save, &shot, &quit])?;
     TrayIconBuilder::with_id("main")
         .icon(app.default_window_icon().unwrap().clone())
         .tooltip("clip.sh")
@@ -469,14 +472,14 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "open" => show_main(app),
-            "save" => {
-                let state = app.state::<AppState>();
-                let (service, dir) = (state.service.clone(), state.clips_dir());
-                tauri::async_runtime::spawn(async move {
-                    if let Err(e) = service.save(dir).await {
-                        tracing::warn!("save failed: {e}");
-                    }
-                });
+            "save" | "screenshot" => {
+                let action = if event.id.as_ref() == "save" {
+                    clip_core::Action::SaveClip
+                } else {
+                    clip_core::Action::Screenshot
+                };
+                let app = app.clone();
+                tauri::async_runtime::spawn(async move { hotkeys::fire(&app, action).await });
             }
             "quit" => app.exit(0),
             _ => {}
@@ -564,7 +567,7 @@ pub fn run() {
                 settings.capture_backend,
                 token_path,
             );
-            let hotkey = settings.hotkey.clone();
+            let bindings = settings.hotkey_bindings();
             app.manage(AppState {
                 service,
                 settings: Mutex::new(settings),
@@ -582,7 +585,7 @@ pub fn run() {
                 let handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
                     let state = handle.state::<AppState>();
-                    state.hotkeys.start(handle.clone(), hotkey).await;
+                    state.hotkeys.start(handle.clone(), bindings).await;
                 });
             }
             {
@@ -590,7 +593,19 @@ pub fn run() {
                 app.listen_any(service::CLIP_SAVED, move |event| {
                     enforce_storage(&handle);
                     let path: PathBuf = serde_json::from_str(event.payload()).unwrap_or_default();
-                    announce_saved(&handle, &path);
+                    let summary = if library::is_edit(&path) {
+                        "Edit rendered"
+                    } else {
+                        "Clip saved"
+                    };
+                    announce_saved(&handle, summary, &path);
+                });
+            }
+            {
+                let handle = app.handle().clone();
+                app.listen_any(service::SCREENSHOT_SAVED, move |event| {
+                    let path: PathBuf = serde_json::from_str(event.payload()).unwrap_or_default();
+                    announce_saved(&handle, "Screenshot saved", &path);
                 });
             }
             // The window starts hidden (tauri.conf.json) so a login launch
@@ -634,6 +649,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_status,
             save_clip,
+            save_screenshot,
             list_clips,
             delete_clip,
             update_clip,

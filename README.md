@@ -21,7 +21,7 @@ pnpm tauri dev
 
 To build a release binary instead, use `pnpm tauri build`. `pnpm test:ui`
 drives every view in a headless Chromium with the Tauri bridge mocked and
-leaves screenshots under `app/tests/shots/`; it runs in CI too. There's also a small CLI, `clipsh save`, that talks to the running app. Bind it to a key in your desktop settings if the in-app hotkey doesn't work for you.
+leaves screenshots under `app/tests/shots/`; it runs in CI too. There's also a small CLI, `clipsh save` (and `clipsh screenshot`), that talks to the running app. Bind it to a key in your desktop settings if the in-app hotkeys don't work for you.
 
 ## How it works / Tech stack
 
@@ -42,6 +42,9 @@ leaves screenshots under `app/tests/shots/`; it runs in CI too. There's also a s
 - Hover a clip for a silent preview; open it to watch or trim. Press `?` in
   the viewer for every keyboard shortcut (speed, frame stepping, in/out
   points, repeat).
+- Press `F9` in a game for a screenshot: the newest frame from the replay
+  buffer, saved as a PNG next to the game's clips. Both keys are set under
+  Settings → Hotkeys.
 - Star a clip (`S`), rename it (`N`) or add labels in the viewer. Favourites
   and labels are filters on the clips page, and they live in the small
   `.json` file next to each clip, so they survive moving the folder.

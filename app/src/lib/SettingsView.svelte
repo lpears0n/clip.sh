@@ -394,14 +394,20 @@
             >
               <HotkeyBinder value={settings.hotkey} onbind={(hotkey) => update({ hotkey })} />
             </Row>
+            <Row
+              title="Screenshot"
+              description="Saves the newest frame of the game as a PNG, next to its clips."
+            >
+              <HotkeyBinder value={settings.screenshot_hotkey} onbind={(screenshot_hotkey) => update({ screenshot_hotkey })} />
+            </Row>
           {/if}
           <Row
             title="Command"
             description={hotkeyBackend === null
-              ? 'Your desktop has no global shortcut service. Bind this command to a key in its keyboard settings.'
+              ? 'Your desktop has no global shortcut service. Bind this command to a key in its keyboard settings; clipsh screenshot takes a screenshot.'
               : hotkeyBackend === 'native'
-                ? 'Use it from scripts, Stream Deck profiles or AutoHotkey.'
-                : 'Bind this to any key in your desktop’s keyboard settings, or use it from scripts.'}
+                ? 'Use it from scripts, Stream Deck profiles or AutoHotkey. clipsh screenshot takes a screenshot.'
+                : 'Bind this to any key in your desktop’s keyboard settings, or use it from scripts. clipsh screenshot takes a screenshot.'}
           >
             <code class="rounded-ctl border border-line bg-canvas px-2.5 py-1.5 text-secondary text-fg-2">clipsh save</code>
             <button class="btn" onclick={copyCommand}>{copied ? 'Copied' : 'Copy'}</button>

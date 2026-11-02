@@ -3,7 +3,9 @@
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
-use clip_core::{AudioSource, Codec, Encoder, RecorderConfig, VideoConfig, auto::Backend};
+use clip_core::{
+    Action, AudioSource, Binding, Codec, Encoder, RecorderConfig, VideoConfig, auto::Backend,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -44,6 +46,8 @@ pub struct Settings {
 
     /// Global "save clip" hotkey, e.g. `F8` or `Ctrl+Shift+S`.
     pub hotkey: String,
+    /// Global "save screenshot" hotkey; empty leaves it unbound.
+    pub screenshot_hotkey: String,
     pub clips_dir: PathBuf,
     /// Soft cap on the clips folder in GB; `None` = no limit.
     pub storage_limit_gb: Option<f64>,
@@ -77,6 +81,7 @@ impl Default for Settings {
             audio_bitrate_kbps: 160,
             capture_backend: None,
             hotkey: "F8".into(),
+            screenshot_hotkey: "F9".into(),
             clips_dir: clip_core::default_clips_dir(),
             storage_limit_gb: None,
             protect_edits: true,
@@ -131,6 +136,14 @@ impl Settings {
             cursor: self.cursor,
             zero_copy: self.zero_copy,
         }
+    }
+
+    /// Every global hotkey, bound or not.
+    pub fn hotkey_bindings(&self) -> Vec<Binding> {
+        vec![
+            Binding::new(Action::SaveClip, self.hotkey.clone()),
+            Binding::new(Action::Screenshot, self.screenshot_hotkey.clone()),
+        ]
     }
 
     pub fn storage_policy(&self) -> crate::storage::Policy {

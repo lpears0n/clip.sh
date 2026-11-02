@@ -12,6 +12,7 @@
     type GameEntry,
     initMedia,
     onClipSaved,
+    onScreenshotSaved,
     onLibraryChanged,
     onRenderProgress,
     onStatusChanged,
@@ -310,6 +311,9 @@
         setTimeout(() => (flash = false), 400)
         refreshLibrary()
         refreshUsage()
+      }),
+      onScreenshotSaved((path) => {
+        notify(`Screenshot saved as ${path.split(/[\\/]/).pop()}`)
       }),
       onLibraryChanged(() => {
         refreshLibrary()

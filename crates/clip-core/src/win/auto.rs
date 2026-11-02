@@ -16,7 +16,7 @@ use crate::{
     encoder::{Codec, Encoder},
     game::Game,
     recorder::{CaptureSource, Recorder, RecorderConfig, Status},
-    save::clip_path,
+    save::{clip_path, screenshot_path},
     win::{Target, game::RunningGame},
 };
 
@@ -183,6 +183,14 @@ impl AutoRecorder {
         let a = self.active.as_ref().context("no game is being recorded")?;
         a.recorder
             .save(seconds, &clip_path(root, &a.game.name))
+            .await
+    }
+
+    /// Save the newest frame as `<root>/<game name>/<timestamp>.png`.
+    pub async fn screenshot(&self, root: &Path) -> Result<PathBuf> {
+        let a = self.active.as_ref().context("no game is being recorded")?;
+        a.recorder
+            .screenshot(&screenshot_path(root, &a.game.name))
             .await
     }
 

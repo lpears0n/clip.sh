@@ -58,6 +58,8 @@ export interface Settings {
   mic: boolean
   clips_dir: string
   hotkey: string
+  /** Empty = unbound. */
+  screenshot_hotkey: string
   capture_backend: 'kwin' | 'portal' | 'windows' | null
   launch_at_login: boolean
   start_in_tray: boolean
@@ -125,6 +127,7 @@ export const api = {
   hotkeyBackend: () => invoke<HotkeyBackend | null>('hotkey_backend'),
   status: () => invoke<Status>('get_status'),
   save: () => invoke<string>('save_clip'),
+  screenshot: () => invoke<string>('save_screenshot'),
   clips: () => invoke<Clip[]>('list_clips'),
   games: () => invoke<GameEntry[]>('list_games'),
   deleteClip: (path: string) => invoke<void>('delete_clip', { path }),
@@ -150,6 +153,9 @@ export const onLibraryChanged = (f: () => void): Promise<UnlistenFn> =>
 
 export const onClipSaved = (f: (path: string) => void): Promise<UnlistenFn> =>
   listen<string>('clip-saved', (e) => f(e.payload))
+
+export const onScreenshotSaved = (f: (path: string) => void): Promise<UnlistenFn> =>
+  listen<string>('screenshot-saved', (e) => f(e.payload))
 
 /** A clip's thumbnail, sprite and duration were generated in the background. */
 export const onThumbnailReady = (f: (c: Clip) => void): Promise<UnlistenFn> =>

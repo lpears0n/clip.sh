@@ -251,6 +251,18 @@ impl Recorder {
         .await?
     }
 
+    /// Write the newest buffered frame to `path` as PNG.
+    pub async fn screenshot(&self, path: &Path) -> Result<PathBuf> {
+        let gop = self.buffer.lock().unwrap().latest_gop()?;
+        let path = path.to_owned();
+        tokio::task::spawn_blocking(move || {
+            crate::screenshot::write_png(&gop, &path)?;
+            tracing::info!(path = %path.display(), "saved screenshot");
+            Ok(path)
+        })
+        .await?
+    }
+
     pub async fn stop(mut self) -> Result<()> {
         if let Some(rate) = self.pipeline.by_name("rate") {
             tracing::info!(

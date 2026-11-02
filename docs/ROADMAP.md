@@ -111,9 +111,11 @@ ship on its own.
   alongside the thumbnail (`clip_core::media::inspect` already decodes one
   frame; take ten). Hover position maps to a sprite frame; cheaper than the
   video preview and works for clips the webview cannot decode.
-- **Screenshots.** A second hotkey saves a PNG of the current frame from the
-  ring buffer. Medal and Steam both have it; it is nearly free given the
-  buffer.
+- ~~**Screenshots.**~~ Done. A second hotkey (`F9`, or `clipsh screenshot`)
+  decodes the newest GOP from the ring buffer and writes its last frame as a
+  PNG next to the game's clips. Nothing is tapped while recording, so the
+  capture path pays nothing for it. The hotkey layer now carries one binding
+  per action, which is what markers need next.
 - **Game page polish.** Session list ("Played 2h 14m on Tuesday, 3 clips"),
   jump to a session's clips.
 

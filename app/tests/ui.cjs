@@ -50,7 +50,7 @@ function fixtures(scenario) {
       ? { state: 'waiting', game: null, steam_app_id: null, session_start_ms: null, buffered_seconds: 0, replay_seconds: 30, encoder: null, capture_path: null, error: null, backend: 'portal', needs_screen: true }
       : { state: 'recording', game: 'ELDEN RING', steam_app_id: 1245620, session_start_ms: now - h, buffered_seconds: 30, replay_seconds: 30, encoder: 'nvenc', capture_path: 'zerocopy', error: null, backend: 'kwin', needs_screen: false },
     get_settings: {
-      replay_seconds: 30, mic: true, clips_dir: '/home/u/Videos/clip.sh', hotkey: 'F8', capture_backend: null,
+      replay_seconds: 30, mic: true, clips_dir: '/home/u/Videos/clip.sh', hotkey: 'F8', screenshot_hotkey: 'F9', capture_backend: null,
       launch_at_login: false, start_in_tray: true, close_to_tray: true, notify_on_save: true, sound_on_save: true,
       fps: 60, bitrate_kbps: 20000, codec: 'h264', encoder: null, cursor: true, zero_copy: true, desktop_audio: true,
       mic_device: null, audio_bitrate_kbps: 160, storage_limit_gb: 25, protect_edits: true, use_trash: true, ads: false,
@@ -194,6 +194,10 @@ async function runScenario(scenario, browser) {
   await page.getByRole('button', { name: 'Recording' }).click()
   await page.waitForTimeout(150)
   await shot('settings-recording-blue')
+  await page.getByRole('button', { name: 'Hotkeys' }).click()
+  await page.waitForTimeout(150)
+  assert.equal(await page.locator('kbd', { hasText: /^F9$/ }).count(), 1, 'screenshot hotkey row')
+  await shot('settings-hotkeys')
   await page.getByRole('button', { name: 'Appearance' }).click()
   await page.getByRole('radio', { name: 'Orange' }).click()
 
