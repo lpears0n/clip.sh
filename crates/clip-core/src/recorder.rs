@@ -38,9 +38,16 @@ pub struct RecorderConfig {
     /// Draw the mouse cursor into the video.
     #[serde(default = "yes")]
     pub cursor: bool,
-    /// Try the zero-copy (DMA-BUF) capture path before the copy path.
-    #[serde(default = "yes")]
+    /// Try the zero-copy (GPU memory) capture path before the copy path.
+    /// Default: on where it is the native path (Windows D3D11), off on
+    /// Linux, where KWin's frame delivery was measured to be the bottleneck
+    /// and the GL import path did no better.
+    #[serde(default = "zero_copy_default")]
     pub zero_copy: bool,
+}
+
+fn zero_copy_default() -> bool {
+    cfg!(windows)
 }
 
 /// How long the zero-copy pipeline gets to deliver a first frame before it
@@ -64,7 +71,7 @@ impl Default for RecorderConfig {
             audio: vec![AudioSource::Desktop],
             audio_bitrate: default_audio_bitrate(),
             cursor: true,
-            zero_copy: true,
+            zero_copy: zero_copy_default(),
         }
     }
 }

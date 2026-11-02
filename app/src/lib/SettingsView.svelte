@@ -289,7 +289,9 @@
                 ? settings.zero_copy
                   ? 'Not available on this driver right now; frames are copied through memory instead.'
                   : 'Off: frames are copied through memory. Turn on for smoother capture under load.'
-                : 'Frames go straight from the compositor into the encoder when the driver allows; otherwise they’re copied through memory.'}
+                : status?.backend === 'windows'
+                  ? 'Frames go straight from Windows Graphics Capture into the encoder as D3D11 textures.'
+                  : 'Frames go straight from the compositor into the encoder when the driver allows; otherwise they’re copied through memory. Compare with and without under load.'}
           >
             <Toggle label="GPU direct capture" checked={settings.zero_copy} onchange={(zero_copy) => update({ zero_copy })} />
           </Row>

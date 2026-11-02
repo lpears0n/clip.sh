@@ -495,6 +495,27 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+/// The installer puts GStreamer's libraries next to the executable (where
+/// the loader finds them) and its plugins under `gst-plugins/`; tell
+/// GStreamer about the latter before it initialises. A machine with its own
+/// GStreamer install, or a dev build, has nothing there and is left alone.
+#[cfg(windows)]
+fn point_gstreamer_at_bundled_plugins() {
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+    let plugins = exe.with_file_name("gst-plugins");
+    if plugins.is_dir() {
+        // SAFETY: called on the main thread before any other thread exists.
+        unsafe {
+            std::env::set_var("GST_PLUGIN_PATH", &plugins);
+            // Only the bundled set: a stray system install of a different
+            // version must not be mixed in.
+            std::env::set_var("GST_PLUGIN_SYSTEM_PATH", &plugins);
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tracing_subscriber::fmt()
@@ -506,6 +527,8 @@ pub fn run() {
         tracing::info!("clip.sh is already running; showed its window");
         return;
     }
+    #[cfg(windows)]
+    point_gstreamer_at_bundled_plugins();
     if let Err(e) = clip_core::init() {
         panic!("GStreamer failed to initialise: {e}");
     }

@@ -1,7 +1,7 @@
 # Builds installers and attaches them to a GitHub release whenever a version
-# tag (v0.2.0) is pushed. The Windows installer does not yet bundle the
-# GStreamer runtime; users install it from gstreamer.freedesktop.org (see
-# docs/WINDOWS.md).
+# tag (v0.2.0) is pushed. The Windows installer bundles the GStreamer
+# runtime (scripts/collect-gstreamer.ps1 + tauri.windows.conf.json), so
+# users need nothing else.
 name: Release
 
 on:
@@ -58,6 +58,10 @@ jobs:
           workspaces: '. -> target'
       - run: pnpm install --frozen-lockfile
         working-directory: app
+      - name: Collect the GStreamer runtime for bundling (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: pwsh scripts/collect-gstreamer.ps1
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

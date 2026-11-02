@@ -382,7 +382,9 @@ the commit history); the audit table above describes the UI before them.
    shows which path is live. `CLIPSH_ZERO_COPY=0 cargo run --example record`
    forces the copy path for an A/B frame-rate comparison. This could not be
    exercised in the development container (no PipeWire, no GPU), so the first
-   run on real hardware is the verification step.
+   run on real hardware is the verification step. Default is off on Linux:
+   the project's own earlier measurement on an RTX 5080 under KDE found the
+   GL import path no better, with the frame loss inside KWin's delivery.
 
 Steps 1–3 are pure polish and cost nothing in performance. Steps 4–6 are
 where "fast" becomes measurable. Step 7 is the one that changes what the

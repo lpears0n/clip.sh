@@ -21,6 +21,9 @@ compositor's copy is the only extra work the GPU does.
   `d3d11screencapturesrc` across GStreamer versions, and the AMF/QSV
   property names (unknown ones are skipped, so the worst case is default
   encoder settings).
+- The installer has not been produced and installed on a clean machine
+  yet; the plugin list in `scripts/collect-gstreamer.ps1` is the first
+  thing to check if an element is missing (`GST_DEBUG=2` names it).
 - Zero-copy is the first path tried; if D3D11 negotiation fails, the
   recorder rebuilds on the system-memory path on its own and Settings →
   Recording says which is active.
@@ -45,9 +48,12 @@ pnpm tauri dev
 ```
 
 `pnpm tauri build` produces an NSIS installer under
-`target\release\bundle\nsis\`. The installer does not yet bundle the
-GStreamer runtime, so users need the runtime installer too; bundling the
-DLLs through `bundle.resources` is the next packaging step.
+`target\release\bundle\nsis\`. Run `pwsh scripts/collect-gstreamer.ps1`
+first: it copies GStreamer's libraries and the plugins clip.sh uses into
+`app/src-tauri/gst/`, and `tauri.windows.conf.json` bundles them next to
+the executable (libraries) and under `gst-plugins/` (plugins). At startup
+the app points GStreamer at that folder, so users install nothing else.
+The release workflow does this automatically.
 
 ## What is platform-specific
 

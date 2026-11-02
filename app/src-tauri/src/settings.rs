@@ -26,8 +26,9 @@ pub struct Settings {
     /// `None` picks the best working encoder for the codec.
     pub encoder: Option<Encoder>,
     pub cursor: bool,
-    /// Capture straight into GPU memory (DMA-BUF) when the driver allows;
-    /// falls back to copying through system memory by itself.
+    /// Capture straight into GPU memory when the driver allows; falls back
+    /// to copying through system memory by itself. On by default on
+    /// Windows (D3D11 is the native path), off on Linux.
     pub zero_copy: bool,
 
     // Audio
@@ -69,7 +70,7 @@ impl Default for Settings {
             codec: Codec::H264,
             encoder: None,
             cursor: true,
-            zero_copy: true,
+            zero_copy: cfg!(windows),
             desktop_audio: true,
             mic: false,
             mic_device: None,
