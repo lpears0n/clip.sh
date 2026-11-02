@@ -168,6 +168,36 @@ impl Encoder {
         Ok(vec![gst::ElementFactory::make(name).build()?])
     }
 
+    /// GPU memory this encoder reads directly, for the zero-copy path.
+    pub fn gpu_memory(self) -> Option<&'static str> {
+        match self {
+            Encoder::Nvenc => Some("memory:GLMemory"),
+            Encoder::Vaapi => Some("memory:VAMemory"),
+            Encoder::X264 => None,
+        }
+    }
+
+    /// Elements that import a DMA-BUF into the encoder's GPU memory and
+    /// convert/scale it there. Scaling is driven by a capsfilter placed
+    /// after them by the caller.
+    pub fn gpu_chain(self) -> Result<Vec<gst::Element>> {
+        let names: &[&str] = match self {
+            // GL import; nvenc reads GL textures through CUDA interop.
+            Encoder::Nvenc => &["glupload", "glcolorscale", "glcolorconvert"],
+            // vapostproc imports DMA-BUF, converts and scales in one element.
+            Encoder::Vaapi => &["vapostproc"],
+            Encoder::X264 => bail!("x264 has no GPU path"),
+        };
+        names
+            .iter()
+            .map(|n| {
+                gst::ElementFactory::make(n)
+                    .build()
+                    .with_context(|| format!("{n} missing (gst-plugins-base/bad GL or VA)"))
+            })
+            .collect()
+    }
+
     /// Configured encoder element. B-frames are disabled so PTS == DTS, which
     /// keeps the replay buffer and remuxing simple; GOP is one second so a clip
     /// can start on a keyframe at any whole second.

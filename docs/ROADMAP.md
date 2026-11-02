@@ -137,9 +137,9 @@ ship on its own.
 
 ### Phase 3 — Capture quality
 
-- **Zero-copy capture** on NVIDIA (`cudaupload` / DMA-BUF into NVENC) and
-  VA-API (`vapostproc` with DMA-BUF import). Fixes the stutter under GPU
-  load noted in the README.
+- ~~**Zero-copy capture**~~ Implemented with automatic fallback (see
+  `docs/DESIGN.md` step 7); needs a run on NVIDIA and on AMD/Intel hardware
+  to confirm the GL and VA paths negotiate.
 - **`ext-image-copy-capture-v1`** for prompt-free window capture on wlroots
   (Hyprland, Sway, niri) now that compositors ship it.
 - **X11** via `ximagesrc` as a fallback backend with `xdotool`-style active

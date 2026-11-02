@@ -26,6 +26,9 @@ pub struct Settings {
     /// `None` picks the best working encoder for the codec.
     pub encoder: Option<Encoder>,
     pub cursor: bool,
+    /// Capture straight into GPU memory (DMA-BUF) when the driver allows;
+    /// falls back to copying through system memory by itself.
+    pub zero_copy: bool,
 
     // Audio
     pub desktop_audio: bool,
@@ -66,6 +69,7 @@ impl Default for Settings {
             codec: Codec::H264,
             encoder: None,
             cursor: true,
+            zero_copy: true,
             desktop_audio: true,
             mic: false,
             mic_device: None,
@@ -124,6 +128,7 @@ impl Settings {
             audio,
             audio_bitrate: (self.audio_bitrate_kbps.clamp(64, 320) * 1000) as i32,
             cursor: self.cursor,
+            zero_copy: self.zero_copy,
         }
     }
 

@@ -16,7 +16,7 @@ pub mod ring;
 pub mod save;
 
 pub use audio::{AudioSource, InputDevice, add_audio_branch, input_devices};
-pub use capture::{PipewireTarget, VideoConfig, add_video_branch};
+pub use capture::{CapturePath, PipewireTarget, VideoConfig, add_video_branch};
 pub use encoder::{Codec, Encoder};
 pub use gstreamer as gst;
 pub use portal::ScreenSource;

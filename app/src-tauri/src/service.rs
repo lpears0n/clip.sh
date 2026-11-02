@@ -37,6 +37,8 @@ pub struct Status {
     pub buffered_seconds: f64,
     pub replay_seconds: u32,
     pub encoder: Option<String>,
+    /// "zerocopy" (DMA-BUF into GPU memory) or "copy", while recording.
+    pub capture_path: Option<clip_core::CapturePath>,
     pub error: Option<String>,
     /// How games are captured: "kwin" (window, KDE) or "portal" (screen).
     pub backend: Option<Backend>,
@@ -121,6 +123,7 @@ async fn run(
                 buffered_seconds: 0.0,
                 replay_seconds,
                 encoder: None,
+                capture_path: None,
                 error: Some(format!("{e:#}")),
                 backend: None,
                 needs_screen: false,
@@ -251,6 +254,7 @@ fn status(
             .encoder()
             .and_then(|e| e.element(auto.codec()))
             .map(str::to_owned),
+        capture_path: rec.as_ref().map(|s| s.path),
         error: rec.and_then(|s| s.error),
         backend: Some(auto.backend()),
         needs_screen: auto.needs_screen(),

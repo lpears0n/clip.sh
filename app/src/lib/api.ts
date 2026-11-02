@@ -13,6 +13,8 @@ export interface Status {
   buffered_seconds: number
   replay_seconds: number
   encoder: string | null
+  /** While recording: frames go straight into GPU memory, or through RAM. */
+  capture_path: 'zerocopy' | 'copy' | null
   error: string | null
   /** "kwin": game windows (KDE). "portal": the chosen screen. */
   backend: 'kwin' | 'portal' | null
@@ -64,6 +66,8 @@ export interface Settings {
   codec: Codec
   encoder: Encoder | null
   cursor: boolean
+  /** Try DMA-BUF capture into GPU memory first; falls back by itself. */
+  zero_copy: boolean
   desktop_audio: boolean
   mic_device: string | null
   audio_bitrate_kbps: number

@@ -282,6 +282,18 @@
             <Toggle label="Record cursor" checked={settings.cursor} onchange={(cursor) => update({ cursor })} />
           </Row>
           <Row
+            title="GPU direct capture"
+            description={status?.capture_path === 'zerocopy'
+              ? 'Active: frames go straight from the compositor into the encoder, so a busy game can’t starve the capture.'
+              : status?.capture_path === 'copy'
+                ? settings.zero_copy
+                  ? 'Not available on this driver right now; frames are copied through memory instead.'
+                  : 'Off: frames are copied through memory. Turn on for smoother capture under load.'
+                : 'Frames go straight from the compositor into the encoder when the driver allows; otherwise they’re copied through memory.'}
+          >
+            <Toggle label="GPU direct capture" checked={settings.zero_copy} onchange={(zero_copy) => update({ zero_copy })} />
+          </Row>
+          <Row
             title="Capture method"
             description={status?.backend === 'kwin'
               ? 'Recording each game’s window directly, with no permission prompts (KDE Plasma).'

@@ -59,7 +59,7 @@ buffer and trimmer carry over), and packaging. CI builds and lints every
 push; tagging `v*` builds AppImage, deb and rpm as a draft release.
 
 Known problems:
-- **Recordings can stutter under heavy GPU load.** When the game is using the GPU hard, the compositor delivers fewer frames, and the encoder duplicates some of them to keep a constant frame rate. The playback in the app is fine, the loss happens during capture.
+- **Recordings could stutter under heavy GPU load** because every frame was copied through system memory. There is now a zero-copy path (DMA-BUF straight into the encoder's GPU memory) that is tried first and falls back by itself; Settings → Recording shows which one is active. It hasn't been verified on real hardware yet.
 - **Only KDE gets prompt-free window capture.** On GNOME and Hyprland you get a one-time screen-share prompt instead. That part is only partly tested.
 - **The portal hotkey path isn't tested** on a real desktop yet.
 - **X11 isn't supported.** There's no capture backend for it.

@@ -374,8 +374,15 @@ the commit history); the audit table above describes the UI before them.
    in one pass, bounded worker pool, index file for instant startup.
 6. ~~**Grid virtualisation**~~ Done: `VirtualGrid` windows rows above 120
    clips; measured 880 clips → 21 cards in the DOM.
-7. **Zero-copy capture** (1–2 weeks). NVIDIA GL path first, VA-API second,
-   with the measurement harness in `crates/clip-core/examples`.
+7. **Zero-copy capture**: implemented, awaiting hardware verification.
+   `CapturePath::ZeroCopy` negotiates `video/x-raw(memory:DMABuf)` from
+   `pipewiresrc` into `glupload → glcolorscale → glcolorconvert` (NVENC) or
+   `vapostproc` (VA-API); the recorder gives it four seconds to deliver a
+   first frame and otherwise rebuilds on the copy path. Settings → Recording
+   shows which path is live. `CLIPSH_ZERO_COPY=0 cargo run --example record`
+   forces the copy path for an A/B frame-rate comparison. This could not be
+   exercised in the development container (no PipeWire, no GPU), so the first
+   run on real hardware is the verification step.
 
 Steps 1–3 are pure polish and cost nothing in performance. Steps 4–6 are
 where "fast" becomes measurable. Step 7 is the one that changes what the

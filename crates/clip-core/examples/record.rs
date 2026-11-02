@@ -7,7 +7,7 @@
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
-use clip_core::{Codec, Encoder, ScreenSource, VideoConfig, add_video_branch};
+use clip_core::{CapturePath, Codec, Encoder, ScreenSource, VideoConfig, add_video_branch};
 use gstreamer as gst;
 use gstreamer::prelude::*;
 
@@ -43,7 +43,16 @@ async fn main() -> Result<()> {
 
     let cfg = VideoConfig::default();
     let pipeline = gst::Pipeline::new();
-    let parse = add_video_branch(&pipeline, source.target(), encoder, &cfg)?;
+    // CLIPSH_ZERO_COPY=0 forces the system-memory path for comparison.
+    let path = if std::env::var("CLIPSH_ZERO_COPY").is_ok_and(|v| v == "0")
+        || encoder.gpu_memory().is_none()
+    {
+        CapturePath::Copy
+    } else {
+        CapturePath::ZeroCopy
+    };
+    println!("capture path: {path:?}");
+    let parse = add_video_branch(&pipeline, source.target(), encoder, &cfg, path)?;
     let mux = gst::ElementFactory::make("mp4mux")
         .property("faststart", true)
         .build()?;
