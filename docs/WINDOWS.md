@@ -27,6 +27,10 @@ compositor's copy is the only extra work the GPU does.
 - Zero-copy is the first path tried; if D3D11 negotiation fails, the
   recorder rebuilds on the system-memory path on its own and Settings →
   Recording says which is active.
+- The app logs to `%LOCALAPPDATA%\sh.clip.app\logs\clip.sh.log` (there is
+  no terminal to print to). A crash shows a message box with the reason and
+  that path. `RUST_LOG=debug` and `GST_DEBUG=2` in the environment make the
+  log more talkative; `GST_DEBUG` names any element that fails to load.
 
 ## Building
 

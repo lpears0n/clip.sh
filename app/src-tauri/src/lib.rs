@@ -2,6 +2,7 @@ mod games;
 mod hotkeys;
 mod ipc_server;
 mod library;
+mod logging;
 mod media_server;
 mod service;
 mod settings;
@@ -521,11 +522,12 @@ fn point_gstreamer_at_bundled_plugins() {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
-        )
-        .init();
+    logging::init();
+    tracing::info!(
+        version = env!("CARGO_PKG_VERSION"),
+        log = %logging::log_path().display(),
+        "clip.sh starting"
+    );
     if ipc_server::hand_off_to_running_instance() {
         tracing::info!("clip.sh is already running; showed its window");
         return;
@@ -533,7 +535,7 @@ pub fn run() {
     #[cfg(windows)]
     point_gstreamer_at_bundled_plugins();
     if let Err(e) = clip_core::init() {
-        panic!("GStreamer failed to initialise: {e}");
+        logging::fatal(&format!("GStreamer failed to initialise: {e:#}"));
     }
 
     let builder = tauri::Builder::default()
