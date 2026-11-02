@@ -21,12 +21,40 @@ pub const SPRITE_FRAME_WIDTH: i32 = THUMB_WIDTH / 2;
 /// Frames in the sprite sheet, laid out in one row.
 pub const SPRITE_FRAMES: usize = 10;
 
+/// Image format of the thumbnail and sprite. WebP where the `webp` plugin
+/// exists (Linux distributions); the Windows GStreamer packages ship no
+/// WebP encoder, so JPEG there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImageFormat {
+    Webp,
+    Jpeg,
+}
+
+impl ImageFormat {
+    /// Whichever encoder this GStreamer has.
+    pub fn available() -> ImageFormat {
+        if gst::ElementFactory::find("webpenc").is_some() {
+            ImageFormat::Webp
+        } else {
+            ImageFormat::Jpeg
+        }
+    }
+
+    pub fn extension(self) -> &'static str {
+        match self {
+            ImageFormat::Webp => "webp",
+            ImageFormat::Jpeg => "jpg",
+        }
+    }
+}
+
 pub struct ClipInfo {
     pub duration: gst::ClockTime,
     pub audio_tracks: usize,
-    /// WebP, `THUMB_WIDTH` wide, aspect preserved.
+    pub format: ImageFormat,
+    /// `THUMB_WIDTH` wide, aspect preserved.
     pub thumbnail: Vec<u8>,
-    /// WebP, `SPRITE_FRAMES` frames of `SPRITE_FRAME_WIDTH` side by side.
+    /// `SPRITE_FRAMES` frames of `SPRITE_FRAME_WIDTH` side by side.
     pub sprite: Vec<u8>,
 }
 
@@ -99,11 +127,13 @@ pub fn inspect(path: &Path) -> Result<ClipInfo> {
             strip.push(halve(&f));
         }
         let sprite = concat_row(&strip);
+        let format = ImageFormat::available();
         Ok(ClipInfo {
             duration,
             audio_tracks: audio.load(std::sync::atomic::Ordering::Relaxed),
-            thumbnail: encode_webp(&thumb, 82)?,
-            sprite: encode_webp(&sprite, 70)?,
+            format,
+            thumbnail: encode_image(&thumb, format, 82)?,
+            sprite: encode_image(&sprite, format, 70)?,
         })
     })();
     let _ = pipeline.set_state(gst::State::Null);
@@ -168,12 +198,16 @@ fn concat_row(frames: &[Frame]) -> Frame {
     }
 }
 
-/// Encode one RGB frame as WebP.
-fn encode_webp(f: &Frame, quality: u32) -> Result<Vec<u8>> {
+/// Encode one RGB frame.
+fn encode_image(f: &Frame, format: ImageFormat, quality: u32) -> Result<Vec<u8>> {
+    let encoder = match format {
+        ImageFormat::Webp => format!("webpenc quality={quality}"),
+        ImageFormat::Jpeg => format!("jpegenc quality={quality}"),
+    };
     let pipeline = gst::parse::launch(&format!(
         "appsrc name=src is-live=false format=time \
          caps=video/x-raw,format=RGB,width={},height={},framerate=0/1 \
-         ! videoconvert ! webpenc quality={quality} ! appsink name=sink",
+         ! videoconvert ! {encoder} ! appsink name=sink",
         f.width, f.height
     ))?
     .downcast::<gst::Pipeline>()

@@ -224,24 +224,32 @@ pub fn list(clips_dir: &Path) -> Vec<Clip> {
 const THUMB_VERSION: u32 = 3;
 
 /// Cache files for a clip, keyed by path + size + mtime (so a rewritten
-/// file gets new images) and the generator version.
+/// file gets new images) and the generator version. The image extension
+/// follows the encoder this GStreamer has (WebP, or JPEG on Windows).
 struct CacheFiles {
     thumb: PathBuf,
     sprite: PathBuf,
     info: PathBuf,
 }
 
-fn cache_files(path: &Path, size: u64, created_ms: u64) -> CacheFiles {
+fn cache_files(path: &Path, size: u64, created_ms: u64, ext: &str) -> CacheFiles {
     let mut h = DefaultHasher::new();
     // Bump THUMB_VERSION when thumbnail generation changes.
     (THUMB_VERSION, path, size, created_ms).hash(&mut h);
     let key = format!("{:016x}", h.finish());
     let dir = cache_dir();
     CacheFiles {
-        thumb: dir.join(format!("{key}.webp")),
-        sprite: dir.join(format!("{key}.strip.webp")),
+        thumb: dir.join(format!("{key}.{ext}")),
+        sprite: dir.join(format!("{key}.strip.{ext}")),
         info: dir.join(format!("{key}.json")),
     }
+}
+
+/// Extension the images are written with on this machine (cached: it needs
+/// GStreamer's registry).
+fn image_ext() -> &'static str {
+    static EXT: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
+    EXT.get_or_init(|| clip_core::media::ImageFormat::available().extension())
 }
 
 fn file_times(path: &Path) -> Result<(u64, u64)> {
@@ -255,7 +263,7 @@ fn file_times(path: &Path) -> Result<(u64, u64)> {
 /// has run for this file.
 pub fn load(path: &Path, game: &str) -> Result<Clip> {
     let (size_bytes, created_ms) = file_times(path)?;
-    let files = cache_files(path, size_bytes, created_ms);
+    let files = cache_files(path, size_bytes, created_ms, image_ext());
     let info = std::fs::read_to_string(&files.info)
         .ok()
         .and_then(|s| serde_json::from_str::<CachedInfo>(&s).ok());
@@ -293,8 +301,8 @@ pub fn is_cached(clip: &Clip) -> bool {
 /// cache. Slow (a second or two per clip); run it from the thumbnail pool.
 pub fn generate(path: &Path) -> Result<()> {
     let (size_bytes, created_ms) = file_times(path)?;
-    let files = cache_files(path, size_bytes, created_ms);
     let info = clip_core::media::inspect(path)?;
+    let files = cache_files(path, size_bytes, created_ms, info.format.extension());
     std::fs::create_dir_all(cache_dir())?;
     std::fs::write(&files.thumb, &info.thumbnail)?;
     std::fs::write(&files.sprite, &info.sprite)?;
