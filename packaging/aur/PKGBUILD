@@ -1,4 +1,4 @@
-# Maintainer: lpears0n <notlucaspearson@gmail.com>
+# Maintainer: lpears0n <lucas.pearson@live.com>
 # Builds clip.sh from a tagged release. Submit to the AUR as `clip-sh`.
 pkgname=clip-sh
 pkgver=0.1.0
