@@ -61,7 +61,7 @@ jobs:
       - name: Install GStreamer (MSVC runtime + development)
         shell: pwsh
         run: |
-          choco install -y --no-progress gstreamer gstreamer-devel pkgconfiglite
+          choco install -y --no-progress gstreamer gstreamer-devel pkgconfiglite ffmpeg
           # The installer records its folder in a machine variable; the job's
           # own environment predates it, so read it from the registry.
           $root = [Environment]::GetEnvironmentVariable('GSTREAMER_1_0_ROOT_MSVC_X86_64', 'Machine')
