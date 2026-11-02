@@ -5,6 +5,7 @@
   import { bytes, date } from './format'
   import SkeletonGrid from './SkeletonGrid.svelte'
   import StateMessage from './StateMessage.svelte'
+  import VirtualGrid from './VirtualGrid.svelte'
 
   let {
     clips,
@@ -207,8 +208,8 @@
     </div>
 
     {#if shown.length}
-      <div class="clip-grid grid gap-x-4 gap-y-5">
-        {#each shown as clip (clip.path)}
+      <VirtualGrid items={shown} key={(c) => c.path}>
+        {#snippet children(clip)}
           <ClipCard
             {clip}
             selectable={selecting}
@@ -219,8 +220,8 @@
             onselect={() => toggle(clip)}
             onfavorite={() => onfavorite(clip)}
           />
-        {/each}
-      </div>
+        {/snippet}
+      </VirtualGrid>
     {:else}
       <StateMessage title="Nothing matches" body="Try another search or clear the filters.">
         <button

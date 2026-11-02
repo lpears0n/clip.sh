@@ -6,6 +6,8 @@ mod service;
 mod settings;
 mod storage;
 mod system;
+mod thumbs;
+mod watcher;
 
 use std::{
     path::{Path, PathBuf},
@@ -43,6 +45,9 @@ pub(crate) struct AppState {
     media: media_server::MediaServer,
     /// Set by `cancel_render` to stop the render in progress (one at a time).
     render_cancel: Arc<AtomicBool>,
+    thumbs: thumbs::Thumbnailer,
+    /// Folder watcher for the current clips folder; replaced when it changes.
+    watcher: Mutex<Option<watcher::Handle>>,
 }
 
 /// Emitted a few times a second while an edit renders.
@@ -202,9 +207,14 @@ async fn save_clip(state: State<'_, AppState>) -> CmdResult<PathBuf> {
 #[tauri::command]
 async fn list_clips(state: State<'_, AppState>) -> CmdResult<Vec<library::Clip>> {
     let dir = state.clips_dir();
-    tauri::async_runtime::spawn_blocking(move || library::list(&dir))
+    let clips = tauri::async_runtime::spawn_blocking(move || library::list(&dir))
         .await
-        .map_err(err)
+        .map_err(err)?;
+    // Images are made in the background; each arrives as a thumbnail-ready event.
+    for c in clips.iter().filter(|c| !library::is_cached(c)) {
+        state.thumbs.request(c.path.clone(), c.game.clone());
+    }
+    Ok(clips)
 }
 
 #[tauri::command]
@@ -237,8 +247,7 @@ async fn get_storage(state: State<'_, AppState>) -> CmdResult<storage::Usage> {
         .map_err(err)
 }
 
-/// Emitted when clips disappear behind the UI's back (storage limit).
-const LIBRARY_CHANGED: &str = "library-changed";
+use watcher::LIBRARY_CHANGED;
 
 /// Apply the storage limit off the async runtime; tell the UI if anything
 /// was removed.
@@ -306,6 +315,9 @@ async fn set_settings(
     }
     settings.save().map_err(|e| format!("{e:#}"))?;
     allow_clips_dir(&app, &settings.clips_dir);
+    if settings.clips_dir != state.settings.lock().unwrap().clips_dir {
+        watch_clips_dir(&app, &settings.clips_dir);
+    }
     state.service.configure(settings.recorder_config())?;
     *state.settings.lock().unwrap() = settings;
     enforce_storage(&app);
@@ -321,7 +333,7 @@ async fn open_for_edit(
 ) -> CmdResult<library::Clip> {
     app.asset_protocol_scope().allow_file(&path).map_err(err)?;
     state.media.allow(&path);
-    tauri::async_runtime::spawn_blocking(move || {
+    let clip = tauri::async_runtime::spawn_blocking(move || {
         let game = path
             .parent()
             .and_then(Path::file_name)
@@ -331,7 +343,11 @@ async fn open_for_edit(
     })
     .await
     .map_err(err)?
-    .map_err(|e| format!("{e:#}"))
+    .map_err(|e| format!("{e:#}"))?;
+    if !library::is_cached(&clip) {
+        state.thumbs.request(clip.path.clone(), clip.game.clone());
+    }
+    Ok(clip)
 }
 
 /// Trim `path` to `start..end` seconds, mixing audio tracks at `volumes`.
@@ -393,6 +409,19 @@ async fn render_clip(
 }
 
 /// Let the webview load videos and thumbnails through the asset protocol.
+/// (Re)start the folder watcher on `dir`.
+fn watch_clips_dir(app: &AppHandle, dir: &std::path::Path) {
+    let state = app.state::<AppState>();
+    let handle = match watcher::watch(app.clone(), dir) {
+        Ok(h) => Some(h),
+        Err(e) => {
+            tracing::warn!("can't watch {}: {e:#}", dir.display());
+            None
+        }
+    };
+    *state.watcher.lock().unwrap() = handle;
+}
+
 fn allow_clips_dir(app: &AppHandle, dir: &std::path::Path) {
     let scope = app.asset_protocol_scope();
     for d in [dir.to_owned(), library::cache_dir()] {
@@ -551,8 +580,11 @@ pub fn run() {
                 encoders: tokio::sync::OnceCell::new(),
                 media,
                 render_cancel: Arc::default(),
+                thumbs: thumbs::Thumbnailer::start(app.handle().clone()),
+                watcher: Mutex::new(None),
             });
             allow_clips_dir(app.handle(), &app.state::<AppState>().clips_dir());
+            watch_clips_dir(app.handle(), &app.state::<AppState>().clips_dir());
             tauri::async_runtime::spawn(listen_hotkey(app.handle().clone(), hotkey));
             {
                 let handle = app.handle().clone();

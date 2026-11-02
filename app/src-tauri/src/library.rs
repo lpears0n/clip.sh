@@ -1,5 +1,7 @@
-//! The clip library: `<clips_dir>/<game>/<timestamp>.mp4`, with thumbnails and
-//! durations cached in `$XDG_CACHE_HOME/clip.sh/thumbs/`.
+//! The clip library: `<clips_dir>/<game>/<timestamp>.mp4`, with thumbnails,
+//! sprite sheets and durations cached in `$XDG_CACHE_HOME/clip.sh/thumbs/`.
+//! Reading the library never decodes video; `generate` does that, from the
+//! thumbnail pool.
 
 use std::{
     hash::{DefaultHasher, Hash, Hasher},
@@ -23,6 +25,9 @@ pub struct Clip {
     pub is_edit: bool,
     pub steam_app_id: Option<u32>,
     pub thumbnail: Option<PathBuf>,
+    /// One row of evenly spaced frames for hover scrubbing.
+    pub sprite: Option<PathBuf>,
+    pub sprite_frames: usize,
     /// User-given name; the UI falls back to the game or time.
     pub title: Option<String>,
     pub favorite: bool,
@@ -132,12 +137,8 @@ pub fn copy_meta(from: &Path, to: &Path) {
 #[derive(Serialize, Deserialize)]
 struct CachedInfo {
     duration: f64,
-    /// Missing in caches written before track counting; those are redone.
-    audio_tracks: Option<usize>,
+    audio_tracks: usize,
 }
-
-/// Part of the cache key; v2 = 1280px thumbnails.
-const THUMB_VERSION: u32 = 2;
 
 pub fn cache_dir() -> PathBuf {
     dirs::cache_dir()
@@ -202,8 +203,8 @@ pub fn is_edit(path: &Path) -> bool {
         .is_some_and(|(_, n)| n.chars().all(|c| c.is_ascii_digit()))
 }
 
-/// All clips, newest first. Generates missing thumbnails, so call it off the
-/// async runtime.
+/// All clips, newest first. Reads only the filesystem and the cache; call
+/// it off the async runtime all the same (one stat and sidecar per clip).
 pub fn list(clips_dir: &Path) -> Vec<Clip> {
     let mut clips: Vec<Clip> = scan(clips_dir)
         .into_iter()
@@ -219,43 +220,46 @@ pub fn list(clips_dir: &Path) -> Vec<Clip> {
     clips
 }
 
-/// Describe one clip file.
-pub fn load(path: &Path, game: &str) -> Result<Clip> {
-    let meta = std::fs::metadata(path)?;
-    let modified = meta.modified()?;
-    let created_ms = modified.duration_since(UNIX_EPOCH)?.as_millis() as u64;
+/// Bumped whenever the generated images change shape or format.
+const THUMB_VERSION: u32 = 3;
 
-    // Cache key: path + size + mtime, so edited files get new thumbnails.
+/// Cache files for a clip, keyed by path + size + mtime (so a rewritten
+/// file gets new images) and the generator version.
+struct CacheFiles {
+    thumb: PathBuf,
+    sprite: PathBuf,
+    info: PathBuf,
+}
+
+fn cache_files(path: &Path, size: u64, created_ms: u64) -> CacheFiles {
     let mut h = DefaultHasher::new();
     // Bump THUMB_VERSION when thumbnail generation changes.
-    (THUMB_VERSION, path, meta.len(), created_ms).hash(&mut h);
+    (THUMB_VERSION, path, size, created_ms).hash(&mut h);
     let key = format!("{:016x}", h.finish());
     let dir = cache_dir();
-    let thumb = dir.join(format!("{key}.jpg"));
-    let info_path = dir.join(format!("{key}.json"));
+    CacheFiles {
+        thumb: dir.join(format!("{key}.webp")),
+        sprite: dir.join(format!("{key}.strip.webp")),
+        info: dir.join(format!("{key}.json")),
+    }
+}
 
-    let cached = std::fs::read_to_string(&info_path)
+fn file_times(path: &Path) -> Result<(u64, u64)> {
+    let meta = std::fs::metadata(path)?;
+    let created_ms = meta.modified()?.duration_since(UNIX_EPOCH)?.as_millis() as u64;
+    Ok((meta.len(), created_ms))
+}
+
+/// Describe one clip file from the filesystem and the cache. Never decodes
+/// video: `thumbnail`, `sprite` and `duration` are `None` until `generate`
+/// has run for this file.
+pub fn load(path: &Path, game: &str) -> Result<Clip> {
+    let (size_bytes, created_ms) = file_times(path)?;
+    let files = cache_files(path, size_bytes, created_ms);
+    let info = std::fs::read_to_string(&files.info)
         .ok()
         .and_then(|s| serde_json::from_str::<CachedInfo>(&s).ok());
-    let info = match cached {
-        Some(c) if thumb.exists() && c.audio_tracks.is_some() => Some(c),
-        _ => match clip_core::media::inspect(path) {
-            Ok(info) => {
-                std::fs::create_dir_all(&dir)?;
-                std::fs::write(&thumb, &info.thumbnail)?;
-                let c = CachedInfo {
-                    duration: info.duration.seconds_f64(),
-                    audio_tracks: Some(info.audio_tracks),
-                };
-                std::fs::write(&info_path, serde_json::to_string(&c)?)?;
-                Some(c)
-            }
-            Err(e) => {
-                tracing::warn!("can't read {}: {e:#}", path.display());
-                None
-            }
-        },
-    };
+    let has_images = files.thumb.exists() && files.sprite.exists();
 
     let user = read_meta(path).unwrap_or_default();
     Ok(Clip {
@@ -266,16 +270,40 @@ pub fn load(path: &Path, game: &str) -> Result<Clip> {
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_default(),
         created_ms,
-        size_bytes: meta.len(),
+        size_bytes,
         duration: info.as_ref().map(|c| c.duration),
-        audio_tracks: info.as_ref().and_then(|c| c.audio_tracks).unwrap_or(0),
+        audio_tracks: info.as_ref().map(|c| c.audio_tracks).unwrap_or(0),
         is_edit: is_edit(path),
         steam_app_id: user.steam_app_id,
-        thumbnail: thumb.exists().then_some(thumb),
+        thumbnail: has_images.then(|| files.thumb.clone()),
+        sprite: has_images.then(|| files.sprite.clone()),
+        sprite_frames: clip_core::media::SPRITE_FRAMES,
         title: user.title,
         favorite: user.favorite,
         labels: user.labels,
     })
+}
+
+/// Whether `load` would come back complete for this file.
+pub fn is_cached(clip: &Clip) -> bool {
+    clip.thumbnail.is_some() && clip.duration.is_some()
+}
+
+/// Decode the clip and write its thumbnail, sprite sheet and info to the
+/// cache. Slow (a second or two per clip); run it from the thumbnail pool.
+pub fn generate(path: &Path) -> Result<()> {
+    let (size_bytes, created_ms) = file_times(path)?;
+    let files = cache_files(path, size_bytes, created_ms);
+    let info = clip_core::media::inspect(path)?;
+    std::fs::create_dir_all(cache_dir())?;
+    std::fs::write(&files.thumb, &info.thumbnail)?;
+    std::fs::write(&files.sprite, &info.sprite)?;
+    let c = CachedInfo {
+        duration: info.duration.seconds_f64(),
+        audio_tracks: info.audio_tracks,
+    };
+    std::fs::write(&files.info, serde_json::to_string(&c)?)?;
+    Ok(())
 }
 
 /// Where to render an edit of `source`: next to it when it's in the library,

@@ -120,7 +120,8 @@ fn saves_last_n_seconds_as_mp4() {
 
     let info = clip_core::media::inspect(&path).unwrap();
     assert!((2.9..=3.2).contains(&info.duration.seconds_f64()));
-    assert_eq!(&info.thumbnail[..2], &[0xFF, 0xD8], "not a JPEG");
+    assert_eq!(&info.thumbnail[..4], b"RIFF", "thumbnail is not WebP");
+    assert_eq!(&info.sprite[..4], b"RIFF", "sprite is not WebP");
 
     assert_eq!(info.audio_tracks, 1);
 

@@ -5,6 +5,7 @@
 
   let {
     status,
+    now,
     hotkey,
     saving,
     flash,
@@ -13,6 +14,8 @@
     onchoosescreen,
   }: {
     status: Status | null
+    /** Wall clock from the app's local tick; the buffer fill is derived from it. */
+    now: number
     hotkey: string
     saving: boolean
     /** Briefly true after a clip is saved; plays the shutter flash. */
@@ -23,6 +26,13 @@
   } = $props()
 
   const recording = $derived(status?.state === 'recording')
+  // The buffer fills from the session start up to the replay length; no
+  // need to ask the backend every second.
+  const buffered = $derived.by(() => {
+    if (!status) return 0
+    const since = status.session_start_ms ? (now - status.session_start_ms) / 1000 : status.buffered_seconds
+    return Math.floor(Math.min(status.replay_seconds, Math.max(status.buffered_seconds, since)))
+  })
 </script>
 
 <div class="flex min-w-0 items-center gap-3">
@@ -35,7 +45,7 @@
     <div class="flex min-w-0 items-center gap-2.5">
       <span class="size-2 flex-none rounded-full bg-danger"></span>
       <span class="display-face max-w-64 truncate text-body font-semibold">{status?.game}</span>
-      <span class="text-secondary text-muted tabular-nums">{Math.floor(status?.buffered_seconds ?? 0)}s</span>
+      <span class="text-secondary text-muted tabular-nums">{buffered}s</span>
     </div>
     <button class="btn-primary relative h-8 overflow-hidden px-3" onclick={onsave} disabled={saving}>
       Clip <kbd class="h-5 border-black/20 bg-black/15 text-on-accent">{hotkey}</kbd>

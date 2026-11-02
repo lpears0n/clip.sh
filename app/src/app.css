@@ -215,6 +215,12 @@
   grid-template-columns: repeat(auto-fill, minmax(var(--card-min, 300px), 1fr));
 }
 
+/* Offscreen cards skip layout and paint; the size hint keeps the scrollbar stable. */
+@utility cv-auto {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 240px;
+}
+
 /* Placeholder for a thumbnail that hasn't been made yet. */
 @utility thumb-empty {
   background: linear-gradient(135deg, var(--color-raised), var(--color-panel));

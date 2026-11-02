@@ -367,13 +367,13 @@ the commit history); the audit table above describes the UI before them.
    views.
 3. ~~**States**~~ Done. Skeleton grid for first load, designed empty and
    error states for every view, progress with cancel for renders.
-4. **Event-driven data** (2 days). Folder watcher, `usage-changed`,
+4. ~~**Event-driven data**~~ Done. Folder watcher, `usage-changed`,
    thumbnail-ready events, delete the three intervals, `$state.raw` for the
    clip list.
-5. **Thumbnail pipeline** (2 days). WebP at display size plus sprite sheet
+5. ~~**Thumbnail pipeline**~~ Done (WebP + sprite, worker pool, cached first paint in `localStorage` rather than an index file). WebP at display size plus sprite sheet
    in one pass, bounded worker pool, index file for instant startup.
-6. **Grid virtualisation** (1 day) once the above is in, if the 2 000-clip
-   budget is missed.
+6. ~~**Grid virtualisation**~~ Done: `VirtualGrid` windows rows above 120
+   clips; measured 880 clips → 21 cards in the DOM.
 7. **Zero-copy capture** (1–2 weeks). NVIDIA GL path first, VA-API second,
    with the measurement harness in `crates/clip-core/examples`.
 

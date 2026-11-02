@@ -12,6 +12,7 @@
     hotkey,
     status,
     settings,
+    now,
     onopen,
     onchoosescreen,
     onsettings,
@@ -21,6 +22,8 @@
     hotkey: string
     status: Status | null
     settings: Settings | null
+    /** Wall clock from the app's local tick, for "playing for". */
+    now: number
     onopen: (g: GameEntry) => void
     onchoosescreen: () => void
     onsettings: (c: Category) => void
@@ -37,7 +40,7 @@
     hero
       ? [
           hero.playing
-            ? `Playing now${session ? ` for ${playtime(Date.now() - session.start_ms)}` : ''}`
+            ? `Playing now${session ? ` for ${playtime(now - session.start_ms)}` : ''}`
             : hero.last_played_ms
               ? `Last played ${ago(hero.last_played_ms)}`
               : null,

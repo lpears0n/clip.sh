@@ -114,7 +114,11 @@
     trimming = false
     start = 0
     end = clip.duration ?? 0
-    levels = Array.from({ length: clip.audio_tracks }, () => 100)
+  })
+
+  // Track count can arrive later (thumbnail pool); keep one level per track.
+  $effect(() => {
+    if (levels.length !== clip.audio_tracks) levels = Array.from({ length: clip.audio_tracks }, () => 100)
   })
 
   function loaded() {

@@ -31,6 +31,9 @@ export interface Clip {
   is_edit: boolean
   steam_app_id: number | null
   thumbnail: string | null
+  /** One row of `sprite_frames` frames for hover scrubbing. */
+  sprite: string | null
+  sprite_frames: number
   /** User-given name; show the game or time when null. */
   title: string | null
   favorite: boolean
@@ -140,6 +143,10 @@ export const onLibraryChanged = (f: () => void): Promise<UnlistenFn> =>
 
 export const onClipSaved = (f: (path: string) => void): Promise<UnlistenFn> =>
   listen<string>('clip-saved', (e) => f(e.payload))
+
+/** A clip's thumbnail, sprite and duration were generated in the background. */
+export const onThumbnailReady = (f: (c: Clip) => void): Promise<UnlistenFn> =>
+  listen<Clip>('thumbnail-ready', (e) => f(e.payload))
 
 /** URL the webview can load a local image from. */
 export const fileUrl = (path: string) => convertFileSrc(path)

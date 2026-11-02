@@ -36,19 +36,35 @@
   // First click arms the delete button, second deletes.
   let armed = $state(false)
 
-  // Hover preview: after the pointer rests a moment, a muted video plays
-  // in place of the thumbnail (Medal calls these quick previews).
+  // Hovering scrubs the sprite sheet (ten frames, no decoding). With hover
+  // previews on, a muted video takes over after the pointer rests a moment.
+  let hovering = $state(false)
+  let frame = $state(0)
   let previewing = $state(false)
   let previewTimer: ReturnType<typeof setTimeout>
 
   function enter() {
+    hovering = true
     if (!prefs.hoverPreviews || prefs.reduceMotion) return
     clearTimeout(previewTimer)
     previewTimer = setTimeout(() => (previewing = true), 450)
   }
 
+  function scrub(e: PointerEvent) {
+    if (!clip.sprite) return
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+    const x = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width))
+    frame = Math.min(clip.sprite_frames - 1, Math.floor(x * clip.sprite_frames))
+    // Moving the pointer means the user is scrubbing, not waiting for video.
+    clearTimeout(previewTimer)
+    if (!previewing && prefs.hoverPreviews && !prefs.reduceMotion) {
+      previewTimer = setTimeout(() => (previewing = true), 450)
+    }
+  }
+
   function leave() {
     clearTimeout(previewTimer)
+    hovering = false
     previewing = false
     armed = false
   }
@@ -61,14 +77,15 @@
   $effect(() => () => clearTimeout(previewTimer))
 </script>
 
-<div class="group min-w-0">
+<div class="group cv-auto min-w-0">
   <div
     class="relative aspect-video cursor-pointer overflow-hidden rounded-card bg-panel ring-1 transition-shadow duration-fast ring-inset focus-visible:ring-2 focus-visible:ring-accent focus-visible:outline-none
       {selected ? 'ring-2 ring-accent' : 'ring-line hover:ring-line-strong'}"
     onclick={activate}
     onkeydown={(e) => e.key === 'Enter' && activate()}
-    onmouseenter={enter}
-    onmouseleave={leave}
+    onpointerenter={enter}
+    onpointermove={scrub}
+    onpointerleave={leave}
     role="button"
     tabindex="0"
     aria-pressed={selectable ? selected : undefined}
@@ -86,6 +103,16 @@
       <div class="thumb-empty flex size-full items-end justify-start p-3 text-muted/50">
         <Clapperboard size={20} strokeWidth={1.6} />
       </div>
+    {/if}
+
+    {#if hovering && clip.sprite && !previewing}
+      <div
+        class="absolute inset-0 bg-cover"
+        style:background-image="url({fileUrl(clip.sprite)})"
+        style:background-size="{clip.sprite_frames * 100}% 100%"
+        style:background-position="{(frame / (clip.sprite_frames - 1)) * 100}% 0"
+        aria-hidden="true"
+      ></div>
     {/if}
 
     {#if previewing}

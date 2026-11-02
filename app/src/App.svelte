@@ -15,11 +15,14 @@
     onLibraryChanged,
     onRenderProgress,
     onStatusChanged,
+    onThumbnailReady,
     type Settings,
     type Status,
     type Usage,
   } from './lib/api'
+  import { readLibraryCache, writeLibraryCache } from './lib/cache'
   import ClipsView from './lib/ClipsView.svelte'
+  import { coalesce } from './lib/coalesce'
   import ClipViewer from './lib/ClipViewer.svelte'
   import GamesView from './lib/GamesView.svelte'
   import GameView from './lib/GameView.svelte'
@@ -51,6 +54,9 @@
   let allClips = $state.raw<Clip[]>([])
   let games = $state.raw<GameEntry[]>([])
   let loading = $state(true)
+  /** Wall clock for live counters (buffer fill, "playing for"); ticks once
+   *  a second while recording, otherwise once a minute. No IPC involved. */
+  let now = $state(Date.now())
   /** Why the library couldn't be read, shown in place of the views. */
   let libraryError = $state<string | null>(null)
   let rendering = $state(false)
@@ -91,17 +97,27 @@
     viewing = null
   }
 
-  async function refreshLibrary() {
+  async function loadLibrary() {
     try {
-      // Fetch clips first: listing them generates the thumbnails games use.
       allClips = await api.clips()
       games = await api.games()
       libraryError = null
+      writeLibraryCache(allClips, games)
     } catch (e) {
       libraryError = String(e)
     } finally {
       loading = false
     }
+  }
+
+  // Saves, the folder watcher and storage enforcement can all fire within
+  // the same second; they cost one fetch.
+  const refreshLibrary = coalesce(loadLibrary)
+
+  /** A clip's images and duration arrived from the thumbnail pool. */
+  function thumbnailReady(c: Clip) {
+    allClips = allClips.map((x) => (x.path === c.path ? { ...x, ...c, title: x.title, favorite: x.favorite, labels: x.labels } : x))
+    if (viewing?.path === c.path) viewing = { ...viewing, ...c, title: viewing.title, favorite: viewing.favorite, labels: viewing.labels }
   }
 
   async function refreshStatus() {
@@ -255,14 +271,33 @@
 
   onMount(() => {
     initMedia()
+    // Paint the last known library at once; the real listing replaces it.
+    const cached = readLibraryCache()
+    if (cached) {
+      allClips = cached.clips
+      games = cached.games
+      loading = false
+    }
     refreshStatus()
-    refreshLibrary()
+    loadLibrary()
     refreshUsage()
     api.settings().then((s) => (settings = s))
     // Probing encoders takes a moment; settings fill in when it's done.
     api.capabilities().then((c) => (caps = c))
-    // State changes arrive as events; polls keep buffer, disk and play time fresh.
-    const polls = [setInterval(refreshStatus, 2000), setInterval(refreshUsage, 15000), setInterval(refreshLibrary, 60000)]
+    // Everything else arrives as events. Coming back to the window is the one
+    // moment worth re-checking, in case an event was missed while hidden.
+    const onFocus = () => {
+      if (document.visibilityState !== 'visible') return
+      refreshStatus()
+      refreshLibrary()
+      refreshUsage()
+    }
+    window.addEventListener('focus', onFocus)
+    document.addEventListener('visibilitychange', onFocus)
+    const tick = setInterval(() => {
+      const recording = status?.state === 'recording'
+      if (recording || Date.now() - now >= 60_000) now = Date.now()
+    }, 1000)
     const unlisten = [
       onStatusChanged((s) => {
         status = s
@@ -280,6 +315,7 @@
         refreshLibrary()
         refreshUsage()
       }),
+      onThumbnailReady(thumbnailReady),
       onRenderProgress((p) => {
         if (viewing?.path === p.path) renderProgress = p.fraction
       }),
@@ -296,7 +332,9 @@
     const onMotion = () => applyPrefs(prefs)
     motion.addEventListener('change', onMotion)
     return () => {
-      polls.forEach(clearInterval)
+      clearInterval(tick)
+      window.removeEventListener('focus', onFocus)
+      document.removeEventListener('visibilitychange', onFocus)
       unlisten.forEach((u) => u.then((f) => f()))
       motion.removeEventListener('change', onMotion)
     }
@@ -320,7 +358,7 @@
       </button>
       <h1 class="display-face truncate text-title font-semibold">{title}</h1>
       <div class="min-w-0 flex-1"></div>
-      <StatusBar {status} {flash} {saving} {hotkey} onsave={save} onopen={pickVideo} onchoosescreen={chooseScreen} />
+      <StatusBar {status} {now} {flash} {saving} {hotkey} onsave={save} onopen={pickVideo} onchoosescreen={chooseScreen} />
     </header>
 
     <main class="flex min-h-0 flex-1 flex-col bg-canvas">
@@ -372,6 +410,7 @@
             {hotkey}
             {status}
             {settings}
+            {now}
             onopen={(g) => {
               gameName = g.name
               go('game')

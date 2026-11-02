@@ -1,4 +1,9 @@
-//! Inspect saved clips: duration and a JPEG thumbnail.
+//! Inspect saved clips: duration, audio track count, a WebP thumbnail and a
+//! sprite sheet of evenly spaced frames for hover scrubbing.
+//!
+//! One decode pipeline produces every frame at thumbnail size; the sprite
+//! frames are downscaled from those in software, and both images are encoded
+//! through a tiny `appsrc → webpenc` pipeline.
 
 use std::path::Path;
 
@@ -6,23 +11,40 @@ use anyhow::{Context, Result, bail};
 use gstreamer as gst;
 use gstreamer::prelude::*;
 use gstreamer_app as gst_app;
+use gstreamer_video as gst_video;
+use gstreamer_video::prelude::*;
 
-pub const THUMB_WIDTH: i32 = 1280;
+/// Thumbnail width; cards are shown at most ~320 px wide at 1x.
+pub const THUMB_WIDTH: i32 = 320;
+/// Each sprite frame is half the thumbnail size.
+pub const SPRITE_FRAME_WIDTH: i32 = THUMB_WIDTH / 2;
+/// Frames in the sprite sheet, laid out in one row.
+pub const SPRITE_FRAMES: usize = 10;
 
 pub struct ClipInfo {
     pub duration: gst::ClockTime,
     pub audio_tracks: usize,
-    /// JPEG bytes, `THUMB_WIDTH` wide, aspect preserved.
+    /// WebP, `THUMB_WIDTH` wide, aspect preserved.
     pub thumbnail: Vec<u8>,
+    /// WebP, `SPRITE_FRAMES` frames of `SPRITE_FRAME_WIDTH` side by side.
+    pub sprite: Vec<u8>,
 }
 
-/// Decode the frame about one second in (or the first, for shorter clips).
+struct Frame {
+    width: usize,
+    height: usize,
+    /// Tightly packed RGB.
+    rgb: Vec<u8>,
+}
+
+/// Decode the frame about one second in (or the first, for shorter clips)
+/// for the thumbnail, and `SPRITE_FRAMES` more spread across the clip.
 pub fn inspect(path: &Path) -> Result<ClipInfo> {
     let uri = gst::glib::filename_to_uri(path, None)?;
     let pipeline = gst::parse::launch(&format!(
         "uridecodebin uri=\"{uri}\" name=dec ! videoconvert ! videoscale \
-         ! video/x-raw,width={THUMB_WIDTH},pixel-aspect-ratio=1/1 \
-         ! jpegenc quality=80 ! appsink name=sink max-buffers=1"
+         ! video/x-raw,format=RGB,width={THUMB_WIDTH},pixel-aspect-ratio=1/1 \
+         ! appsink name=sink max-buffers=1"
     ))?
     .downcast::<gst::Pipeline>()
     .unwrap();
@@ -57,21 +79,129 @@ pub fn inspect(path: &Path) -> Result<ClipInfo> {
         let duration = pipeline
             .query_duration::<gst::ClockTime>()
             .context("clip has no duration")?;
-        let at = gst::ClockTime::from_seconds(1).min(duration / 2);
-        if at > gst::ClockTime::ZERO {
+
+        let grab = |at: gst::ClockTime| -> Result<Frame> {
             pipeline.seek_simple(gst::SeekFlags::FLUSH | gst::SeekFlags::KEY_UNIT, at)?;
             wait_preroll(&pipeline)?;
+            let sample = sink
+                .try_pull_preroll(gst::ClockTime::from_seconds(5))
+                .context("no frame decoded")?;
+            frame_of(&sample)
+        };
+
+        let at = gst::ClockTime::from_seconds(1).min(duration / 2);
+        let thumb = grab(at)?;
+        let mut strip: Vec<Frame> = Vec::with_capacity(SPRITE_FRAMES);
+        for i in 0..SPRITE_FRAMES {
+            // Centre of each tenth, so the last frame isn't the (often black) end.
+            let t = duration.mul_div_floor(2 * i as u64 + 1, 2 * SPRITE_FRAMES as u64);
+            let f = grab(t.unwrap_or(gst::ClockTime::ZERO))?;
+            strip.push(halve(&f));
         }
-        let sample = sink
-            .try_pull_preroll(gst::ClockTime::from_seconds(5))
-            .context("no frame decoded")?;
-        let buf = sample.buffer().context("empty frame")?;
-        let thumbnail = buf.map_readable()?.to_vec();
+        let sprite = concat_row(&strip);
         Ok(ClipInfo {
             duration,
             audio_tracks: audio.load(std::sync::atomic::Ordering::Relaxed),
-            thumbnail,
+            thumbnail: encode_webp(&thumb, 82)?,
+            sprite: encode_webp(&sprite, 70)?,
         })
+    })();
+    let _ = pipeline.set_state(gst::State::Null);
+    result
+}
+
+/// Copy a sample's RGB frame into tightly packed rows (GStreamer pads rows).
+fn frame_of(sample: &gst::Sample) -> Result<Frame> {
+    let caps = sample.caps().context("frame has no caps")?;
+    let info = gst_video::VideoInfo::from_caps(caps)?;
+    let buf = sample.buffer().context("empty frame")?;
+    let frame = gst_video::VideoFrameRef::from_buffer_ref_readable(buf, &info)
+        .context("unreadable frame")?;
+    let (width, height) = (info.width() as usize, info.height() as usize);
+    let stride = frame.plane_stride()[0] as usize;
+    let data = frame.plane_data(0).context("no plane data")?;
+    let mut rgb = Vec::with_capacity(width * height * 3);
+    for y in 0..height {
+        rgb.extend_from_slice(&data[y * stride..y * stride + width * 3]);
+    }
+    Ok(Frame { width, height, rgb })
+}
+
+/// 2×2 box downscale.
+fn halve(f: &Frame) -> Frame {
+    let (w, h) = (f.width / 2, f.height / 2);
+    let mut rgb = Vec::with_capacity(w * h * 3);
+    for y in 0..h {
+        for x in 0..w {
+            for c in 0..3 {
+                let p = |yy: usize, xx: usize| f.rgb[(yy * f.width + xx) * 3 + c] as u32;
+                let sum = p(2 * y, 2 * x)
+                    + p(2 * y, 2 * x + 1)
+                    + p(2 * y + 1, 2 * x)
+                    + p(2 * y + 1, 2 * x + 1);
+                rgb.push((sum / 4) as u8);
+            }
+        }
+    }
+    Frame {
+        width: w,
+        height: h,
+        rgb,
+    }
+}
+
+/// Frames side by side (all the same size).
+fn concat_row(frames: &[Frame]) -> Frame {
+    let (fw, h) = (frames[0].width, frames[0].height);
+    let width = fw * frames.len();
+    let mut rgb = vec![0u8; width * h * 3];
+    for (i, f) in frames.iter().enumerate() {
+        for y in 0..h {
+            let dst = (y * width + i * fw) * 3;
+            rgb[dst..dst + fw * 3].copy_from_slice(&f.rgb[y * fw * 3..(y + 1) * fw * 3]);
+        }
+    }
+    Frame {
+        width,
+        height: h,
+        rgb,
+    }
+}
+
+/// Encode one RGB frame as WebP.
+fn encode_webp(f: &Frame, quality: u32) -> Result<Vec<u8>> {
+    let pipeline = gst::parse::launch(&format!(
+        "appsrc name=src is-live=false format=time \
+         caps=video/x-raw,format=RGB,width={},height={},framerate=0/1 \
+         ! videoconvert ! webpenc quality={quality} ! appsink name=sink",
+        f.width, f.height
+    ))?
+    .downcast::<gst::Pipeline>()
+    .unwrap();
+    let src = pipeline
+        .by_name("src")
+        .unwrap()
+        .downcast::<gst_app::AppSrc>()
+        .unwrap();
+    let sink = pipeline
+        .by_name("sink")
+        .unwrap()
+        .downcast::<gst_app::AppSink>()
+        .unwrap();
+    let result = (|| {
+        pipeline.set_state(gst::State::Playing)?;
+        let mut buf = gst::Buffer::from_slice(f.rgb.clone());
+        buf.get_mut().unwrap().set_pts(gst::ClockTime::ZERO);
+        src.push_buffer(buf).context("pushing frame")?;
+        src.end_of_stream().context("ending stream")?;
+        let sample = sink
+            .try_pull_sample(gst::ClockTime::from_seconds(5))
+            .context("no image encoded")?;
+        Ok(sample
+            .buffer()
+            .context("empty image")?
+            .map_readable()?
+            .to_vec())
     })();
     let _ = pipeline.set_state(gst::State::Null);
     result
