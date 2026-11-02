@@ -32,6 +32,9 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
+          # The 22.04 runner image ships LLVM's libunwind-14-dev, which
+          # conflicts with the libunwind-dev that libgstreamer1.0-dev needs.
+          sudo apt-get remove -y libunwind-14-dev || true
           sudo apt-get install -y --no-install-recommends \
             libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
             libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf \
