@@ -28,6 +28,9 @@ jobs:
         working-directory: app
       - run: pnpm build
         working-directory: app
+      - name: UI smoke test (Chromium, Tauri bridge mocked)
+        run: npx playwright install --with-deps chromium && pnpm test:ui
+        working-directory: app
 
   rust:
     name: Rust (clippy, test) · Linux

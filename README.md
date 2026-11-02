@@ -19,7 +19,9 @@ pnpm install
 pnpm tauri dev
 ```
 
-To build a release binary instead, use `pnpm tauri build`. There's also a small CLI, `clipsh save`, that talks to the running app. Bind it to a key in your desktop settings if the in-app hotkey doesn't work for you.
+To build a release binary instead, use `pnpm tauri build`. `pnpm test:ui`
+drives every view in a headless Chromium with the Tauri bridge mocked and
+leaves screenshots under `app/tests/shots/`; it runs in CI too. There's also a small CLI, `clipsh save`, that talks to the running app. Bind it to a key in your desktop settings if the in-app hotkey doesn't work for you.
 
 ## How it works / Tech stack
 
