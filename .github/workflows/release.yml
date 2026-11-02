@@ -41,9 +41,21 @@ jobs:
         shell: pwsh
         run: |
           choco install -y --no-progress gstreamer gstreamer-devel pkgconfiglite
-          echo "GSTREAMER_1_0_ROOT_MSVC_X86_64=C:\gstreamer\1.0\msvc_x86_64" >> $env:GITHUB_ENV
-          echo "PKG_CONFIG_PATH=C:\gstreamer\1.0\msvc_x86_64\lib\pkgconfig" >> $env:GITHUB_ENV
-          echo "C:\gstreamer\1.0\msvc_x86_64\bin" >> $env:GITHUB_PATH
+          # The installer records its folder in a machine variable; the job's
+          # own environment predates it, so read it from the registry.
+          $root = [Environment]::GetEnvironmentVariable('GSTREAMER_1_0_ROOT_MSVC_X86_64', 'Machine')
+          if (-not $root) {
+            $root = (Get-ChildItem 'C:\Program Files\gstreamer\1.0', 'C:\gstreamer\1.0' -Directory -Filter msvc_x86_64 -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
+          }
+          if (-not $root) { throw 'GStreamer install folder not found' }
+          $root = $root.TrimEnd('\')
+          Write-Host "GStreamer at $root"
+          "GSTREAMER_1_0_ROOT_MSVC_X86_64=$root" >> $env:GITHUB_ENV
+          "PKG_CONFIG_PATH=$root\lib\pkgconfig" >> $env:GITHUB_ENV
+          "$root\bin" >> $env:GITHUB_PATH
+          # Prefer the pkg-config GStreamer ships over the Chocolatey one.
+          if (Test-Path "$root\bin\pkg-config.exe") { "PKG_CONFIG=$root\bin\pkg-config.exe" >> $env:GITHUB_ENV }
+          if (-not (Test-Path "$root\lib\pkgconfig\glib-2.0.pc")) { throw "no glib-2.0.pc under $root" }
       - uses: pnpm/action-setup@v4
         with:
           version: 10
