@@ -17,13 +17,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     audio::{AudioSource, add_audio_branch},
-    capture::{CapturePath, PipewireTarget, VideoConfig, add_video_branch},
+    capture::{CapturePath, CaptureTarget, VideoConfig, add_video_branch},
     encoder::Encoder,
-    kwin::KwinStream,
-    portal::ScreenSource,
     ring::{ReplayBuffer, running_time_buffer},
     save::write_mp4,
 };
+#[cfg(target_os = "linux")]
+use crate::{capture::PipewireTarget, kwin::KwinStream, portal::ScreenSource};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RecorderConfig {
@@ -82,23 +82,41 @@ pub struct Status {
 /// What is being captured. Keeps the underlying session alive.
 pub enum CaptureSource {
     /// A screen or window picked through the xdg portal.
+    #[cfg(target_os = "linux")]
     Portal(ScreenSource),
     /// A window streamed by KWin directly (no picker).
+    #[cfg(target_os = "linux")]
     Kwin(KwinStream),
+    /// A monitor, through Windows Graphics Capture.
+    #[cfg(windows)]
+    Screen(crate::win::Target),
 }
 
 impl CaptureSource {
-    fn target(&self) -> PipewireTarget {
+    fn target(&self) -> CaptureTarget {
         match self {
-            CaptureSource::Portal(s) => s.target(),
-            CaptureSource::Kwin(s) => PipewireTarget::Serial(s.pipewire_serial()),
+            #[cfg(target_os = "linux")]
+            CaptureSource::Portal(s) => CaptureTarget::Pipewire(s.target()),
+            #[cfg(target_os = "linux")]
+            CaptureSource::Kwin(s) => {
+                CaptureTarget::Pipewire(PipewireTarget::Serial(s.pipewire_serial()))
+            }
+            #[cfg(windows)]
+            CaptureSource::Screen(t) => CaptureTarget::Monitor {
+                handle: t.monitor,
+                cursor: t.cursor,
+            },
         }
     }
 
     async fn close(self) -> Result<()> {
         match self {
+            #[cfg(target_os = "linux")]
             CaptureSource::Portal(s) => s.close().await,
+            #[cfg(target_os = "linux")]
             CaptureSource::Kwin(_) => Ok(()),
+            #[cfg(windows)]
+            CaptureSource::Screen(_) => Ok(()),
         }
     }
 }
@@ -204,8 +222,10 @@ impl Recorder {
     /// Token to persist so the next start skips the screen picker.
     pub fn restore_token(&self) -> Option<&str> {
         match self.source.as_ref()? {
+            #[cfg(target_os = "linux")]
             CaptureSource::Portal(s) => s.restore_token(),
-            CaptureSource::Kwin(_) => None,
+            #[allow(unreachable_patterns)]
+            _ => None,
         }
     }
 
@@ -267,7 +287,7 @@ impl Pipeline {
     fn build(
         cfg: &RecorderConfig,
         encoder: Encoder,
-        target: PipewireTarget,
+        target: CaptureTarget,
         path: CapturePath,
     ) -> Result<Self> {
         let window = gst::ClockTime::from_seconds(cfg.replay_seconds.into());

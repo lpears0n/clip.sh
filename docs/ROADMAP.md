@@ -205,6 +205,10 @@ uses `RegisterHotKey`, which fires over borderless-fullscreen games and most
 exclusive-fullscreen ones; keep `clipsh save` + the IPC socket (named pipe
 on Windows) as the fallback.
 
+**Status (November 2026):** steps 1 and most of 2 below are done; see
+`docs/WINDOWS.md`. The code compiles for Windows and CI checks it on
+`windows-latest`, but it has not run on a Windows machine yet.
+
 **Hard parts, in order.**
 
 1. `clip-core` compiles on Windows: gate `kwin`, `portal`, `hotkey`

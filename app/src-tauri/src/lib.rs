@@ -1,4 +1,5 @@
 mod games;
+mod hotkeys;
 mod ipc_server;
 mod library;
 mod media_server;
@@ -17,11 +18,7 @@ use std::{
     },
 };
 
-use clip_core::{
-    Codec, Encoder,
-    export::Edit,
-    hotkey::{Hotkey, HotkeyBackend},
-};
+use clip_core::{Codec, Encoder, export::Edit};
 use serde::Serialize;
 
 use service::{Service, Status};
@@ -36,9 +33,7 @@ use tauri_plugin_opener::OpenerExt;
 pub(crate) struct AppState {
     pub(crate) service: Service,
     settings: Mutex<Settings>,
-    /// `None` when KGlobalAccel isn't available (not KDE).
-    /// `None` until registered, and when no hotkey service exists.
-    shortcut: tokio::sync::Mutex<Option<Hotkey>>,
+    hotkeys: hotkeys::Hotkeys,
     encoder: OnceLock<Encoder>,
     /// Which encoders handle which codecs; probing test-encodes, so do it once.
     encoders: tokio::sync::OnceCell<Vec<EncoderSupport>>,
@@ -88,8 +83,8 @@ async fn choose_screen(state: State<'_, AppState>) -> CmdResult<()> {
 /// How the global hotkey is provided: "kglobalaccel", "portal", or null when
 /// the desktop has neither (the UI then explains `clipsh save`).
 #[tauri::command]
-async fn hotkey_backend(state: State<'_, AppState>) -> CmdResult<Option<HotkeyBackend>> {
-    Ok(state.shortcut.lock().await.as_ref().map(Hotkey::backend))
+async fn hotkey_backend(state: State<'_, AppState>) -> CmdResult<Option<hotkeys::Backend>> {
+    Ok(state.hotkeys.backend().await)
 }
 
 /// Recently played games with clips, sessions and Steam art.
@@ -300,18 +295,7 @@ async fn set_settings(
         system::set_autostart(settings.launch_at_login).map_err(|e| format!("{e:#}"))?;
     }
     if settings.hotkey != old_hotkey {
-        match state.shortcut.lock().await.as_ref() {
-            Some(s) => s
-                .set_keys(&settings.hotkey)
-                .await
-                .map_err(|e| format!("{e:#}"))?,
-            None => {
-                return Err(
-                    "your desktop has no global shortcut service; bind `clipsh save` in its keyboard settings"
-                        .into(),
-                );
-            }
-        }
+        state.hotkeys.set_keys(&app, &settings.hotkey).await?;
     }
     settings.save().map_err(|e| format!("{e:#}"))?;
     allow_clips_dir(&app, &settings.clips_dir);
@@ -443,26 +427,6 @@ pub(crate) fn show_main(app: &AppHandle) {
     }
 }
 
-/// Register the global hotkey and save a clip on every press.
-async fn listen_hotkey(app: AppHandle, keys: String) {
-    // CLIPSH_HOTKEY_PORTAL=1 tests the portal path on KDE.
-    let skip_kde = std::env::var_os("CLIPSH_HOTKEY_PORTAL").is_some();
-    let (shortcut, mut presses) = match Hotkey::register(&keys, skip_kde).await {
-        Ok(v) => v,
-        Err(e) => {
-            tracing::warn!("global hotkey unavailable: {e:#}");
-            return;
-        }
-    };
-    let state = app.state::<AppState>();
-    *state.shortcut.lock().await = Some(shortcut);
-    while presses.recv().await.is_some() {
-        if let Err(e) = state.service.save(state.clips_dir()).await {
-            tracing::warn!("hotkey save failed: {e}");
-        }
-    }
-}
-
 /// Notification + sound for a newly saved clip, as configured.
 fn announce_saved(app: &AppHandle, path: &std::path::Path) {
     let (notify, sound) = {
@@ -484,8 +448,9 @@ fn announce_saved(app: &AppHandle, path: &std::path::Path) {
         } else {
             "Clip saved"
         };
+        let app = app.clone();
         tauri::async_runtime::spawn(async move {
-            if let Err(e) = system::notify(summary, &game).await {
+            if let Err(e) = system::notify(&app, summary, &game).await {
                 tracing::debug!("notify: {e:#}");
             }
         });
@@ -545,9 +510,14 @@ pub fn run() {
         panic!("GStreamer failed to initialise: {e}");
     }
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_dialog::init());
+    #[cfg(windows)]
+    let builder = builder
+        .plugin(hotkeys::plugin())
+        .plugin(tauri_plugin_notification::init());
+    builder
         // Remember the window's size and position between launches. The
         // window starts hidden and VISIBLE is skipped so a tray launch stays
         // in the tray.
@@ -575,7 +545,7 @@ pub fn run() {
             app.manage(AppState {
                 service,
                 settings: Mutex::new(settings),
-                shortcut: tokio::sync::Mutex::new(None),
+                hotkeys: hotkeys::Hotkeys::default(),
                 encoder: OnceLock::new(),
                 encoders: tokio::sync::OnceCell::new(),
                 media,
@@ -585,7 +555,13 @@ pub fn run() {
             });
             allow_clips_dir(app.handle(), &app.state::<AppState>().clips_dir());
             watch_clips_dir(app.handle(), &app.state::<AppState>().clips_dir());
-            tauri::async_runtime::spawn(listen_hotkey(app.handle().clone(), hotkey));
+            {
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    let state = handle.state::<AppState>();
+                    state.hotkeys.start(handle.clone(), hotkey).await;
+                });
+            }
             {
                 let handle = app.handle().clone();
                 app.listen_any(service::CLIP_SAVED, move |event| {

@@ -12,6 +12,7 @@
 //!
 //! The recorder tries zero-copy first and falls back if negotiation fails.
 
+#[cfg(target_os = "linux")]
 use std::os::fd::RawFd;
 
 use anyhow::{Context, Result, bail};
@@ -40,6 +41,7 @@ impl Default for VideoConfig {
 }
 
 /// Where `pipewiresrc` reads frames from.
+#[cfg(target_os = "linux")]
 #[derive(Debug, Clone, Copy)]
 pub enum PipewireTarget {
     /// A portal-provided PipeWire remote and node id. The fd must stay open
@@ -47,6 +49,16 @@ pub enum PipewireTarget {
     Remote { fd: RawFd, node_id: u32 },
     /// An object serial on the session's own PipeWire daemon (KWin streams).
     Serial(u64),
+}
+
+/// What the video source captures, per platform.
+#[derive(Debug, Clone, Copy)]
+pub enum CaptureTarget {
+    #[cfg(target_os = "linux")]
+    Pipewire(PipewireTarget),
+    /// A monitor by `HMONITOR`, through Windows Graphics Capture.
+    #[cfg(windows)]
+    Monitor { handle: isize, cursor: bool },
 }
 
 /// How frames travel from the compositor to the encoder.
@@ -65,7 +77,7 @@ pub enum CapturePath {
 /// file.
 pub fn add_video_branch(
     pipeline: &gst::Pipeline,
-    target: PipewireTarget,
+    target: CaptureTarget,
     encoder: Encoder,
     cfg: &VideoConfig,
     path: CapturePath,
@@ -73,23 +85,7 @@ pub fn add_video_branch(
     if path == CapturePath::ZeroCopy && encoder.gpu_memory().is_none() {
         bail!("{encoder:?} has no zero-copy path");
     }
-    let src = gst::ElementFactory::make("pipewiresrc")
-        .name("screen")
-        .property("do-timestamp", true)
-        // Compositors only send frames on damage; resend so static scenes
-        // still produce video.
-        .property("keepalive-time", 1000 / cfg.fps as i32);
-    let src = match target {
-        PipewireTarget::Remote { fd, node_id } => {
-            src.property("fd", fd).property("path", node_id.to_string())
-        }
-        PipewireTarget::Serial(serial) => src.property("target-object", serial.to_string()),
-    }
-    .build()?;
-    if path == CapturePath::ZeroCopy && src.has_property("always-copy") {
-        // Copying can't map a DMA-BUF; it would hand out empty buffers.
-        src.set_property("always-copy", false);
-    }
+    let src = make_source(target, cfg, path)?;
 
     let rate = gst::ElementFactory::make("videorate")
         .name("rate")
@@ -127,13 +123,14 @@ pub fn add_video_branch(
         }
         CapturePath::ZeroCopy => {
             let memory = encoder.gpu_memory().unwrap();
-            // Only DMA-BUF leaves the source; a system-memory offer must fail
-            // here so the recorder can fall back instead of silently copying.
-            let dmabuf = capsfilter(raw_caps(Some("memory:DMABuf"), |_| {}))?;
-            let rate_caps = capsfilter(raw_caps(Some("memory:DMABuf"), |s| {
+            // Only GPU memory leaves the source; a system-memory offer must
+            // fail here so the recorder can fall back instead of silently
+            // copying.
+            let gpu = capsfilter(raw_caps(Some(SOURCE_GPU_MEMORY), |_| {}))?;
+            let rate_caps = capsfilter(raw_caps(Some(SOURCE_GPU_MEMORY), |s| {
                 s.set("framerate", gst::Fraction::new(cfg.fps as i32, 1));
             }))?;
-            chain.extend([dmabuf, rate, rate_caps, queue]);
+            chain.extend([gpu, rate, rate_caps, queue]);
             chain.extend(encoder.gpu_chain()?);
             // The GPU converter also scales: ask for an even size so 4:2:0
             // encoders accept odd window streams.
@@ -159,6 +156,67 @@ pub fn add_video_branch(
     pipeline.add_many(&chain)?;
     gst::Element::link_many(&chain)?;
     Ok(parse)
+}
+
+/// The GPU memory the platform's capture source hands out.
+#[cfg(target_os = "linux")]
+const SOURCE_GPU_MEMORY: &str = "memory:DMABuf";
+#[cfg(windows)]
+const SOURCE_GPU_MEMORY: &str = "memory:D3D11Memory";
+
+/// The capture source element for this platform.
+#[cfg(target_os = "linux")]
+fn make_source(
+    target: CaptureTarget,
+    cfg: &VideoConfig,
+    path: CapturePath,
+) -> Result<gst::Element> {
+    let CaptureTarget::Pipewire(target) = target;
+    let src = gst::ElementFactory::make("pipewiresrc")
+        .name("screen")
+        .property("do-timestamp", true)
+        // Compositors only send frames on damage; resend so static scenes
+        // still produce video.
+        .property("keepalive-time", 1000 / cfg.fps as i32);
+    let src = match target {
+        PipewireTarget::Remote { fd, node_id } => {
+            src.property("fd", fd).property("path", node_id.to_string())
+        }
+        PipewireTarget::Serial(serial) => src.property("target-object", serial.to_string()),
+    }
+    .build()?;
+    if path == CapturePath::ZeroCopy && src.has_property("always-copy") {
+        // Copying can't map a DMA-BUF; it would hand out empty buffers.
+        src.set_property("always-copy", false);
+    }
+    Ok(src)
+}
+
+/// Windows Graphics Capture through `d3d11screencapturesrc`: frames arrive
+/// as D3D11 textures (zero-copy into every Windows hardware encoder) or as
+/// system memory for the copy path. WGC is the API games can't block and
+/// that doesn't hook the game's own swap chain, so it costs the game
+/// nothing beyond the compositor's copy.
+#[cfg(windows)]
+fn make_source(
+    target: CaptureTarget,
+    _cfg: &VideoConfig,
+    _path: CapturePath,
+) -> Result<gst::Element> {
+    let CaptureTarget::Monitor { handle, cursor } = target;
+    let src = gst::ElementFactory::make("d3d11screencapturesrc")
+        .name("screen")
+        .property("monitor-handle", handle as u64)
+        .property("show-cursor", cursor)
+        .build()
+        .context("d3d11screencapturesrc missing (GStreamer d3d11 plugin)")?;
+    if src.has_property("capture-api") {
+        src.set_property_from_str("capture-api", "wgc");
+    }
+    if src.has_property("show-border") {
+        src.set_property("show-border", false);
+    }
+    Ok(src)
 }
 
 /// `video/x-raw` with an optional memory feature (`memory:DMABuf`,

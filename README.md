@@ -63,6 +63,7 @@ Known problems:
 - **Only KDE gets prompt-free window capture.** On GNOME and Hyprland you get a one-time screen-share prompt instead. That part is only partly tested.
 - **The portal hotkey path isn't tested** on a real desktop yet.
 - **X11 isn't supported.** There's no capture backend for it.
+- **Windows compiles but is untested.** The capture backend (Windows Graphics Capture, D3D11 zero-copy into NVENC/AMF/QSV/Media Foundation) is written and cross-checked in CI; see [docs/WINDOWS.md](docs/WINDOWS.md) for building and what to expect on the first run.
 - **Not packaged yet.** The release workflow and an AUR `PKGBUILD` (under `packaging/`) are in place but no release has been tagged.
 - **Storage limits are a soft cap.** Old clips get deleted after a save if you go over, and the Trash option is on by default so you can recover them.
 

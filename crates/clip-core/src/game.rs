@@ -1,9 +1,11 @@
 //! Decide whether a window belongs to a game, and what it's called.
+//!
+//! Detection itself is per platform (`/proc` here, window walking in
+//! `win::game`); the Steam library lookups are shared.
 
-use std::{
-    fs,
-    path::{Path, PathBuf},
-};
+#[cfg(target_os = "linux")]
+use std::path::Path;
+use std::{fs, path::PathBuf};
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct Game {
@@ -12,145 +14,153 @@ pub struct Game {
     pub steam_app_id: Option<u32>,
 }
 
-/// Inspect the process behind a window. `title` is the fallback name.
-pub fn detect(pid: u32, title: &str) -> Option<Game> {
-    if pid == 0 {
-        return None;
-    }
-    let proc = Path::new("/proc").join(pid.to_string());
-    let environ = fs::read(proc.join("environ")).ok()?;
-    let env = parse_environ(&environ);
+#[cfg(target_os = "linux")]
+mod proc {
+    use super::*;
 
-    if let Some(id) = steam_app_id(&env) {
-        let name = steam_app_name(id).unwrap_or_else(|| fallback_name(title, pid));
-        return Some(Game {
-            name,
-            steam_app_id: Some(id),
-        });
-    }
-
-    // Wine/Proton outside Steam (Lutris, Heroic, bottles...): a Windows exe.
-    let cmdline = fs::read(proc.join("cmdline")).unwrap_or_default();
-    if is_windows_exe(&cmdline) {
-        return Some(Game {
-            name: fallback_name(title, pid),
-            steam_app_id: None,
-        });
-    }
-    None
-}
-
-/// Every game running right now, found by scanning processes (no compositor
-/// needed, so this works on any desktop). A game spawns many processes
-/// (launcher, Proton, wineserver...); each game is reported once.
-pub fn running_games() -> Vec<Game> {
-    let mut games: Vec<Game> = Vec::new();
-    let me = std::process::id();
-    let Ok(entries) = fs::read_dir("/proc") else {
-        return games;
-    };
-    for e in entries.flatten() {
-        let Some(pid) = e.file_name().to_str().and_then(|n| n.parse::<u32>().ok()) else {
-            continue;
-        };
-        if pid == me {
-            continue;
+    /// Inspect the process behind a window. `title` is the fallback name.
+    pub fn detect(pid: u32, title: &str) -> Option<Game> {
+        if pid == 0 {
+            return None;
         }
-        // Other users' processes aren't readable; that's fine.
-        let Ok(environ) = fs::read(e.path().join("environ")) else {
-            continue;
-        };
+        let proc = Path::new("/proc").join(pid.to_string());
+        let environ = fs::read(proc.join("environ")).ok()?;
         let env = parse_environ(&environ);
-        let game = if let Some(id) = steam_app_id(&env) {
-            if games.iter().any(|g| g.steam_app_id == Some(id)) {
-                continue;
-            }
-            Game {
-                name: steam_app_name(id).unwrap_or_else(|| format!("Steam app {id}")),
+
+        if let Some(id) = steam_app_id(&env) {
+            let name = steam_app_name(id).unwrap_or_else(|| fallback_name(title, pid));
+            return Some(Game {
+                name,
                 steam_app_id: Some(id),
-            }
-        } else {
-            let cmdline = fs::read(e.path().join("cmdline")).unwrap_or_default();
-            let Some(exe) = windows_exe(&cmdline) else {
+            });
+        }
+
+        // Wine/Proton outside Steam (Lutris, Heroic, bottles...): a Windows exe.
+        let cmdline = fs::read(proc.join("cmdline")).unwrap_or_default();
+        if is_windows_exe(&cmdline) {
+            return Some(Game {
+                name: fallback_name(title, pid),
+                steam_app_id: None,
+            });
+        }
+        None
+    }
+
+    /// Every game running right now, found by scanning processes (no compositor
+    /// needed, so this works on any desktop). A game spawns many processes
+    /// (launcher, Proton, wineserver...); each game is reported once.
+    pub fn running_games() -> Vec<Game> {
+        let mut games: Vec<Game> = Vec::new();
+        let me = std::process::id();
+        let Ok(entries) = fs::read_dir("/proc") else {
+            return games;
+        };
+        for e in entries.flatten() {
+            let Some(pid) = e.file_name().to_str().and_then(|n| n.parse::<u32>().ok()) else {
                 continue;
             };
-            Game {
-                name: exe,
-                steam_app_id: None,
+            if pid == me {
+                continue;
             }
-        };
-        if !games.iter().any(|g| g.name == game.name) {
-            games.push(game);
+            // Other users' processes aren't readable; that's fine.
+            let Ok(environ) = fs::read(e.path().join("environ")) else {
+                continue;
+            };
+            let env = parse_environ(&environ);
+            let game = if let Some(id) = steam_app_id(&env) {
+                if games.iter().any(|g| g.steam_app_id == Some(id)) {
+                    continue;
+                }
+                Game {
+                    name: steam_app_name(id).unwrap_or_else(|| format!("Steam app {id}")),
+                    steam_app_id: Some(id),
+                }
+            } else {
+                let cmdline = fs::read(e.path().join("cmdline")).unwrap_or_default();
+                let Some(exe) = windows_exe(&cmdline) else {
+                    continue;
+                };
+                Game {
+                    name: exe,
+                    steam_app_id: None,
+                }
+            };
+            if !games.iter().any(|g| g.name == game.name) {
+                games.push(game);
+            }
         }
+        games
     }
-    games
-}
 
-/// Steam (native and Proton) launches games with their app id set. Steam's
-/// own processes don't have it, and 0 means "not a game".
-fn steam_app_id(env: &[(&str, &str)]) -> Option<u32> {
-    env_var(env, "SteamAppId")
-        .or_else(|| env_var(env, "SteamGameId"))
-        .and_then(|v| v.parse::<u32>().ok())
-        .filter(|&id| id != 0)
-}
-
-/// The game's name from a Wine command line: the .exe's file stem.
-fn windows_exe(cmdline: &[u8]) -> Option<String> {
-    if !is_windows_exe(cmdline) {
-        return None;
+    /// Steam (native and Proton) launches games with their app id set. Steam's
+    /// own processes don't have it, and 0 means "not a game".
+    fn steam_app_id(env: &[(&str, &str)]) -> Option<u32> {
+        env_var(env, "SteamAppId")
+            .or_else(|| env_var(env, "SteamGameId"))
+            .and_then(|v| v.parse::<u32>().ok())
+            .filter(|&id| id != 0)
     }
-    cmdline
-        .split(|&b| b == 0)
-        .filter_map(|a| std::str::from_utf8(a).ok())
-        .find(|a| a.to_ascii_lowercase().ends_with(".exe"))
-        .and_then(|a| a.rsplit(['\\', '/']).next())
-        .and_then(|f| f.get(..f.len() - 4))
-        .map(str::to_owned)
-}
 
-fn parse_environ(raw: &[u8]) -> Vec<(&str, &str)> {
-    raw.split(|&b| b == 0)
-        .filter_map(|kv| std::str::from_utf8(kv).ok()?.split_once('='))
-        .collect()
-}
-
-fn env_var<'a>(env: &[(&str, &'a str)], key: &str) -> Option<&'a str> {
-    env.iter().find(|(k, _)| *k == key).map(|(_, v)| *v)
-}
-
-fn is_windows_exe(cmdline: &[u8]) -> bool {
-    cmdline
-        .split(|&b| b == 0)
-        .filter_map(|a| std::str::from_utf8(a).ok())
-        .any(|a| {
-            let a = a.to_ascii_lowercase();
-            // Wine's own helpers aren't games.
-            a.ends_with(".exe")
-                && ![
-                    "explorer.exe",
-                    "winedevice.exe",
-                    "services.exe",
-                    "rpcss.exe",
-                    "plugplay.exe",
-                    "svchost.exe",
-                    "steam.exe",
-                    "steamwebhelper.exe",
-                ]
-                .iter()
-                .any(|h| a.ends_with(h))
-        })
-}
-
-fn fallback_name(title: &str, pid: u32) -> String {
-    let t = title.trim();
-    if !t.is_empty() {
-        return t.to_owned();
+    /// The game's name from a Wine command line: the .exe's file stem.
+    pub(super) fn windows_exe(cmdline: &[u8]) -> Option<String> {
+        if !is_windows_exe(cmdline) {
+            return None;
+        }
+        cmdline
+            .split(|&b| b == 0)
+            .filter_map(|a| std::str::from_utf8(a).ok())
+            .find(|a| a.to_ascii_lowercase().ends_with(".exe"))
+            .and_then(|a| a.rsplit(['\\', '/']).next())
+            .and_then(|f| f.get(..f.len() - 4))
+            .map(str::to_owned)
     }
-    fs::read_to_string(format!("/proc/{pid}/comm"))
-        .map(|s| s.trim().to_owned())
-        .unwrap_or_else(|_| "Game".into())
+
+    pub(super) fn parse_environ(raw: &[u8]) -> Vec<(&str, &str)> {
+        raw.split(|&b| b == 0)
+            .filter_map(|kv| std::str::from_utf8(kv).ok()?.split_once('='))
+            .collect()
+    }
+
+    pub(super) fn env_var<'a>(env: &[(&str, &'a str)], key: &str) -> Option<&'a str> {
+        env.iter().find(|(k, _)| *k == key).map(|(_, v)| *v)
+    }
+
+    pub(super) fn is_windows_exe(cmdline: &[u8]) -> bool {
+        cmdline
+            .split(|&b| b == 0)
+            .filter_map(|a| std::str::from_utf8(a).ok())
+            .any(|a| {
+                let a = a.to_ascii_lowercase();
+                // Wine's own helpers aren't games.
+                a.ends_with(".exe")
+                    && ![
+                        "explorer.exe",
+                        "winedevice.exe",
+                        "services.exe",
+                        "rpcss.exe",
+                        "plugplay.exe",
+                        "svchost.exe",
+                        "steam.exe",
+                        "steamwebhelper.exe",
+                    ]
+                    .iter()
+                    .any(|h| a.ends_with(h))
+            })
+    }
+
+    fn fallback_name(title: &str, pid: u32) -> String {
+        let t = title.trim();
+        if !t.is_empty() {
+            return t.to_owned();
+        }
+        fs::read_to_string(format!("/proc/{pid}/comm"))
+            .map(|s| s.trim().to_owned())
+            .unwrap_or_else(|_| "Game".into())
+    }
 }
+
+#[cfg(target_os = "linux")]
+pub use proc::{detect, running_games};
 
 /// Look up an app's name in the Steam library manifests.
 pub fn steam_app_name(id: u32) -> Option<String> {
@@ -206,17 +216,43 @@ pub fn steam_art(id: u32) -> SteamArt {
     art
 }
 
+/// Where the Steam client may be installed on this platform.
+fn steam_candidates() -> Vec<PathBuf> {
+    #[cfg(target_os = "linux")]
+    {
+        let Some(home) = dirs::home_dir() else {
+            return vec![];
+        };
+        vec![
+            home.join(".local/share/Steam"),
+            home.join(".steam/steam"),
+            home.join(".var/app/com.valvesoftware.Steam/.local/share/Steam"),
+        ]
+    }
+    #[cfg(windows)]
+    {
+        let mut v = Vec::new();
+        // The client records its folder; fall back to the default installs.
+        if let Ok(key) = winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER)
+            .open_subkey("Software\\Valve\\Steam")
+            && let Ok(p) = key.get_value::<String, _>("SteamPath")
+        {
+            v.push(PathBuf::from(p));
+        }
+        v.push(PathBuf::from("C:\\Program Files (x86)\\Steam"));
+        v.push(PathBuf::from("C:\\Program Files\\Steam"));
+        v
+    }
+    #[cfg(not(any(target_os = "linux", windows)))]
+    {
+        vec![]
+    }
+}
+
 /// Folders holding Steam's own cache (not game libraries).
 pub fn steam_roots() -> Vec<PathBuf> {
-    let Some(home) = dirs::home_dir() else {
-        return vec![];
-    };
     let mut roots = Vec::new();
-    for p in [
-        home.join(".local/share/Steam"),
-        home.join(".steam/steam"),
-        home.join(".var/app/com.valvesoftware.Steam/.local/share/Steam"),
-    ] {
+    for p in steam_candidates() {
         if let Ok(c) = p.canonicalize()
             && !roots.contains(&c)
         {
@@ -253,17 +289,9 @@ pub fn steam_apps() -> Vec<(u32, String)> {
     apps
 }
 
-fn steam_libraries() -> Vec<PathBuf> {
-    let Some(home) = dirs::home_dir() else {
-        return vec![];
-    };
-    let roots = [
-        home.join(".local/share/Steam"),
-        home.join(".steam/steam"),
-        home.join(".var/app/com.valvesoftware.Steam/.local/share/Steam"),
-    ];
+pub(crate) fn steam_libraries() -> Vec<PathBuf> {
     let mut libs = Vec::new();
-    for root in roots {
+    for root in steam_candidates() {
         let Ok(vdf) = fs::read_to_string(root.join("steamapps/libraryfolders.vdf")) else {
             continue;
         };
@@ -283,7 +311,7 @@ fn steam_libraries() -> Vec<PathBuf> {
 }
 
 /// First `"key"  "value"` pair in a VDF/ACF text.
-fn vdf_value(text: &str, key: &str) -> Option<String> {
+pub(crate) fn vdf_value(text: &str, key: &str) -> Option<String> {
     let needle = format!("\"{key}\"");
     text.lines().find_map(|line| {
         let rest = line.trim().strip_prefix(&needle)?.trim();
@@ -294,6 +322,8 @@ fn vdf_value(text: &str, key: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(target_os = "linux")]
+    use super::proc::*;
     use super::*;
 
     #[test]
@@ -304,6 +334,7 @@ mod tests {
         assert_eq!(vdf_value(acf, "missing"), None);
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn recognises_windows_exes() {
         assert!(is_windows_exe(
@@ -315,6 +346,7 @@ mod tests {
         assert!(!is_windows_exe(b"/usr/bin/konsole\0"));
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn environ_lookup() {
         let env = parse_environ(b"HOME=/home/x\0SteamAppId=730\0EMPTY=\0");
@@ -332,6 +364,7 @@ mod tests {
         }
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn names_wine_games_by_exe() {
         assert_eq!(
@@ -341,6 +374,7 @@ mod tests {
         assert_eq!(windows_exe(b"/usr/bin/konsole\0"), None);
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn scanning_finds_a_steam_game() {
         // A child with SteamAppId set must be reported as that game.
@@ -366,6 +400,7 @@ mod tests {
         );
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn own_process_is_not_a_game() {
         assert_eq!(detect(std::process::id(), "test"), None);

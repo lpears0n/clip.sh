@@ -65,7 +65,12 @@
     if (status.state === 'unavailable') return { ok: false, text: status.error ?? 'Capture unavailable.', action: 'recording' as const }
     return {
       ok: true,
-      text: status.backend === 'kwin' ? 'Game windows are captured directly, no prompts.' : 'Capturing the screen you chose.',
+      text:
+        status.backend === 'kwin'
+          ? 'Game windows are captured directly, no prompts.'
+          : status.backend === 'windows'
+            ? 'The monitor your game is on is captured, no prompts.'
+            : 'Capturing the screen you chose.',
     }
   })
   const folder = $derived(settings?.clips_dir.replace(/^\/home\/[^/]+/, '~') ?? '…')

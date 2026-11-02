@@ -1,6 +1,7 @@
 # Builds installers and attaches them to a GitHub release whenever a version
-# tag (v0.2.0) is pushed. Linux ships now; the Windows job is wired up and
-# commented out until the Windows capture backend lands (docs/ROADMAP.md).
+# tag (v0.2.0) is pushed. The Windows installer does not yet bundle the
+# GStreamer runtime; users install it from gstreamer.freedesktop.org (see
+# docs/WINDOWS.md).
 name: Release
 
 on:
@@ -22,9 +23,9 @@ jobs:
           - name: Linux x86_64
             os: ubuntu-22.04 # oldest glibc we want the AppImage to run on
             bundles: appimage,deb,rpm
-          # - name: Windows x86_64
-          #   os: windows-latest
-          #   bundles: nsis,msi
+          - name: Windows x86_64
+            os: windows-latest
+            bundles: nsis
     steps:
       - uses: actions/checkout@v4
       - name: Install system libraries (Linux)
@@ -35,6 +36,14 @@ jobs:
             libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
             libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf \
             libxdo-dev libssl-dev
+      - name: Install GStreamer (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install -y --no-progress gstreamer gstreamer-devel pkgconfiglite
+          echo "GSTREAMER_1_0_ROOT_MSVC_X86_64=C:\gstreamer\1.0\msvc_x86_64" >> $env:GITHUB_ENV
+          echo "PKG_CONFIG_PATH=C:\gstreamer\1.0\msvc_x86_64\lib\pkgconfig" >> $env:GITHUB_ENV
+          echo "C:\gstreamer\1.0\msvc_x86_64\bin" >> $env:GITHUB_PATH
       - uses: pnpm/action-setup@v4
         with:
           version: 10

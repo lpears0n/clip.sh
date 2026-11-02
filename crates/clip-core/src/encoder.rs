@@ -69,27 +69,73 @@ impl Codec {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Encoder {
-    /// NVIDIA NVENC (CUDA mode).
+    /// NVIDIA NVENC. CUDA on Linux; D3D11 on Windows so capture frames never
+    /// leave the GPU.
     Nvenc,
-    /// VA-API (AMD / Intel).
+    /// VA-API (AMD / Intel on Linux).
     Vaapi,
+    /// AMD AMF (Windows).
+    Amf,
+    /// Intel Quick Sync (Windows).
+    Qsv,
+    /// Media Foundation (Windows; whatever the GPU vendor driver exposes).
+    Mf,
     /// Software x264 fallback.
     X264,
 }
 
+/// Set a property if the element has one by that name.
+fn set<V: Into<gst::glib::Value> + Clone>(el: &gst::Element, name: &str, value: V) {
+    if el.has_property(name) {
+        el.set_property(name, value);
+    }
+}
+
+fn set_str(el: &gst::Element, name: &str, value: &str) {
+    if el.has_property(name) {
+        el.set_property_from_str(name, value);
+    }
+}
+
 impl Encoder {
-    /// Probe order: hardware first.
-    pub const ALL: [Encoder; 3] = [Encoder::Nvenc, Encoder::Vaapi, Encoder::X264];
+    /// Probe order: hardware first. Elements that don't exist on a platform
+    /// simply fail the probe.
+    pub const ALL: [Encoder; 6] = [
+        Encoder::Nvenc,
+        Encoder::Amf,
+        Encoder::Qsv,
+        Encoder::Vaapi,
+        Encoder::Mf,
+        Encoder::X264,
+    ];
 
     /// GStreamer element for `codec`, if this encoder supports it.
     pub fn element(self, codec: Codec) -> Option<&'static str> {
         match (self, codec) {
+            #[cfg(windows)]
+            (Encoder::Nvenc, Codec::H264) => Some("nvd3d11h264enc"),
+            #[cfg(windows)]
+            (Encoder::Nvenc, Codec::Hevc) => Some("nvd3d11h265enc"),
+            #[cfg(windows)]
+            (Encoder::Nvenc, Codec::Av1) => Some("nvd3d11av1enc"),
+            #[cfg(not(windows))]
             (Encoder::Nvenc, Codec::H264) => Some("nvh264enc"),
+            #[cfg(not(windows))]
             (Encoder::Nvenc, Codec::Hevc) => Some("nvh265enc"),
+            #[cfg(not(windows))]
             (Encoder::Nvenc, Codec::Av1) => Some("nvav1enc"),
             (Encoder::Vaapi, Codec::H264) => Some("vah264enc"),
             (Encoder::Vaapi, Codec::Hevc) => Some("vah265enc"),
             (Encoder::Vaapi, Codec::Av1) => Some("vaav1enc"),
+            (Encoder::Amf, Codec::H264) => Some("amfh264enc"),
+            (Encoder::Amf, Codec::Hevc) => Some("amfh265enc"),
+            (Encoder::Amf, Codec::Av1) => Some("amfav1enc"),
+            (Encoder::Qsv, Codec::H264) => Some("qsvh264enc"),
+            (Encoder::Qsv, Codec::Hevc) => Some("qsvh265enc"),
+            (Encoder::Qsv, Codec::Av1) => Some("qsvav1enc"),
+            (Encoder::Mf, Codec::H264) => Some("mfh264enc"),
+            (Encoder::Mf, Codec::Hevc) => Some("mfh265enc"),
+            (Encoder::Mf, Codec::Av1) => None,
             (Encoder::X264, Codec::H264) => Some("x264enc"),
             (Encoder::X264, _) => None,
         }
@@ -160,32 +206,53 @@ impl Encoder {
     /// type/format it accepts. Converters run in passthrough when possible.
     pub fn upload_chain(self) -> Result<Vec<gst::Element>> {
         let name = match self {
-            // nvh264enc takes BGRx/RGBx system memory and converts on the GPU.
-            Encoder::Nvenc => "videoconvert",
+            // Hardware encoders take BGRx/RGBx/NV12 system memory and upload
+            // themselves; videoconvert only runs when a format change is needed.
+            Encoder::Nvenc | Encoder::Amf | Encoder::Qsv | Encoder::Mf | Encoder::X264 => {
+                "videoconvert"
+            }
             Encoder::Vaapi => "vapostproc",
-            Encoder::X264 => "videoconvert",
         };
         Ok(vec![gst::ElementFactory::make(name).build()?])
     }
 
     /// GPU memory this encoder reads directly, for the zero-copy path.
     pub fn gpu_memory(self) -> Option<&'static str> {
-        match self {
-            Encoder::Nvenc => Some("memory:GLMemory"),
-            Encoder::Vaapi => Some("memory:VAMemory"),
-            Encoder::X264 => None,
+        #[cfg(windows)]
+        {
+            // Every Windows hardware encoder takes D3D11 textures, which is
+            // what Windows Graphics Capture produces.
+            match self {
+                Encoder::Nvenc | Encoder::Amf | Encoder::Qsv | Encoder::Mf => {
+                    Some("memory:D3D11Memory")
+                }
+                Encoder::Vaapi | Encoder::X264 => None,
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            match self {
+                Encoder::Nvenc => Some("memory:GLMemory"),
+                Encoder::Vaapi => Some("memory:VAMemory"),
+                Encoder::Amf | Encoder::Qsv | Encoder::Mf | Encoder::X264 => None,
+            }
         }
     }
 
-    /// Elements that import a DMA-BUF into the encoder's GPU memory and
-    /// convert/scale it there. Scaling is driven by a capsfilter placed
+    /// Elements that import captured frames into the encoder's GPU memory
+    /// and convert/scale them there. Scaling is driven by a capsfilter placed
     /// after them by the caller.
     pub fn gpu_chain(self) -> Result<Vec<gst::Element>> {
         let names: &[&str] = match self {
+            #[cfg(windows)]
+            Encoder::Nvenc | Encoder::Amf | Encoder::Qsv | Encoder::Mf => &["d3d11convert"],
+            #[cfg(not(windows))]
             // GL import; nvenc reads GL textures through CUDA interop.
             Encoder::Nvenc => &["glupload", "glcolorscale", "glcolorconvert"],
             // vapostproc imports DMA-BUF, converts and scales in one element.
             Encoder::Vaapi => &["vapostproc"],
+            #[cfg(not(windows))]
+            Encoder::Amf | Encoder::Qsv | Encoder::Mf => bail!("{self:?} is Windows-only"),
             Encoder::X264 => bail!("x264 has no GPU path"),
         };
         names
@@ -231,6 +298,30 @@ impl Encoder {
                 el.set_property_from_str("speed-preset", "veryfast");
                 el.set_property("bitrate", cfg.bitrate_kbps);
                 el.set_property("key-int-max", gop);
+            }
+            // The Windows encoders share names for the essentials; anything
+            // a particular element lacks is skipped rather than guessed.
+            Encoder::Amf => {
+                set_str(&el, "rate-control", "vbr-latency");
+                set_str(&el, "usage", "low-latency");
+                set(&el, "bitrate", cfg.bitrate_kbps);
+                set(&el, "max-bitrate", cfg.bitrate_kbps * 3 / 2);
+                set(&el, "gop-size", gop as i32);
+            }
+            Encoder::Qsv => {
+                set_str(&el, "rate-control", "vbr");
+                set(&el, "bitrate", cfg.bitrate_kbps);
+                set(&el, "max-bitrate", cfg.bitrate_kbps * 3 / 2);
+                set(&el, "gop-size", gop);
+                set(&el, "b-frames", 0u32);
+                set(&el, "low-latency", true);
+            }
+            Encoder::Mf => {
+                set_str(&el, "rc-mode", "cbr");
+                set(&el, "bitrate", cfg.bitrate_kbps);
+                set(&el, "gop-size", gop as i32);
+                set(&el, "bframes", 0u32);
+                set(&el, "low-latency", true);
             }
         }
         Ok(el)

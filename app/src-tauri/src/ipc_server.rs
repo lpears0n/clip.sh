@@ -2,14 +2,9 @@
 //! second launch finds the socket, asks the running app to show itself, and
 //! exits.
 
-use std::os::unix::fs::PermissionsExt;
-
 use clip_ipc::{Request, Response, socket_path};
 use tauri::{AppHandle, Manager};
-use tokio::{
-    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
-    net::{UnixListener, UnixStream},
-};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 
 use crate::AppState;
 
@@ -21,7 +16,11 @@ pub fn hand_off_to_running_instance() -> bool {
 }
 
 /// Listen on the control socket for the life of the app.
+#[cfg(target_os = "linux")]
 pub fn serve(app: AppHandle) -> anyhow::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    use tokio::net::UnixListener;
+
     let path = socket_path();
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
@@ -49,8 +48,44 @@ pub fn serve(app: AppHandle) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn handle(app: AppHandle, sock: UnixStream) -> anyhow::Result<()> {
-    let (read, mut write) = sock.into_split();
+/// Named pipe `\\.\pipe\clipsh-<user>`; one instance per connection, as
+/// Windows pipes work.
+#[cfg(windows)]
+pub fn serve(app: AppHandle) -> anyhow::Result<()> {
+    use tokio::net::windows::named_pipe::ServerOptions;
+
+    let name = socket_path().to_string_lossy().into_owned();
+    let mut server = ServerOptions::new()
+        .first_pipe_instance(true)
+        .create(&name)?;
+    tracing::info!(pipe = %name, "control pipe ready");
+    tauri::async_runtime::spawn(async move {
+        loop {
+            if let Err(e) = server.connect().await {
+                tracing::warn!("control pipe connect: {e}");
+                continue;
+            }
+            let conn = server;
+            server = match ServerOptions::new().create(&name) {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::warn!("control pipe: {e}");
+                    return;
+                }
+            };
+            let app = app.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = handle(app, conn).await {
+                    tracing::debug!("control pipe: {e:#}");
+                }
+            });
+        }
+    });
+    Ok(())
+}
+
+async fn handle<S: AsyncRead + AsyncWrite + Unpin>(app: AppHandle, sock: S) -> anyhow::Result<()> {
+    let (read, mut write) = tokio::io::split(sock);
     let mut line = String::new();
     BufReader::new(read).read_line(&mut line).await?;
     let resp = match serde_json::from_str::<Request>(&line) {

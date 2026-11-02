@@ -6,7 +6,7 @@
 <script lang="ts">
   import { AudioLines, Check, FolderOpen, HardDrive, Keyboard, Palette, SlidersHorizontal, Video } from '@lucide/svelte'
   import { open as openDialog } from '@tauri-apps/plugin-dialog'
-  import { api, type Capabilities, type Codec, type Encoder, type Settings, type Status, type Usage } from './api'
+  import { api, type Capabilities, type Codec, type Encoder, type HotkeyBackend, type Settings, type Status, type Usage } from './api'
   import { bytes } from './format'
   import HotkeyBinder from './HotkeyBinder.svelte'
   import { ACCENTS, type Accent, prefs, setPrefs } from './prefs.svelte'
@@ -42,7 +42,7 @@
   } = $props()
 
   // Which hotkey service the desktop provided (loaded when Hotkeys opens).
-  let hotkeyBackend = $state<'kglobalaccel' | 'portal' | null | undefined>(undefined)
+  let hotkeyBackend = $state<HotkeyBackend | null | undefined>(undefined)
   $effect(() => {
     if (category === 'Hotkeys') api.hotkeyBackend().then((b) => (hotkeyBackend = b))
   })
@@ -293,6 +293,7 @@
           >
             <Toggle label="GPU direct capture" checked={settings.zero_copy} onchange={(zero_copy) => update({ zero_copy })} />
           </Row>
+          {#if status?.backend !== 'windows'}
           <Row
             title="Capture method"
             description={status?.backend === 'kwin'
@@ -314,6 +315,9 @@
               <option value="portal">Screen (any desktop)</option>
             </select>
           </Row>
+          {:else}
+            <Row title="Capture method" description="The monitor your game is on, through Windows Graphics Capture. Frames stay on the GPU." />
+          {/if}
           {#if status?.backend === 'portal'}
             <Row
               title="Screen"
@@ -382,7 +386,9 @@
               title="Clip that"
               description={hotkeyBackend === 'portal'
                 ? 'Registered with your desktop, which may ask to confirm it once.'
-                : 'Saves the replay buffer from the current game. Works in fullscreen games.'}
+                : hotkeyBackend === 'native'
+                  ? 'Registered with Windows. Works over fullscreen games; pick another key if an app already owns it.'
+                  : 'Saves the replay buffer from the current game. Works in fullscreen games.'}
             >
               <HotkeyBinder value={settings.hotkey} onbind={(hotkey) => update({ hotkey })} />
             </Row>
@@ -391,7 +397,9 @@
             title="Command"
             description={hotkeyBackend === null
               ? 'Your desktop has no global shortcut service. Bind this command to a key in its keyboard settings.'
-              : 'Bind this to any key in your desktop’s keyboard settings, or use it from scripts.'}
+              : hotkeyBackend === 'native'
+                ? 'Use it from scripts, Stream Deck profiles or AutoHotkey.'
+                : 'Bind this to any key in your desktop’s keyboard settings, or use it from scripts.'}
           >
             <code class="rounded-ctl border border-line bg-canvas px-2.5 py-1.5 text-secondary text-fg-2">clipsh save</code>
             <button class="btn" onclick={copyCommand}>{copied ? 'Copied' : 'Copy'}</button>

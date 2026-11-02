@@ -1,4 +1,5 @@
-//! PipeWire audio capture → AAC pipeline branch.
+//! Audio capture → AAC pipeline branch. PipeWire on Linux, WASAPI on
+//! Windows (loopback of the default output for game audio).
 
 use anyhow::{Context, Result};
 use gstreamer as gst;
@@ -10,7 +11,8 @@ use serde::{Deserialize, Serialize};
 pub enum AudioSource {
     /// Monitor of the default output device (game/desktop audio).
     Desktop,
-    /// An input device by PipeWire node name, or the default input.
+    /// An input device by id (PipeWire node name / WASAPI device id), or the
+    /// default input.
     Mic(Option<String>),
 }
 
@@ -29,7 +31,8 @@ const AAC_ENCODERS: [&str; 2] = ["fdkaacenc", "avenc_aac"];
 /// A capture device the user can pick for the mic track.
 #[derive(Debug, Clone, Serialize)]
 pub struct InputDevice {
-    /// PipeWire node name (stable across reboots); pass to `AudioSource::Mic`.
+    /// Stable device id (PipeWire node name / WASAPI id); pass to
+    /// `AudioSource::Mic`.
     pub id: String,
     pub name: String,
 }
@@ -46,12 +49,21 @@ pub fn input_devices() -> Vec<InputDevice> {
         .into_iter()
         .filter_map(|d| {
             let props = d.properties()?;
-            let id = props.get::<String>("node.name").ok()?;
-            let class = props.get::<String>("media.class").unwrap_or_default();
-            // Sink monitors also show up as sources.
-            if class != "Audio/Source" || id.ends_with(".monitor") {
-                return None;
-            }
+            #[cfg(target_os = "linux")]
+            let id = {
+                let id = props.get::<String>("node.name").ok()?;
+                let class = props.get::<String>("media.class").unwrap_or_default();
+                // Sink monitors also show up as sources.
+                if class != "Audio/Source" || id.ends_with(".monitor") {
+                    return None;
+                }
+                id
+            };
+            #[cfg(not(target_os = "linux"))]
+            let id = props
+                .get::<String>("device.id")
+                .or_else(|_| props.get::<String>("device.strid"))
+                .ok()?;
             Some(InputDevice {
                 id,
                 name: d.display_name().to_string(),
@@ -69,21 +81,7 @@ pub fn add_audio_branch(
     source: &AudioSource,
     bitrate: i32,
 ) -> Result<gst::Element> {
-    let mut src = gst::ElementFactory::make("pipewiresrc").name(source.name());
-    if let AudioSource::Mic(Some(device)) = source {
-        src = src.property("target-object", device);
-    }
-    if *source == AudioSource::Desktop {
-        // Without a target, this captures the default sink's monitor and
-        // follows it when the default changes.
-        src = src.property(
-            "stream-properties",
-            gst::Structure::builder("props")
-                .field("stream.capture.sink", "true")
-                .build(),
-        );
-    }
-    let src = src.build()?;
+    let src = make_source(source)?;
     let convert = gst::ElementFactory::make("audioconvert").build()?;
     let resample = gst::ElementFactory::make("audioresample").build()?;
     let caps = gst::ElementFactory::make("capsfilter")
@@ -111,6 +109,41 @@ pub fn add_audio_branch(
     pipeline.add_many(&chain)?;
     gst::Element::link_many(&chain)?;
     Ok(parse)
+}
+
+#[cfg(target_os = "linux")]
+fn make_source(source: &AudioSource) -> Result<gst::Element> {
+    let mut src = gst::ElementFactory::make("pipewiresrc").name(source.name());
+    if let AudioSource::Mic(Some(device)) = source {
+        src = src.property("target-object", device);
+    }
+    if *source == AudioSource::Desktop {
+        // Without a target, this captures the default sink's monitor and
+        // follows it when the default changes.
+        src = src.property(
+            "stream-properties",
+            gst::Structure::builder("props")
+                .field("stream.capture.sink", "true")
+                .build(),
+        );
+    }
+    Ok(src.build()?)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn make_source(source: &AudioSource) -> Result<gst::Element> {
+    // wasapi2src: shared-mode WASAPI, low latency, no exclusive grabs.
+    let mut src = gst::ElementFactory::make("wasapi2src")
+        .name(source.name())
+        .property("low-latency", true);
+    match source {
+        // Loopback of the default render device: everything the user hears.
+        AudioSource::Desktop => src = src.property("loopback", true),
+        AudioSource::Mic(Some(device)) => src = src.property("device", device),
+        AudioSource::Mic(None) => {}
+    }
+    src.build()
+        .context("wasapi2src missing (GStreamer wasapi2 plugin)")
 }
 
 fn aac_encoder(bitrate: i32) -> Result<gst::Element> {

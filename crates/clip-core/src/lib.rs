@@ -1,24 +1,45 @@
 //! Capture, encoding and instant-replay buffering for clip.sh.
 
 pub mod audio;
-pub mod auto;
+pub mod backend;
 pub mod capture;
-pub mod display;
 pub mod encoder;
 pub mod export;
 pub mod game;
-pub mod hotkey;
-pub mod kwin;
 pub mod media;
-pub mod portal;
 pub mod recorder;
 pub mod ring;
 pub mod save;
 
+// Linux: Wayland compositors (KWin direct, or the screen-cast portal),
+// PipeWire, desktop hotkey services.
+#[cfg(target_os = "linux")]
+pub mod auto;
+#[cfg(target_os = "linux")]
+pub mod display;
+#[cfg(target_os = "linux")]
+pub mod hotkey;
+#[cfg(target_os = "linux")]
+pub mod kwin;
+#[cfg(target_os = "linux")]
+pub mod portal;
+
+// Windows: Windows Graphics Capture, WASAPI, window walking.
+#[cfg(windows)]
+pub mod win;
+#[cfg(windows)]
+pub use win::auto;
+#[cfg(windows)]
+pub use win::display;
+
 pub use audio::{AudioSource, InputDevice, add_audio_branch, input_devices};
-pub use capture::{CapturePath, PipewireTarget, VideoConfig, add_video_branch};
+pub use backend::Backend;
+#[cfg(target_os = "linux")]
+pub use capture::PipewireTarget;
+pub use capture::{CapturePath, CaptureTarget, VideoConfig, add_video_branch};
 pub use encoder::{Codec, Encoder};
 pub use gstreamer as gst;
+#[cfg(target_os = "linux")]
 pub use portal::ScreenSource;
 pub use recorder::{CaptureSource, Recorder, RecorderConfig, Status};
 pub use ring::{Clip, ReplayBuffer};

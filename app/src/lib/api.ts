@@ -5,6 +5,9 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 
 export type RecorderState = 'unavailable' | 'waiting' | 'recording'
 
+/** Who provides the global hotkey: KDE, the portal, or the OS itself (Windows). */
+export type HotkeyBackend = 'kglobalaccel' | 'portal' | 'native'
+
 export interface Status {
   state: RecorderState
   game: string | null
@@ -16,8 +19,8 @@ export interface Status {
   /** While recording: frames go straight into GPU memory, or through RAM. */
   capture_path: 'zerocopy' | 'copy' | null
   error: string | null
-  /** "kwin": game windows (KDE). "portal": the chosen screen. */
-  backend: 'kwin' | 'portal' | null
+  /** "kwin": game windows (KDE). "portal": the chosen screen. "windows": the game's monitor. */
+  backend: 'kwin' | 'portal' | 'windows' | null
   /** Portal capture needs a screen chosen once. */
   needs_screen: boolean
 }
@@ -55,7 +58,7 @@ export interface Settings {
   mic: boolean
   clips_dir: string
   hotkey: string
-  capture_backend: 'kwin' | 'portal' | null
+  capture_backend: 'kwin' | 'portal' | 'windows' | null
   launch_at_login: boolean
   start_in_tray: boolean
   close_to_tray: boolean
@@ -78,7 +81,7 @@ export interface Settings {
 }
 
 export type Codec = 'h264' | 'hevc' | 'av1'
-export type Encoder = 'nvenc' | 'vaapi' | 'x264'
+export type Encoder = 'nvenc' | 'vaapi' | 'amf' | 'qsv' | 'mf' | 'x264'
 
 export interface Capabilities {
   display_hz: number | null
@@ -119,7 +122,7 @@ export const api = {
   storage: () => invoke<Usage>('get_storage'),
   capabilities: () => invoke<Capabilities>('get_capabilities'),
   chooseScreen: () => invoke<void>('choose_screen'),
-  hotkeyBackend: () => invoke<'kglobalaccel' | 'portal' | null>('hotkey_backend'),
+  hotkeyBackend: () => invoke<HotkeyBackend | null>('hotkey_backend'),
   status: () => invoke<Status>('get_status'),
   save: () => invoke<string>('save_clip'),
   clips: () => invoke<Clip[]>('list_clips'),

@@ -34,13 +34,40 @@ pub fn usage(clips_dir: &Path, limit_bytes: Option<u64>) -> Usage {
 
 /// Free/total bytes on the filesystem containing `path` (or its nearest
 /// existing ancestor).
+/// (free for this user, total) bytes on the volume holding `path`.
 fn disk_space(path: &Path) -> Result<(u64, u64)> {
     let existing = path
         .ancestors()
         .find(|p| p.exists())
         .context("no existing ancestor")?;
-    let st = rustix::fs::statvfs(existing)?;
-    Ok((st.f_bavail * st.f_frsize, st.f_blocks * st.f_frsize))
+    #[cfg(target_os = "linux")]
+    {
+        let st = rustix::fs::statvfs(existing)?;
+        Ok((st.f_bavail * st.f_frsize, st.f_blocks * st.f_frsize))
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        use windows::{Win32::Storage::FileSystem::GetDiskFreeSpaceExW, core::PCWSTR};
+        let wide: Vec<u16> = existing.as_os_str().encode_wide().chain(Some(0)).collect();
+        let (mut free, mut total) = (0u64, 0u64);
+        // SAFETY: NUL-terminated path; out-pointers are valid for the call.
+        unsafe {
+            GetDiskFreeSpaceExW(
+                PCWSTR(wide.as_ptr()),
+                Some(&mut free),
+                Some(&mut total),
+                None,
+            )
+        }
+        .context("GetDiskFreeSpaceExW")?;
+        Ok((free, total))
+    }
+    #[cfg(not(any(target_os = "linux", windows)))]
+    {
+        let _ = existing;
+        Ok((0, 0))
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
