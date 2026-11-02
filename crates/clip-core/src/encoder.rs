@@ -149,11 +149,21 @@ impl Encoder {
     /// Whether the element exists *and* can encode a test frame. Factories can
     /// be registered even when the driver fails at runtime.
     pub fn works(self, codec: Codec) -> bool {
-        match self.element(codec) {
-            Some(name) if gst::ElementFactory::find(name).is_some() => {
-                self.encode_test_frame(codec).is_ok()
+        let Some(name) = self.element(codec) else {
+            return false;
+        };
+        if gst::ElementFactory::find(name).is_none() {
+            tracing::debug!(element = name, "encoder not available here");
+            return false;
+        }
+        match self.encode_test_frame(codec) {
+            Ok(()) => true,
+            Err(e) => {
+                // Worth a line at info: an encoder that exists but can't run
+                // is how a broken driver or install shows itself.
+                tracing::info!(element = name, "encoder failed the probe: {e:#}");
+                false
             }
-            _ => false,
         }
     }
 

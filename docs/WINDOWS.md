@@ -21,9 +21,11 @@ compositor's copy is the only extra work the GPU does.
   `d3d11screencapturesrc` across GStreamer versions, and the AMF/QSV
   property names (unknown ones are skipped, so the worst case is default
   encoder settings).
-- The installer has not been produced and installed on a clean machine
-  yet; the plugin list in `scripts/collect-gstreamer.ps1` is the first
-  thing to check if an element is missing (`GST_DEBUG=2` names it).
+- The plugin list in `scripts/collect-gstreamer.ps1` is the first thing
+  to check if an element is missing. The script now refuses to finish
+  unless every element the app makes by name loads from the bundle alone;
+  the first installer shipped without `videotestsrc`, which the encoder
+  probe uses, so no encoder ever passed and nothing recorded.
 - Zero-copy is the first path tried; if D3D11 negotiation fails, the
   recorder rebuilds on the system-memory path on its own and Settings →
   Recording says which is active.
