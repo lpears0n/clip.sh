@@ -19,6 +19,8 @@ pub struct Settings {
     pub close_to_tray: bool,
     pub notify_on_save: bool,
     pub sound_on_save: bool,
+    /// Windows: a popup over the game when recording starts and on a save.
+    pub overlay: bool,
 
     // Recording
     pub replay_seconds: u32,
@@ -71,6 +73,7 @@ impl Default for Settings {
             close_to_tray: true,
             notify_on_save: true,
             sound_on_save: true,
+            overlay: true,
             replay_seconds: 30,
             fps: 60,
             bitrate_kbps: 20_000,

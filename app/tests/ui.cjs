@@ -51,7 +51,7 @@ function fixtures(scenario) {
       : { state: 'recording', game: 'ELDEN RING', steam_app_id: 1245620, session_start_ms: now - h, buffered_seconds: 30, replay_seconds: 30, encoder: 'nvenc', capture_path: 'zerocopy', error: null, backend: 'kwin', needs_screen: false },
     get_settings: {
       replay_seconds: 30, mic: true, clips_dir: '/home/u/Videos/clip.sh', hotkey: 'F8', screenshot_hotkey: 'F9', capture_backend: null,
-      launch_at_login: false, start_in_tray: true, close_to_tray: true, notify_on_save: true, sound_on_save: true,
+      launch_at_login: false, start_in_tray: true, close_to_tray: true, notify_on_save: true, sound_on_save: true, overlay: true,
       fps: 60, bitrate_kbps: 20000, codec: 'h264', encoder: null, cursor: true, zero_copy: true, desktop_audio: true, desktop_device: 'out-headset',
       mic_device: null, audio_bitrate_kbps: 160, storage_limit_gb: 25, protect_edits: true, use_trash: true, ads: false,
     },
@@ -94,6 +94,11 @@ function mockBridge(data) {
         return c
       }
       if (cmd === 'delete_clip') { data.list_clips = data.list_clips.filter((c) => c.path !== args.path); return null }
+      if (cmd === 'plugin:event|listen') {
+        // Remember the handler so a test can fire the event at the page.
+        (window.__listeners ||= {})[args.event] = args.handler
+        return args.handler
+      }
       if (cmd.startsWith('plugin:')) return 1
       if (cmd in data) return data[cmd]
       return null
@@ -217,6 +222,37 @@ async function runScenario(scenario, browser) {
 
 // ------------------------------------------------------------------ runner
 
+// The in-game popup page: fire the events the backend sends and check what
+// it draws. The window is transparent, so it's shot over a stand-in game.
+async function overlayScenario(browser) {
+  const page = await browser.newPage({ viewport: { width: 380, height: 72 }, colorScheme: 'dark' })
+  page.on('pageerror', (e) => { throw new Error(`page error in overlay: ${e.message}`) })
+  await page.addInitScript(mockBridge, fixtures('full'))
+  await page.goto(`http://localhost:${PORT}/overlay.html`)
+  await page.waitForFunction(() => window.__listeners && window.__listeners['overlay-show'])
+  await page.addStyleTag({ content: 'html { background: linear-gradient(135deg, #3a4a5a, #6b5a3a) !important }' })
+  const fire = (payload) =>
+    page.evaluate((p) => window[`_${window.__listeners['overlay-show']}`]({ event: 'overlay-show', id: 1, payload: p }), payload)
+
+  await fire({ kind: 'ready', title: 'Ready to record', detail: "Tom Clancy's Rainbow Six Siege", key: 'F8', ms: 3500 })
+  await page.waitForTimeout(300)
+  assert.equal(await page.locator('#title').textContent(), 'Ready to record')
+  assert.ok((await page.locator('#detail').textContent()).startsWith('Press F8 to clip'))
+  assert.ok(await page.locator('.dot').isVisible(), 'recording dot on ready')
+  await page.screenshot({ path: path.join(out, 'overlay-ready.png') })
+
+  await fire({ kind: 'saved', title: 'Clip saved', detail: "Tom Clancy's Rainbow Six Siege", key: null, ms: 600 })
+  await page.waitForTimeout(250)
+  assert.equal(await page.locator('#title').textContent(), 'Clip saved')
+  assert.ok(await page.locator('.check').isVisible(), 'check mark on saved')
+  assert.ok(!(await page.locator('#detail').textContent()).includes('Press'), 'no key hint on saved')
+  await page.screenshot({ path: path.join(out, 'overlay-saved.png') })
+  // Fades out on its own before the backend hides the window.
+  await page.waitForTimeout(700)
+  assert.equal(await page.locator('#popup').evaluate((e) => e.classList.contains('in')), false, 'fades out')
+  await page.close()
+}
+
 async function waitForServer() {
   for (let i = 0; i < 100; i++) {
     try {
@@ -247,6 +283,10 @@ async function waitForServer() {
     for (const s of wanted) {
       await runScenario(s, browser)
       console.log(`ok  ${s}`)
+    }
+    if (!process.argv[2]) {
+      await overlayScenario(browser)
+      console.log('ok  overlay')
     }
   } finally {
     await browser.close()

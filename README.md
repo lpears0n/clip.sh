@@ -45,6 +45,9 @@ leaves screenshots under `app/tests/shots/`; it runs in CI too. There's also a s
 - **Settings → Audio** picks which output's sound is recorded as the game
   track (say, only your headset) and which microphone goes on its own
   track. An unplugged device falls back to the default.
+- On Windows a small popup over the game says **Ready to record** when a
+  game starts recording and **Clip saved** when you clip. It never ends up
+  in clips; turn it off under Settings → General.
 - Press `F9` in a game for a screenshot: the newest frame from the replay
   buffer, saved as a PNG next to the game's clips. Both keys are set under
   Settings → Hotkeys.

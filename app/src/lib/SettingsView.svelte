@@ -185,6 +185,14 @@
           <Row title="Play a sound" description="A short shutter sound you can hear in-game.">
             <Toggle label="Play a sound" checked={settings.sound_on_save} onchange={(sound_on_save) => update({ sound_on_save })} />
           </Row>
+          {#if status?.backend === 'windows'}
+            <Row
+              title="In-game popup"
+              description="A small popup over the game says when recording is ready and when a clip saves. It never shows up in clips."
+            >
+              <Toggle label="In-game popup" checked={settings.overlay} onchange={(overlay) => update({ overlay })} />
+            </Row>
+          {/if}
         </div>
       </section>
     {:else if category === 'Recording'}

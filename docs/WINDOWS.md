@@ -39,6 +39,13 @@ compositor's copy is the only extra work the GPU does.
   and how it does for frame pacing next to monitor capture (which made
   Windows compose the game and caused constant hitching in Rainbow Six
   Siege with G-Sync on), is still to be confirmed on real machines.
+- **In-game popup** ("Ready to record", "Clip saved"): a transparent,
+  click-through, never-focused window kept on top of the game for a few
+  seconds, not a hook into the game (which anti-cheat flags). It is shown
+  with `SW_SHOWNOACTIVATE` so a fullscreen game keeps focus, placed at the
+  game window's top-right, and skipped when clip.sh itself is in front.
+  While visible it makes Windows compose the game, so it stays brief.
+  Untested so far: whether it appears over exclusive-fullscreen games.
 - The capture source now runs at the recording frame rate. Left to
   itself it settled on 30 fps and every clip had each frame twice.
 - The app logs to `%LOCALAPPDATA%\sh.clip.app\logs\clip.sh.log` (there is

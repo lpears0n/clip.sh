@@ -1,0 +1,138 @@
+/* The in-game popup. A borderless, transparent, click-through window the
+   size of the card; everything outside the card stays see-through. Tokens
+   match app.css (kept literal: this page loads without Tailwind). */
+@import '@fontsource-variable/inter';
+@import '@fontsource-variable/archivo/wdth.css';
+
+:root {
+  --accent: oklch(72% 0.19 50);
+  --overlay: oklch(24.5% 0.005 270 / 94%);
+  --line: oklch(100% 0 0 / 14%);
+  --fg: oklch(100% 0 0 / 92%);
+  --muted: oklch(100% 0 0 / 60%);
+  --danger: oklch(66% 0.21 15);
+  color-scheme: dark;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  user-select: none;
+  font-family: 'Inter Variable', Inter, system-ui, sans-serif;
+}
+
+body {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  padding: 6px;
+  box-sizing: border-box;
+}
+
+.popup {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: 10px 16px 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--overlay);
+  color: var(--fg);
+  opacity: 0;
+  transform: translateY(-6px);
+  transition:
+    opacity 180ms ease-out,
+    transform 180ms ease-out;
+}
+
+.popup.in {
+  opacity: 1;
+  transform: none;
+}
+
+.icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  background: oklch(100% 0 0 / 8%);
+}
+
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--danger);
+}
+
+.check {
+  display: none;
+  width: 16px;
+  height: 16px;
+  color: var(--accent);
+}
+
+.popup[data-kind='saved'] .icon,
+.popup[data-kind='screenshot'] .icon {
+  background: color-mix(in oklch, var(--accent) 20%, transparent);
+}
+
+.popup[data-kind='saved'] .dot,
+.popup[data-kind='screenshot'] .dot {
+  display: none;
+}
+
+.popup[data-kind='saved'] .check,
+.popup[data-kind='screenshot'] .check {
+  display: block;
+}
+
+.text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.title {
+  font-family: 'Archivo Variable', 'Inter Variable', system-ui, sans-serif;
+  font-stretch: 112%;
+  font-size: 15px;
+  line-height: 20px;
+  font-weight: 650;
+}
+
+.detail {
+  overflow: hidden;
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--muted);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+kbd {
+  padding: 0 5px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font: 600 12px/16px 'Inter Variable', system-ui, sans-serif;
+  color: var(--fg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .popup {
+    transition: opacity 120ms linear;
+    transform: none;
+  }
+}
+
+.reduce-motion .popup {
+  transition: opacity 120ms linear;
+  transform: none;
+}

@@ -4,6 +4,7 @@ mod ipc_server;
 mod library;
 mod logging;
 mod media_server;
+mod overlay;
 mod service;
 mod settings;
 mod storage;
@@ -33,7 +34,7 @@ use tauri_plugin_opener::OpenerExt;
 
 pub(crate) struct AppState {
     pub(crate) service: Service,
-    settings: Mutex<Settings>,
+    pub(crate) settings: Mutex<Settings>,
     hotkeys: hotkeys::Hotkeys,
     encoder: OnceLock<Encoder>,
     /// Which encoders handle which codecs; probing test-encodes, so do it once.
@@ -438,8 +439,15 @@ pub(crate) fn show_main(app: &AppHandle) {
     }
 }
 
-/// Notification + sound for a newly saved clip or screenshot, as configured.
-fn announce_saved(app: &AppHandle, summary: &'static str, path: &std::path::Path) {
+/// Notification, sound and overlay for a newly saved clip or screenshot,
+/// as configured. `popup` is the overlay to show over the game (none for
+/// edits rendered in the app).
+fn announce_saved(
+    app: &AppHandle,
+    summary: &'static str,
+    popup: Option<overlay::Kind>,
+    path: &std::path::Path,
+) {
     let (notify, sound) = {
         let state = app.state::<AppState>();
         let s = state.settings.lock().unwrap();
@@ -448,12 +456,17 @@ fn announce_saved(app: &AppHandle, summary: &'static str, path: &std::path::Path
     if sound {
         system::play_save_sound();
     }
+    let game = path
+        .parent()
+        .and_then(std::path::Path::file_name)
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    if let Some(kind) = popup
+        && overlay::enabled(app)
+    {
+        overlay::show(app, overlay::Popup::saved(kind, &game));
+    }
     if notify {
-        let game = path
-            .parent()
-            .and_then(std::path::Path::file_name)
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_default();
         let app = app.clone();
         tauri::async_runtime::spawn(async move {
             if let Err(e) = system::notify(&app, summary, &game).await {
@@ -558,6 +571,8 @@ pub fn run() {
                     tauri_plugin_window_state::StateFlags::all()
                         - tauri_plugin_window_state::StateFlags::VISIBLE,
                 )
+                // The overlay is placed over the game each time it shows.
+                .with_denylist(&["overlay"])
                 .build(),
         )
         .setup(|app| {
@@ -598,20 +613,44 @@ pub fn run() {
                 app.listen_any(service::CLIP_SAVED, move |event| {
                     enforce_storage(&handle);
                     let path: PathBuf = serde_json::from_str(event.payload()).unwrap_or_default();
-                    let summary = if library::is_edit(&path) {
-                        "Edit rendered"
+                    if library::is_edit(&path) {
+                        announce_saved(&handle, "Edit rendered", None, &path);
                     } else {
-                        "Clip saved"
-                    };
-                    announce_saved(&handle, summary, &path);
+                        announce_saved(&handle, "Clip saved", Some(overlay::Kind::Saved), &path);
+                    }
                 });
             }
             {
                 let handle = app.handle().clone();
                 app.listen_any(service::SCREENSHOT_SAVED, move |event| {
                     let path: PathBuf = serde_json::from_str(event.payload()).unwrap_or_default();
-                    announce_saved(&handle, "Screenshot saved", &path);
+                    announce_saved(
+                        &handle,
+                        "Screenshot saved",
+                        Some(overlay::Kind::Screenshot),
+                        &path,
+                    );
                 });
+            }
+            {
+                let handle = app.handle().clone();
+                app.listen_any(service::RECORDING_STARTED, move |event| {
+                    if !overlay::enabled(&handle) {
+                        return;
+                    }
+                    let game: String = serde_json::from_str(event.payload()).unwrap_or_default();
+                    let hotkey = handle
+                        .state::<AppState>()
+                        .settings
+                        .lock()
+                        .unwrap()
+                        .hotkey
+                        .clone();
+                    overlay::show(&handle, overlay::Popup::ready(&game, &hotkey));
+                });
+            }
+            if let Err(e) = overlay::create(app.handle()) {
+                tracing::warn!("in-game overlay unavailable: {e}");
             }
             // The window starts hidden (tauri.conf.json) so a login launch
             // can stay in the tray without flashing.

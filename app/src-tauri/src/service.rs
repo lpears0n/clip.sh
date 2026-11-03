@@ -17,6 +17,8 @@ use crate::{games, library};
 pub const STATUS_CHANGED: &str = "status-changed";
 pub const CLIP_SAVED: &str = "clip-saved";
 pub const SCREENSHOT_SAVED: &str = "screenshot-saved";
+/// A game started recording; the payload is its name.
+pub const RECORDING_STARTED: &str = "recording-started";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -162,6 +164,9 @@ async fn run(
                 let Some(ev) = ev else { break };
                 match auto.handle(ev).await {
                     Ok(Some(change)) => {
+                        if let Change::Started(g) = &change {
+                            let _ = app.emit(RECORDING_STARTED, &g.name);
+                        }
                         apply(change, &mut session);
                         let _ = app.emit(STATUS_CHANGED, status(&auto, replay_seconds, session.as_ref()));
                     }

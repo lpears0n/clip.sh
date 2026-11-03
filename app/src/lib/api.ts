@@ -66,6 +66,8 @@ export interface Settings {
   close_to_tray: boolean
   notify_on_save: boolean
   sound_on_save: boolean
+  /** Windows: popup over the game when recording starts and on a save. */
+  overlay: boolean
   fps: number
   bitrate_kbps: number
   codec: Codec
