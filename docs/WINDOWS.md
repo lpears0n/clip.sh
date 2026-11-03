@@ -29,6 +29,18 @@ compositor's copy is the only extra work the GPU does.
 - Zero-copy is the first path tried; if D3D11 negotiation fails, the
   recorder rebuilds on the system-memory path on its own and Settings →
   Recording says which is active.
+- **Capture method** (Settings → Recording): the game's monitor through
+  WGC (default), the game's window through WGC, or the monitor through
+  DXGI Desktop Duplication. Capturing a whole monitor can make Windows
+  compose a fullscreen game instead of letting it flip straight to the
+  display, which hurts frame pacing and drops G-Sync when G-Sync is set
+  to fullscreen only; the first report from a real machine was constant
+  hitching in Rainbow Six Siege with G-Sync on. Window capture falls back
+  to the monitor if the game refuses it. Which one hitches least on a
+  given machine is still to be measured (PresentMon's PresentMode column
+  shows whether the game is composed).
+- The capture source now runs at the recording frame rate. Left to
+  itself it settled on 30 fps and every clip had each frame twice.
 - The app logs to `%LOCALAPPDATA%\sh.clip.app\logs\clip.sh.log` (there is
   no terminal to print to). A crash shows a message box with the reason and
   that path. `RUST_LOG=debug` and `GST_DEBUG=2` in the environment make the

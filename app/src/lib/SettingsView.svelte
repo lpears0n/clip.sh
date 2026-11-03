@@ -6,7 +6,17 @@
 <script lang="ts">
   import { AudioLines, Check, FolderOpen, HardDrive, Keyboard, Palette, SlidersHorizontal, Video } from '@lucide/svelte'
   import { open as openDialog } from '@tauri-apps/plugin-dialog'
-  import { api, type Capabilities, type Codec, type Encoder, type HotkeyBackend, type Settings, type Status, type Usage } from './api'
+  import {
+    api,
+    type Capabilities,
+    type CaptureMethod,
+    type Codec,
+    type Encoder,
+    type HotkeyBackend,
+    type Settings,
+    type Status,
+    type Usage,
+  } from './api'
   import { bytes } from './format'
   import HotkeyBinder from './HotkeyBinder.svelte'
   import { ACCENTS, type Accent, prefs, setPrefs } from './prefs.svelte'
@@ -318,7 +328,25 @@
             </select>
           </Row>
           {:else}
-            <Row title="Capture method" description="The monitor your game is on, through Windows Graphics Capture. Frames stay on the GPU." />
+            <Row
+              title="Capture method"
+              description={settings.capture_method === 'window'
+                ? 'Only the game’s window. Can keep Windows from composing a fullscreen game, which helps frame pacing and G-Sync. Falls back to the monitor if the game refuses.'
+                : settings.capture_method === 'monitor-dxgi'
+                  ? 'The game’s monitor through Desktop Duplication, the older capture API. Try it if the others stutter.'
+                  : 'The monitor your game is on, through Windows Graphics Capture. If games hitch while recording, try Game window.'}
+            >
+              <select
+                class="field w-48"
+                aria-label="Capture method"
+                value={settings.capture_method}
+                onchange={(e) => update({ capture_method: e.currentTarget.value as CaptureMethod })}
+              >
+                <option value="monitor">Monitor</option>
+                <option value="window">Game window</option>
+                <option value="monitor-dxgi">Monitor (Desktop Duplication)</option>
+              </select>
+            </Row>
           {/if}
           {#if status?.backend === 'portal'}
             <Row
@@ -334,7 +362,9 @@
           {/if}
         </div>
         <p class="px-1 text-secondary text-muted">
-          Recording changes apply from the next game you launch; a new capture method applies after restarting clip.sh.
+          {status?.backend === 'windows'
+            ? 'Recording changes apply from the next game you launch.'
+            : 'Recording changes apply from the next game you launch; a new capture method applies after restarting clip.sh.'}
         </p>
       </section>
     {:else if category === 'Audio'}

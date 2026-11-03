@@ -5,9 +5,12 @@ pub mod auto;
 pub mod display;
 pub mod game;
 
-/// What the recorder captures: a monitor, by `HMONITOR`.
+/// What the recorder captures: the game's monitor (`HMONITOR`) or its
+/// window (`HWND`), as `method` says.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Target {
     pub monitor: isize,
+    pub window: isize,
+    pub method: crate::capture::CaptureMethod,
     pub cursor: bool,
 }

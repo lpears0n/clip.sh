@@ -44,6 +44,10 @@ pub struct RecorderConfig {
     /// and the GL import path did no better.
     #[serde(default = "zero_copy_default")]
     pub zero_copy: bool,
+    /// What Windows captures (monitor or game window, and through which
+    /// API). Ignored on Linux.
+    #[serde(default)]
+    pub capture_method: crate::capture::CaptureMethod,
 }
 
 fn zero_copy_default() -> bool {
@@ -72,6 +76,7 @@ impl Default for RecorderConfig {
             audio_bitrate: default_audio_bitrate(),
             cursor: true,
             zero_copy: zero_copy_default(),
+            capture_method: Default::default(),
         }
     }
 }
@@ -94,7 +99,7 @@ pub enum CaptureSource {
     /// A window streamed by KWin directly (no picker).
     #[cfg(target_os = "linux")]
     Kwin(KwinStream),
-    /// A monitor, through Windows Graphics Capture.
+    /// The game's monitor or window (Windows Graphics Capture or DXGI).
     #[cfg(windows)]
     Screen(crate::win::Target),
 }
@@ -109,8 +114,10 @@ impl CaptureSource {
                 CaptureTarget::Pipewire(PipewireTarget::Serial(s.pipewire_serial()))
             }
             #[cfg(windows)]
-            CaptureSource::Screen(t) => CaptureTarget::Monitor {
-                handle: t.monitor,
+            CaptureSource::Screen(t) => CaptureTarget::Windows {
+                monitor: t.monitor,
+                window: t.window,
+                method: t.method,
                 cursor: t.cursor,
             },
         }

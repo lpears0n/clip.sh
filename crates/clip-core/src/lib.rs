@@ -36,7 +36,7 @@ pub use audio::{AudioDevice, AudioSource, add_audio_branch, input_devices, outpu
 pub use backend::Backend;
 #[cfg(target_os = "linux")]
 pub use capture::PipewireTarget;
-pub use capture::{CapturePath, CaptureTarget, VideoConfig, add_video_branch};
+pub use capture::{CaptureMethod, CapturePath, CaptureTarget, VideoConfig, add_video_branch};
 pub use encoder::{Codec, Encoder};
 pub use gstreamer as gst;
 pub use hotkey::{Action, Binding};

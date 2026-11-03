@@ -13,6 +13,7 @@ use tokio::sync::mpsc;
 
 pub use crate::backend::Backend;
 use crate::{
+    capture::CaptureMethod,
     encoder::{Codec, Encoder},
     game::Game,
     recorder::{CaptureSource, Recorder, RecorderConfig, Status},
@@ -60,10 +61,24 @@ impl AutoRecorder {
         let (tx, rx) = mpsc::unbounded_channel();
         tokio::spawn(async move {
             let mut last: Option<Vec<RunningGame>> = None;
+            let mut scanner = crate::win::game::Scanner::default();
             loop {
-                let games = tokio::task::spawn_blocking(crate::win::game::running_games)
-                    .await
-                    .unwrap_or_default();
+                let games = match tokio::task::spawn_blocking(move || {
+                    let games = scanner.scan();
+                    (scanner, games)
+                })
+                .await
+                {
+                    Ok((s, games)) => {
+                        scanner = s;
+                        games
+                    }
+                    // A panicking scan loses its cache, not the watcher.
+                    Err(_) => {
+                        scanner = crate::win::game::Scanner::default();
+                        Vec::new()
+                    }
+                };
                 if last.as_ref() != Some(&games) {
                     if tx.send(Event::Games(games.clone())).is_err() {
                         break;
@@ -118,10 +133,27 @@ impl AutoRecorder {
         cfg.encoder = Some(self.resolve_encoder().await?);
         let target = Target {
             monitor: running.monitor,
+            window: running.hwnd,
+            method: cfg.capture_method,
             cursor: cfg.cursor,
         };
-        let recorder = Recorder::start(&cfg, CaptureSource::Screen(target)).await?;
-        tracing::info!(game = %running.game.name, "recording (monitor)");
+        let recorder = match Recorder::start(&cfg, CaptureSource::Screen(target)).await {
+            Ok(r) => r,
+            // Some windows refuse capture; the monitor always works.
+            Err(e) if target.method == CaptureMethod::Window => {
+                tracing::warn!(
+                    game = %running.game.name,
+                    "window capture failed, capturing the monitor instead: {e:#}"
+                );
+                let target = Target {
+                    method: CaptureMethod::Monitor,
+                    ..target
+                };
+                Recorder::start(&cfg, CaptureSource::Screen(target)).await?
+            }
+            Err(e) => return Err(e),
+        };
+        tracing::info!(game = %running.game.name, method = ?target.method, "recording");
         self.active = Some(Active {
             game: running.game.clone(),
             recorder,

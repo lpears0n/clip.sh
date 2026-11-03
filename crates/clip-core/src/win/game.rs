@@ -3,8 +3,9 @@
 //! every couple of seconds (a few hundred microseconds; no per-frame work).
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     path::{Path, PathBuf},
+    time::{Duration, Instant},
 };
 
 use windows::{
@@ -83,74 +84,105 @@ const NOT_GAMES: &[&str] = &[
     "conhost",
 ];
 
-/// Every game window right now; the foreground one first.
-pub fn running_games() -> Vec<RunningGame> {
-    let mut windows: Vec<HWND> = Vec::new();
-    // SAFETY: the callback only pushes handles into the Vec passed as LPARAM.
-    let _ = unsafe { EnumWindows(Some(collect), LPARAM(&mut windows as *mut _ as isize)) };
-    // SAFETY: plain query.
-    let fg = unsafe { GetForegroundWindow() };
-    let steam = SteamIndex::load();
-    let me = std::process::id();
+/// How often the Steam library index is re-read (installs are rare).
+const STEAM_REFRESH: Duration = Duration::from_secs(60);
 
-    let mut games: Vec<RunningGame> = Vec::new();
-    for hwnd in windows {
-        // SAFETY: hwnd came from EnumWindows moments ago; stale handles just fail.
-        let visible = unsafe { IsWindowVisible(hwnd) }.as_bool();
-        if !visible {
-            continue;
+/// Finds game windows, remembering between scans what it already looked
+/// up: each process's executable (so a running game is opened once, not
+/// every scan; anti-cheat inspects every handle opened to its process) and
+/// the Steam library index (re-read once a minute instead of every scan).
+#[derive(Default)]
+pub struct Scanner {
+    exes: HashMap<u32, Option<PathBuf>>,
+    steam: Option<(SteamIndex, Instant)>,
+}
+
+impl Scanner {
+    /// Every game window right now; the foreground one first.
+    pub fn scan(&mut self) -> Vec<RunningGame> {
+        let mut windows: Vec<HWND> = Vec::new();
+        // SAFETY: the callback only pushes handles into the Vec passed as LPARAM.
+        let _ = unsafe { EnumWindows(Some(collect), LPARAM(&mut windows as *mut _ as isize)) };
+        // SAFETY: plain query.
+        let fg = unsafe { GetForegroundWindow() };
+        if self
+            .steam
+            .as_ref()
+            .is_none_or(|(_, at)| at.elapsed() > STEAM_REFRESH)
+        {
+            self.steam = Some((SteamIndex::load(), Instant::now()));
         }
-        let title = window_title(hwnd);
-        if title.is_empty() {
-            continue;
+        let steam = &self.steam.as_ref().unwrap().0;
+        let me = std::process::id();
+
+        let mut seen = HashSet::new();
+        let mut games: Vec<RunningGame> = Vec::new();
+        for hwnd in windows {
+            // SAFETY: hwnd came from EnumWindows moments ago; stale handles just fail.
+            let visible = unsafe { IsWindowVisible(hwnd) }.as_bool();
+            if !visible {
+                continue;
+            }
+            let title = window_title(hwnd);
+            if title.is_empty() {
+                continue;
+            }
+            let mut pid = 0u32;
+            // SAFETY: writes the owning process id into `pid`.
+            unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)) };
+            if pid == 0 || pid == me {
+                continue;
+            }
+            seen.insert(pid);
+            let Some(exe) = self
+                .exes
+                .entry(pid)
+                .or_insert_with(|| process_image(pid))
+                .clone()
+            else {
+                continue;
+            };
+            let stem = exe
+                .file_stem()
+                .map(|s| s.to_string_lossy().to_ascii_lowercase())
+                .unwrap_or_default();
+            if NOT_GAMES.contains(&stem.as_str()) {
+                continue;
+            }
+            let game = match steam.lookup(&exe) {
+                Some((id, name)) => Game {
+                    name,
+                    steam_app_id: Some(id),
+                },
+                // Not from Steam: only count it if it fills its monitor, the way
+                // games do and productivity apps rarely do.
+                None if fills_monitor(hwnd) => Game {
+                    name: title_or_stem(&title, &stem),
+                    steam_app_id: None,
+                },
+                None => continue,
+            };
+            if games.iter().any(|g| g.game == game) {
+                continue;
+            }
+            // SAFETY: plain query on a live window handle.
+            let monitor = unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) };
+            games.push(RunningGame {
+                game,
+                hwnd: hwnd.0 as isize,
+                monitor: monitor.0 as isize,
+                foreground: hwnd == fg,
+            });
         }
-        let mut pid = 0u32;
-        // SAFETY: writes the owning process id into `pid`.
-        unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)) };
-        if pid == 0 || pid == me {
-            continue;
-        }
-        let Some(exe) = process_image(pid) else {
-            continue;
-        };
-        let stem = exe
-            .file_stem()
-            .map(|s| s.to_string_lossy().to_ascii_lowercase())
-            .unwrap_or_default();
-        if NOT_GAMES.contains(&stem.as_str()) {
-            continue;
-        }
-        let game = match steam.lookup(&exe) {
-            Some((id, name)) => Game {
-                name,
-                steam_app_id: Some(id),
-            },
-            // Not from Steam: only count it if it fills its monitor, the way
-            // games do and productivity apps rarely do.
-            None if fills_monitor(hwnd) => Game {
-                name: title_or_stem(&title, &stem),
-                steam_app_id: None,
-            },
-            None => continue,
-        };
-        if games.iter().any(|g| g.game == game) {
-            continue;
-        }
-        // SAFETY: plain query on a live window handle.
-        let monitor = unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) };
-        games.push(RunningGame {
-            game,
-            hwnd: hwnd.0 as isize,
-            monitor: monitor.0 as isize,
-            foreground: hwnd == fg,
-        });
+        // Forget processes whose windows are gone (their ids get reused).
+        self.exes.retain(|pid, _| seen.contains(pid));
+        games.sort_by_key(|g| !g.foreground);
+        games
     }
-    games.sort_by_key(|g| !g.foreground);
-    games
 }
 
 unsafe extern "system" fn collect(hwnd: HWND, lparam: LPARAM) -> BOOL {
-    // SAFETY: lparam is the Vec<HWND> passed by `running_games`.
+    // SAFETY: lparam is the Vec<HWND> passed by `Scanner::scan`.
     let list = unsafe { &mut *(lparam.0 as *mut Vec<HWND>) };
     list.push(hwnd);
     BOOL(1)

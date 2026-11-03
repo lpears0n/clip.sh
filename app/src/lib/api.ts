@@ -73,6 +73,8 @@ export interface Settings {
   cursor: boolean
   /** Try DMA-BUF capture into GPU memory first; falls back by itself. */
   zero_copy: boolean
+  /** Windows: what to capture, and through which API. */
+  capture_method: CaptureMethod
   desktop_audio: boolean
   /** Output whose sound is recorded; null = the system default. */
   desktop_device: string | null
@@ -84,6 +86,7 @@ export interface Settings {
   ads: boolean
 }
 
+export type CaptureMethod = 'monitor' | 'window' | 'monitor-dxgi'
 export type Codec = 'h264' | 'hevc' | 'av1'
 export type Encoder = 'nvenc' | 'vaapi' | 'amf' | 'qsv' | 'mf' | 'x264'
 

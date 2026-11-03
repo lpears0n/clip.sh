@@ -51,14 +51,34 @@ pub enum PipewireTarget {
     Serial(u64),
 }
 
+/// How Windows captures the game. Ignored on Linux, where the compositor
+/// decides (KWin streams the window, the portal a monitor).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CaptureMethod {
+    /// The game's monitor through Windows Graphics Capture.
+    #[default]
+    Monitor,
+    /// The game's own window through Windows Graphics Capture (falls back
+    /// to `Monitor` if the window can't be captured).
+    Window,
+    /// The game's monitor through DXGI Desktop Duplication, the older API.
+    MonitorDxgi,
+}
+
 /// What the video source captures, per platform.
 #[derive(Debug, Clone, Copy)]
 pub enum CaptureTarget {
     #[cfg(target_os = "linux")]
     Pipewire(PipewireTarget),
-    /// A monitor by `HMONITOR`, through Windows Graphics Capture.
+    /// The game on Windows: its monitor (`HMONITOR`) or its window (`HWND`).
     #[cfg(windows)]
-    Monitor { handle: isize, cursor: bool },
+    Windows {
+        monitor: isize,
+        window: isize,
+        method: CaptureMethod,
+        cursor: bool,
+    },
 }
 
 /// How frames travel from the compositor to the encoder.
@@ -103,8 +123,21 @@ pub fn add_video_branch(
     let parse = cfg.codec.make_parser()?;
 
     let mut chain = vec![src.clone()];
+    // The Windows source paces itself to the frame rate it negotiates, and
+    // left alone it settles on 30 fps (videorate would then duplicate every
+    // other frame). Ask it for the recording rate.
+    #[cfg(windows)]
+    let source_rate = |s: &mut gst::StructureRef| {
+        s.set("framerate", gst::Fraction::new(cfg.fps as i32, 1));
+    };
+    // pipewiresrc sends frames on damage at a variable rate; videorate makes
+    // it constant, so the source itself isn't constrained.
+    #[cfg(not(windows))]
+    let source_rate = |_: &mut gst::StructureRef| {};
     match path {
         CapturePath::Copy => {
+            #[cfg(windows)]
+            chain.push(capsfilter(raw_caps(None, source_rate))?);
             // Window streams can have odd sizes, which 4:2:0 encoders reject;
             // trim the odd row/column whenever the size changes.
             let crop = gst::ElementFactory::make("videocrop").build()?;
@@ -126,7 +159,7 @@ pub fn add_video_branch(
             // Only GPU memory leaves the source; a system-memory offer must
             // fail here so the recorder can fall back instead of silently
             // copying.
-            let gpu = capsfilter(raw_caps(Some(SOURCE_GPU_MEMORY), |_| {}))?;
+            let gpu = capsfilter(raw_caps(Some(SOURCE_GPU_MEMORY), source_rate))?;
             let rate_caps = capsfilter(raw_caps(Some(SOURCE_GPU_MEMORY), |s| {
                 s.set("framerate", gst::Fraction::new(cfg.fps as i32, 1));
             }))?;
@@ -192,26 +225,49 @@ fn make_source(
     Ok(src)
 }
 
-/// Windows Graphics Capture through `d3d11screencapturesrc`: frames arrive
-/// as D3D11 textures (zero-copy into every Windows hardware encoder) or as
-/// system memory for the copy path. WGC is the API games can't block and
-/// that doesn't hook the game's own swap chain, so it costs the game
-/// nothing beyond the compositor's copy.
+/// `d3d11screencapturesrc`: frames arrive as D3D11 textures (zero-copy into
+/// every Windows hardware encoder) or as system memory for the copy path.
+/// Neither API hooks the game's swap chain, but capturing a whole monitor
+/// can make Windows compose a fullscreen game instead of letting it flip
+/// straight to the display, which costs frame pacing (and G-Sync in
+/// fullscreen-only mode); [`CaptureMethod`] lets the user pick.
 #[cfg(windows)]
 fn make_source(
     target: CaptureTarget,
     _cfg: &VideoConfig,
     _path: CapturePath,
 ) -> Result<gst::Element> {
-    let CaptureTarget::Monitor { handle, cursor } = target;
+    let CaptureTarget::Windows {
+        monitor,
+        window,
+        method,
+        cursor,
+    } = target;
     let src = gst::ElementFactory::make("d3d11screencapturesrc")
         .name("screen")
-        .property("monitor-handle", handle as u64)
         .property("show-cursor", cursor)
         .build()
         .context("d3d11screencapturesrc missing (GStreamer d3d11 plugin)")?;
-    if src.has_property("capture-api") {
-        src.set_property_from_str("capture-api", "wgc");
+    match method {
+        CaptureMethod::Window => {
+            // A window handle selects WGC window capture by itself; "client"
+            // leaves out the title bar and borders of a windowed game.
+            src.set_property("window-handle", window as u64);
+            if src.has_property("window-capture-mode") {
+                src.set_property_from_str("window-capture-mode", "client");
+            }
+        }
+        CaptureMethod::Monitor | CaptureMethod::MonitorDxgi => {
+            src.set_property("monitor-handle", monitor as u64);
+            if src.has_property("capture-api") {
+                let api = if method == CaptureMethod::MonitorDxgi {
+                    "dxgi"
+                } else {
+                    "wgc"
+                };
+                src.set_property_from_str("capture-api", api);
+            }
+        }
     }
     if src.has_property("show-border") {
         src.set_property("show-border", false);
