@@ -163,6 +163,11 @@ impl ReplayBuffer {
         }
     }
 
+    /// Where the newest buffered video ends (running time), if any.
+    pub fn newest_video_end(&self) -> Option<gst::ClockTime> {
+        self.video.newest_end()
+    }
+
     /// How much video is currently buffered.
     pub fn buffered(&self) -> gst::ClockTime {
         match (self.video.oldest_pts(), self.video.newest_end()) {
@@ -300,6 +305,7 @@ mod tests {
         assert_eq!(buf.video.oldest_pts(), Some(ms(7000)));
         assert!(is_keyframe(buf.video.packets.front().unwrap()));
         assert_eq!(buf.buffered(), ms(3000));
+        assert_eq!(buf.newest_video_end(), Some(ms(10_000)));
     }
 
     #[test]

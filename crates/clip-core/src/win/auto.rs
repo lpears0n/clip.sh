@@ -21,8 +21,12 @@ use crate::{
     win::{Target, game::RunningGame},
 };
 
-/// How often windows are walked looking for games.
+/// How often windows are walked looking for games (and the recording's
+/// health checked).
 const SCAN_INTERVAL: Duration = Duration::from_secs(2);
+
+/// After a failed start, how long to wait before trying again.
+const RETRY_AFTER: Duration = Duration::from_secs(10);
 
 /// Input for [`AutoRecorder::handle`].
 #[derive(Debug, Clone)]
@@ -52,6 +56,8 @@ pub struct AutoRecorder {
     probed: HashMap<Codec, Encoder>,
     running: Vec<RunningGame>,
     active: Option<Active>,
+    /// No new start attempt before this, after one failed.
+    retry_at: Option<std::time::Instant>,
 }
 
 impl AutoRecorder {
@@ -64,7 +70,6 @@ impl AutoRecorder {
     ) -> Result<(Self, mpsc::UnboundedReceiver<Event>)> {
         let (tx, rx) = mpsc::unbounded_channel();
         tokio::spawn(async move {
-            let mut last: Option<Vec<RunningGame>> = None;
             let mut scanner = crate::win::game::Scanner::default();
             loop {
                 let games = match tokio::task::spawn_blocking(move || {
@@ -83,11 +88,10 @@ impl AutoRecorder {
                         Vec::new()
                     }
                 };
-                if last.as_ref() != Some(&games) {
-                    if tx.send(Event::Games(games.clone())).is_err() {
-                        break;
-                    }
-                    last = Some(games);
+                // Every scan, changed or not: each one also checks that the
+                // recording is still alive.
+                if tx.send(Event::Games(games)).is_err() {
+                    break;
                 }
                 tokio::time::sleep(SCAN_INTERVAL).await;
             }
@@ -99,6 +103,7 @@ impl AutoRecorder {
                 probed: HashMap::new(),
                 running: vec![],
                 active: None,
+                retry_at: None,
             },
             rx,
         ))
@@ -125,20 +130,46 @@ impl AutoRecorder {
                 return self.stop().await.map(|g| g.map(Change::Stopped));
             };
             if now.hwnd == a.hwnd {
-                return Ok(None);
+                let Some(failure) = a.recorder.failure() else {
+                    return Ok(None);
+                };
+                // The capture died (the window's capture was closed, the
+                // GPU was reset, ...). Left alone, every clip would replay
+                // the last moments before the failure.
+                tracing::warn!(game = %now.game.name, "capture failed, restarting it: {failure}");
+            } else {
+                // Same game, new window (a splash screen gave way to the
+                // game, or it recreated its window switching to fullscreen).
+                tracing::info!(game = %now.game.name, "game window changed; following it");
             }
-            // Same game, new window (a splash screen gave way to the game,
-            // or it recreated its window switching to fullscreen): follow
-            // it. The play session carries on; the replay buffer restarts.
-            tracing::info!(game = %now.game.name, "game window changed; following it");
-            self.stop().await?;
-            self.start(now).await?;
+            // Either way the play session carries on; the replay buffer
+            // restarts.
+            let _ = self.stop().await;
+            self.try_start(now).await?;
+            return Ok(None);
+        }
+        if self.retry_at.is_some_and(|t| std::time::Instant::now() < t) {
             return Ok(None);
         }
         let Some(next) = self.running.first().cloned() else {
             return Ok(None);
         };
-        self.start(next).await.map(Some)
+        self.try_start(next).await.map(Some)
+    }
+
+    /// [`Self::start`], backing off for a while if it fails, so a game that
+    /// can't be captured isn't retried every scan.
+    async fn try_start(&mut self, running: RunningGame) -> Result<Change> {
+        match self.start(running).await {
+            Ok(c) => {
+                self.retry_at = None;
+                Ok(c)
+            }
+            Err(e) => {
+                self.retry_at = Some(std::time::Instant::now() + RETRY_AFTER);
+                Err(e)
+            }
+        }
     }
 
     async fn start(&mut self, running: RunningGame) -> Result<Change> {
@@ -153,7 +184,7 @@ impl AutoRecorder {
         let recorder = Recorder::start(&cfg, CaptureSource::Screen(target))
             .await
             .with_context(|| format!("can't capture the {} window", running.game.name))?;
-        tracing::info!(game = %running.game.name, "recording (window)");
+        tracing::info!(game = %running.game.name, hwnd = running.hwnd, "recording (window)");
         let hdr = crate::win::display::hdr_display(running.monitor);
         if let Some(h) = hdr {
             tracing::info!(

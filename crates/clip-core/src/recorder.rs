@@ -50,6 +50,9 @@ fn zero_copy_default() -> bool {
     cfg!(windows)
 }
 
+/// A newest frame older than this at save time gets a log line.
+const STALE: gst::ClockTime = gst::ClockTime::from_seconds(2);
+
 /// How long the zero-copy pipeline gets to deliver a first frame before it
 /// is judged not to work on this machine.
 const ZERO_COPY_PROBE: std::time::Duration = std::time::Duration::from_secs(4);
@@ -236,8 +239,33 @@ impl Recorder {
         }
     }
 
+    /// The error that stopped capture, if the pipeline failed after it
+    /// started (the replay buffer then holds nothing newer than the
+    /// failure).
+    pub fn failure(&self) -> Option<String> {
+        self.error.lock().unwrap().clone()
+    }
+
+    /// How long ago the newest buffered frame was captured. Long when the
+    /// game stops drawing (minimized), or capture failed.
+    pub fn frame_age(&self) -> Option<gst::ClockTime> {
+        let now = self.pipeline.current_running_time()?;
+        let newest = self.buffer.lock().unwrap().newest_video_end()?;
+        Some(now.saturating_sub(newest))
+    }
+
     /// Save the last `seconds` (default: the whole buffer) to `path`.
     pub async fn save(&self, seconds: Option<u32>, path: &Path) -> Result<PathBuf> {
+        if let Some(age) = self.frame_age()
+            && age > STALE
+        {
+            tracing::warn!(
+                %age,
+                failure = self.failure().as_deref().unwrap_or("none"),
+                "saving footage that ends this long ago: no new frames since \
+                 (window minimized, game not drawing, or capture failed)"
+            );
+        }
         let duration = seconds
             .map(|s| gst::ClockTime::from_seconds(s.into()))
             .unwrap_or_else(|| self.buffer.lock().unwrap().window());

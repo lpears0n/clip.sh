@@ -88,9 +88,7 @@ pub fn add_video_branch(
     }
     let src = make_source(target, cfg, path)?;
 
-    let rate = gst::ElementFactory::make("videorate")
-        .name("rate")
-        .build()?;
+    let rate = make_rate()?;
     let queue = gst::ElementFactory::make("queue")
         .property("max-size-buffers", 4u32)
         .property("max-size-time", 0u64)
@@ -170,6 +168,21 @@ pub fn add_video_branch(
     pipeline.add_many(&chain)?;
     gst::Element::link_many(&chain)?;
     Ok(parse)
+}
+
+/// `videorate`, which turns the source's frames into a constant rate.
+/// When the source pauses (Windows: a window only yields frames while the
+/// game draws), the gap is not filled with copies: on resume that would be
+/// a burst of hundreds of duplicate frames at once for the encoder. Pauses
+/// longer than a second stay gaps in the replay buffer.
+fn make_rate() -> Result<gst::Element> {
+    Ok(gst::ElementFactory::make("videorate")
+        .name("rate")
+        .property(
+            "max-duplication-time",
+            gst::ClockTime::from_seconds(1).nseconds(),
+        )
+        .build()?)
 }
 
 /// The GPU memory the platform's capture source hands out.
@@ -279,6 +292,61 @@ fn on_caps(src: &gst::Element, f: impl Fn(i32, i32) + Send + Sync + 'static) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 1 s of 30 fps frames, a 3 s pause, 1 s more: the pause must not come
+    /// out as ~90 filler frames.
+    #[test]
+    fn long_pauses_are_not_filled_with_copies() {
+        use gstreamer_app as gst_app;
+        crate::init().unwrap();
+        let pipeline = gst::Pipeline::new();
+        let src = gst_app::AppSrc::builder()
+            .caps(
+                &gst::Caps::builder("video/x-raw")
+                    .field("format", "I420")
+                    .field("width", 16i32)
+                    .field("height", 16i32)
+                    .field("framerate", gst::Fraction::new(0, 1))
+                    .build(),
+            )
+            .format(gst::Format::Time)
+            .build();
+        let rate = make_rate().unwrap();
+        let caps = capsfilter(raw_caps(None, |s| {
+            s.set("framerate", gst::Fraction::new(30, 1))
+        }))
+        .unwrap();
+        let sink = gst_app::AppSink::builder().sync(false).build();
+        pipeline
+            .add_many([src.upcast_ref(), &rate, &caps, sink.upcast_ref()])
+            .unwrap();
+        gst::Element::link_many([src.upcast_ref(), &rate, &caps, sink.upcast_ref()]).unwrap();
+        pipeline.set_state(gst::State::Playing).unwrap();
+
+        let frame = gst::ClockTime::from_nseconds(1_000_000_000 / 30);
+        let times = (0..30u64)
+            .map(|i| frame * i)
+            .chain((0..30u64).map(|i| gst::ClockTime::from_seconds(4) + frame * i));
+        for t in times {
+            let mut b = gst::Buffer::from_slice(vec![0u8; 16 * 16 * 3 / 2]);
+            let bm = b.get_mut().unwrap();
+            bm.set_pts(t);
+            bm.set_duration(frame);
+            src.push_buffer(b).unwrap();
+        }
+        src.end_of_stream().unwrap();
+        let mut out = 0;
+        while sink
+            .try_pull_sample(gst::ClockTime::from_seconds(5))
+            .is_some()
+        {
+            out += 1;
+        }
+        pipeline.set_state(gst::State::Null).unwrap();
+        // 60 real frames, give or take videorate's edge frames; a filled
+        // gap would be ~150.
+        assert!((55..=70).contains(&out), "{out} frames out");
+    }
 
     #[test]
     fn caps_carry_memory_features() {
