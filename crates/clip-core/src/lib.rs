@@ -6,6 +6,7 @@ pub mod capture;
 pub mod encoder;
 pub mod export;
 pub mod game;
+pub mod hdr;
 pub mod media;
 pub mod recorder;
 pub mod ring;
@@ -39,6 +40,7 @@ pub use capture::PipewireTarget;
 pub use capture::{CapturePath, CaptureTarget, VideoConfig, add_video_branch};
 pub use encoder::{Codec, Encoder};
 pub use gstreamer as gst;
+pub use hdr::HdrDisplay;
 pub use hotkey::{Action, Binding};
 #[cfg(target_os = "linux")]
 pub use portal::ScreenSource;

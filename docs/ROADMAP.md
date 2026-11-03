@@ -146,6 +146,9 @@ ship on its own.
   (Hyprland, Sway, niri) now that compositors ship it.
 - **X11** via `ximagesrc` as a fallback backend with `xdotool`-style active
   window tracking.
+- **HDR** (see `docs/HDR.md`): detection is done; next is tone-mapped
+  SDR from HDR games through clip.sh's own FP16 window capture, then
+  optional HDR10 recording.
 - **Audio per application** through PipeWire node targeting (record the
   game, not Discord), with Discord as its own optional track.
 - **Replay length up to 20 min** with the ring spilling to disk (`splitmuxsink`

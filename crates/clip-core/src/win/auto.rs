@@ -42,6 +42,8 @@ struct Active {
     game: Game,
     /// The window being recorded.
     hwnd: isize,
+    /// The game's display, if it is running in HDR.
+    hdr: Option<crate::HdrDisplay>,
     recorder: Recorder,
 }
 
@@ -152,9 +154,18 @@ impl AutoRecorder {
             .await
             .with_context(|| format!("can't capture the {} window", running.game.name))?;
         tracing::info!(game = %running.game.name, "recording (window)");
+        let hdr = crate::win::display::hdr_display(running.monitor);
+        if let Some(h) = hdr {
+            tracing::info!(
+                sdr_white_nits = h.sdr_white_nits,
+                peak_nits = h.peak_nits,
+                "the game's display is in HDR; clips are SDR, so HDR highlights clip"
+            );
+        }
         self.active = Some(Active {
             game: running.game.clone(),
             hwnd: running.hwnd,
+            hdr,
             recorder,
         });
         Ok(Change::Started(running.game))
@@ -200,6 +211,11 @@ impl AutoRecorder {
             .encoder
             .filter(|e| e.element(self.cfg.video.codec).is_some())
             .or_else(|| self.probed.get(&self.cfg.video.codec).copied())
+    }
+
+    /// The recorded game's display, if it is running in HDR.
+    pub fn hdr(&self) -> Option<crate::HdrDisplay> {
+        self.active.as_ref().and_then(|a| a.hdr)
     }
 
     pub fn current_game(&self) -> Option<&Game> {

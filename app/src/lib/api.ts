@@ -23,6 +23,8 @@ export interface Status {
   backend: 'kwin' | 'portal' | 'windows' | null
   /** Portal capture needs a screen chosen once. */
   needs_screen: boolean
+  /** While recording: the game's display, when it runs in HDR. */
+  hdr: { sdr_white_nits: number; peak_nits: number } | null
 }
 
 export interface Clip {

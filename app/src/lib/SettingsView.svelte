@@ -340,6 +340,12 @@
               description="Only the game’s own window is recorded, never the rest of your screen. Notifications, Discord and your other monitors stay out of clips."
             />
           {/if}
+          {#if status?.hdr}
+            <Row
+              title="HDR display"
+              description={`The game’s display is in HDR (SDR white at ${Math.round(status.hdr.sdr_white_nits)} nits). Clips are recorded in SDR for now, so bright HDR highlights look blown out. Proper HDR support is in progress.`}
+            />
+          {/if}
           {#if status?.backend === 'portal'}
             <Row
               title="Screen"

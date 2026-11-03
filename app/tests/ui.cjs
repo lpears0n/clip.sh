@@ -47,8 +47,8 @@ function fixtures(scenario) {
   const empty = scenario === 'empty'
   return {
     get_status: empty
-      ? { state: 'waiting', game: null, steam_app_id: null, session_start_ms: null, buffered_seconds: 0, replay_seconds: 30, encoder: null, capture_path: null, error: null, backend: 'portal', needs_screen: true }
-      : { state: 'recording', game: 'ELDEN RING', steam_app_id: 1245620, session_start_ms: now - h, buffered_seconds: 30, replay_seconds: 30, encoder: 'nvenc', capture_path: 'zerocopy', error: null, backend: 'kwin', needs_screen: false },
+      ? { state: 'waiting', game: null, steam_app_id: null, session_start_ms: null, buffered_seconds: 0, replay_seconds: 30, encoder: null, capture_path: null, error: null, backend: 'portal', needs_screen: true, hdr: null }
+      : { state: 'recording', game: 'ELDEN RING', steam_app_id: 1245620, session_start_ms: now - h, buffered_seconds: 30, replay_seconds: 30, encoder: 'nvenc', capture_path: 'zerocopy', error: null, backend: 'kwin', needs_screen: false, hdr: { sdr_white_nits: 240, peak_nits: 1000 } },
     get_settings: {
       replay_seconds: 30, mic: true, clips_dir: '/home/u/Videos/clip.sh', hotkey: 'F8', screenshot_hotkey: 'F9', capture_backend: null,
       launch_at_login: false, start_in_tray: true, close_to_tray: true, notify_on_save: true, sound_on_save: true, overlay: true,
@@ -199,6 +199,8 @@ async function runScenario(scenario, browser) {
   await page.getByRole('button', { name: 'Recording' }).click()
   await page.waitForTimeout(150)
   await shot('settings-recording-blue')
+  await page.getByText('HDR display').waitFor()
+  assert.ok(await page.getByText('SDR white at 240 nits').isVisible(), 'HDR row shows the SDR white level')
   await page.getByRole('button', { name: 'Audio' }).click()
   await page.waitForTimeout(150)
   assert.equal(await page.getByLabel('Output device').inputValue(), 'out-headset', 'chosen output is selected')

@@ -334,6 +334,12 @@ impl AutoRecorder {
             .or_else(|| self.probed.get(&self.cfg.video.codec).copied())
     }
 
+    /// The recorded game's display, if it is running in HDR. Not detected
+    /// on Linux yet (KWin's HDR state isn't queried).
+    pub fn hdr(&self) -> Option<crate::HdrDisplay> {
+        None
+    }
+
     pub fn current_game(&self) -> Option<&Game> {
         self.active.as_ref().map(|a| &a.game)
     }

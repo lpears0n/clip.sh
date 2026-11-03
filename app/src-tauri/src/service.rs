@@ -47,6 +47,8 @@ pub struct Status {
     pub backend: Option<Backend>,
     /// Portal capture needs a screen chosen once before it can record.
     pub needs_screen: bool,
+    /// While recording: the game's display, if it is running in HDR.
+    pub hdr: Option<clip_core::HdrDisplay>,
 }
 
 enum Cmd {
@@ -138,6 +140,7 @@ async fn run(
                 error: Some(format!("{e:#}")),
                 backend: None,
                 needs_screen: false,
+                hdr: None,
             };
             while let Some(cmd) = cmds.recv().await {
                 match cmd {
@@ -281,5 +284,6 @@ fn status(
         error: rec.and_then(|s| s.error),
         backend: Some(auto.backend()),
         needs_screen: auto.needs_screen(),
+        hdr: auto.hdr(),
     }
 }
