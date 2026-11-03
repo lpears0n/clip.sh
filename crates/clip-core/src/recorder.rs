@@ -343,12 +343,17 @@ impl Pipeline {
 
         let parse = add_video_branch(&pipeline, target, encoder, &cfg.video, path)?;
         let buf = buffer.clone();
+        let mut keyframes = KeyframeGuard::default();
         link_appsink(&pipeline, &parse, "video-sink", move |caps, buffer| {
+            let ask = buffer.pts().is_some_and(|pts| {
+                keyframes.on_packet(pts, !buffer.flags().contains(gst::BufferFlags::DELTA_UNIT))
+            });
             let mut b = buf.lock().unwrap();
             if let Some(caps) = caps {
                 b.video.set_caps(caps);
             }
             b.push_video(buffer);
+            ask
         })?;
 
         for (i, src) in cfg.audio.iter().enumerate() {
@@ -364,6 +369,7 @@ impl Pipeline {
                         b.audio[i].set_caps(caps);
                     }
                     b.push_audio(i, buffer);
+                    false
                 },
             )?;
         }
@@ -405,11 +411,14 @@ impl Pipeline {
 
 /// Terminate `tail` in an appsink that hands each buffer to `on_buffer`,
 /// along with the caps whenever they change.
+/// Link `tail` to an appsink that hands every encoded packet (with running-
+/// time timestamps, and the caps when they change) to `on_buffer`. When
+/// `on_buffer` returns true, a keyframe is requested from the encoder.
 fn link_appsink(
     pipeline: &gst::Pipeline,
     tail: &gst::Element,
     name: &str,
-    mut on_buffer: impl FnMut(Option<gst::Caps>, gst::Buffer) + Send + 'static,
+    mut on_buffer: impl FnMut(Option<gst::Caps>, gst::Buffer) -> bool + Send + 'static,
 ) -> Result<()> {
     let mut last_caps: Option<gst::Caps> = None;
     let sink = gst_app::AppSink::builder()
@@ -429,7 +438,14 @@ fn link_appsink(
                     if let Some(c) = &caps {
                         last_caps = Some(c.clone());
                     }
-                    on_buffer(caps, buffer);
+                    if on_buffer(caps, buffer) {
+                        // Travels upstream through the parser to the encoder.
+                        sink.send_event(
+                            gstreamer_video::UpstreamForceKeyUnitEvent::builder()
+                                .all_headers(true)
+                                .build(),
+                        );
+                    }
                     Ok(gst::FlowSuccess::Ok)
                 })
                 .build(),
@@ -438,6 +454,56 @@ fn link_appsink(
     pipeline.add(&sink)?;
     tail.link(&sink)?;
     Ok(())
+}
+
+/// The replay buffer can only trim, and a clip can only start, at a
+/// keyframe. An encoder that stops sending them (one was seen to on
+/// Windows: a clip came out 78 s long with 30 s asked for) would make the
+/// buffer, and memory, grow without bound. This watches the packets and
+/// asks for a keyframe when none has come for [`MAX_KEYFRAME_GAP`].
+#[derive(Debug, Default)]
+struct KeyframeGuard {
+    /// Newest keyframe, or the first packet while none has been seen.
+    since: Option<gst::ClockTime>,
+    /// When a keyframe was last asked for and hasn't come yet.
+    asked: Option<gst::ClockTime>,
+    warned: bool,
+}
+
+/// Longest stretch without a keyframe before one is requested. Encoders
+/// are set to one a second; this only fires when one ignores that.
+const MAX_KEYFRAME_GAP: gst::ClockTime = gst::ClockTime::from_seconds(2);
+
+impl KeyframeGuard {
+    /// Note a video packet; true when a keyframe should be requested now.
+    fn on_packet(&mut self, pts: gst::ClockTime, keyframe: bool) -> bool {
+        if keyframe {
+            self.since = Some(pts);
+            self.asked = None;
+            return false;
+        }
+        let since = *self.since.get_or_insert(pts);
+        if pts.saturating_sub(since) < MAX_KEYFRAME_GAP {
+            return false;
+        }
+        // Give a request a second to be answered before repeating it.
+        if self
+            .asked
+            .is_some_and(|a| pts.saturating_sub(a) < gst::ClockTime::from_seconds(1))
+        {
+            return false;
+        }
+        if !self.warned {
+            self.warned = true;
+            tracing::warn!(
+                gap = %pts.saturating_sub(since),
+                "the encoder sent no keyframe for this long; asking for them \
+                 (the replay buffer can only trim at keyframes)"
+            );
+        }
+        self.asked = Some(pts);
+        true
+    }
 }
 
 fn spawn_bus_watch(
@@ -475,4 +541,80 @@ fn spawn_bus_watch(
                 }
             }
         })?)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::AtomicUsize;
+
+    use super::*;
+
+    fn s(secs: f64) -> gst::ClockTime {
+        gst::ClockTime::from_nseconds((secs * 1e9) as u64)
+    }
+
+    #[test]
+    fn guard_asks_after_two_seconds_and_not_again_for_one() {
+        let mut g = KeyframeGuard::default();
+        assert!(!g.on_packet(s(0.0), true));
+        assert!(!g.on_packet(s(1.9), false));
+        assert!(g.on_packet(s(2.0), false), "2 s without a keyframe");
+        assert!(!g.on_packet(s(2.5), false), "already asked");
+        assert!(g.on_packet(s(3.0), false), "asks again after a second");
+        assert!(!g.on_packet(s(3.1), true));
+        assert!(!g.on_packet(s(4.5), false), "the keyframe reset the clock");
+        // A stream that starts mid-GOP counts from its first packet.
+        let mut g = KeyframeGuard::default();
+        assert!(!g.on_packet(s(10.0), false));
+        assert!(g.on_packet(s(12.0), false));
+    }
+
+    /// x264 with keyframes effectively off, through the real appsink path:
+    /// with the guard asking, keyframes keep coming.
+    fn keyframes_from_encoder_without_gop(ask: bool) -> usize {
+        crate::init().unwrap();
+        let pipeline = gst::parse::launch(
+            "videotestsrc num-buffers=300 ! video/x-raw,width=160,height=120,framerate=30/1 \
+             ! videoconvert ! x264enc name=enc key-int-max=100000 tune=zerolatency \
+             speed-preset=ultrafast option-string=scenecut=0 ! h264parse name=parse",
+        )
+        .unwrap()
+        .downcast::<gst::Pipeline>()
+        .unwrap();
+        let parse = pipeline.by_name("parse").unwrap();
+        let count = Arc::new(AtomicUsize::new(0));
+        let mut guard = KeyframeGuard::default();
+        {
+            let count = count.clone();
+            link_appsink(&pipeline, &parse, "video-sink", move |_, buffer| {
+                let key = !buffer.flags().contains(gst::BufferFlags::DELTA_UNIT);
+                if key {
+                    count.fetch_add(1, Ordering::Relaxed);
+                }
+                let wants = guard.on_packet(buffer.pts().unwrap(), key);
+                ask && wants
+            })
+            .unwrap();
+        }
+        pipeline.set_state(gst::State::Playing).unwrap();
+        let msg = pipeline
+            .bus()
+            .unwrap()
+            .timed_pop_filtered(
+                gst::ClockTime::from_seconds(30),
+                &[gst::MessageType::Eos, gst::MessageType::Error],
+            )
+            .expect("encoding timed out");
+        assert!(matches!(msg.view(), gst::MessageView::Eos(_)), "{msg:?}");
+        pipeline.set_state(gst::State::Null).unwrap();
+        count.load(Ordering::Relaxed)
+    }
+
+    #[test]
+    fn guard_gets_keyframes_from_an_encoder_that_stops_sending_them() {
+        assert_eq!(keyframes_from_encoder_without_gop(false), 1, "baseline");
+        // 10 s of video: the first keyframe, then one about every 2 s.
+        let n = keyframes_from_encoder_without_gop(true);
+        assert!((4..=6).contains(&n), "{n} keyframes");
+    }
 }
