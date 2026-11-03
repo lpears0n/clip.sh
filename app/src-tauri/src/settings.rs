@@ -4,8 +4,7 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use clip_core::{
-    Action, AudioSource, Binding, CaptureMethod, Codec, Encoder, RecorderConfig, VideoConfig,
-    auto::Backend,
+    Action, AudioSource, Binding, Codec, Encoder, RecorderConfig, VideoConfig, auto::Backend,
 };
 use serde::{Deserialize, Serialize};
 
@@ -33,8 +32,6 @@ pub struct Settings {
     /// to copying through system memory by itself. On by default on
     /// Windows (D3D11 is the native path), off on Linux.
     pub zero_copy: bool,
-    /// Windows: capture the game's monitor or its window, and how.
-    pub capture_method: CaptureMethod,
 
     // Audio
     pub desktop_audio: bool,
@@ -81,7 +78,6 @@ impl Default for Settings {
             encoder: None,
             cursor: true,
             zero_copy: cfg!(windows),
-            capture_method: CaptureMethod::default(),
             desktop_audio: true,
             desktop_device: None,
             mic: false,
@@ -143,7 +139,6 @@ impl Settings {
             audio_bitrate: (self.audio_bitrate_kbps.clamp(64, 320) * 1000) as i32,
             cursor: self.cursor,
             zero_copy: self.zero_copy,
-            capture_method: self.capture_method,
         }
     }
 

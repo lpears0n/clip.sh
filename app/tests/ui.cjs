@@ -52,7 +52,7 @@ function fixtures(scenario) {
     get_settings: {
       replay_seconds: 30, mic: true, clips_dir: '/home/u/Videos/clip.sh', hotkey: 'F8', screenshot_hotkey: 'F9', capture_backend: null,
       launch_at_login: false, start_in_tray: true, close_to_tray: true, notify_on_save: true, sound_on_save: true,
-      fps: 60, bitrate_kbps: 20000, codec: 'h264', encoder: null, cursor: true, zero_copy: true, capture_method: 'monitor', desktop_audio: true, desktop_device: 'out-headset',
+      fps: 60, bitrate_kbps: 20000, codec: 'h264', encoder: null, cursor: true, zero_copy: true, desktop_audio: true, desktop_device: 'out-headset',
       mic_device: null, audio_bitrate_kbps: 160, storage_limit_gb: 25, protect_edits: true, use_trash: true, ads: false,
     },
     list_clips: empty ? [] : clips,

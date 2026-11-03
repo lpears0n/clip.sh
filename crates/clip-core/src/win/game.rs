@@ -116,7 +116,8 @@ impl Scanner {
         let me = std::process::id();
 
         let mut seen = HashSet::new();
-        let mut games: Vec<RunningGame> = Vec::new();
+        // Each game with its best window so far and that window's area.
+        let mut games: Vec<(RunningGame, i64)> = Vec::new();
         for hwnd in windows {
             // SAFETY: hwnd came from EnumWindows moments ago; stale handles just fail.
             let visible = unsafe { IsWindowVisible(hwnd) }.as_bool();
@@ -162,20 +163,33 @@ impl Scanner {
                 },
                 None => continue,
             };
-            if games.iter().any(|g| g.game == game) {
-                continue;
-            }
             // SAFETY: plain query on a live window handle.
             let monitor = unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) };
-            games.push(RunningGame {
+            let found = RunningGame {
                 game,
                 hwnd: hwnd.0 as isize,
                 monitor: monitor.0 as isize,
                 foreground: hwnd == fg,
-            });
+            };
+            let area = window_area(hwnd);
+            // A game with several windows (launcher, splash, overlay) is
+            // recorded through its largest, the same one every scan, so the
+            // recording doesn't hop between them.
+            match games.iter_mut().find(|(g, _)| g.game == found.game) {
+                Some((g, best)) => {
+                    let foreground = g.foreground || found.foreground;
+                    if area > *best {
+                        *g = found;
+                        *best = area;
+                    }
+                    g.foreground = foreground;
+                }
+                None => games.push((found, area)),
+            }
         }
         // Forget processes whose windows are gone (their ids get reused).
         self.exes.retain(|pid, _| seen.contains(pid));
+        let mut games: Vec<RunningGame> = games.into_iter().map(|(g, _)| g).collect();
         games.sort_by_key(|g| !g.foreground);
         games
     }
@@ -215,6 +229,16 @@ fn process_image(pid: u32) -> Option<PathBuf> {
         let _ = windows::Win32::Foundation::CloseHandle(h);
         ok.then(|| PathBuf::from(String::from_utf16_lossy(&buf[..len as usize])))
     }
+}
+
+/// The window's size in pixels (0 if it can't be read).
+fn window_area(hwnd: HWND) -> i64 {
+    let mut r = RECT::default();
+    // SAFETY: plain query; a stale handle just fails.
+    if unsafe { GetWindowRect(hwnd, &mut r) }.is_err() {
+        return 0;
+    }
+    i64::from(r.right - r.left).max(0) * i64::from(r.bottom - r.top).max(0)
 }
 
 /// Borderless or exclusive fullscreen: the window covers its monitor.

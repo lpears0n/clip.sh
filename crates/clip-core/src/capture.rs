@@ -51,34 +51,15 @@ pub enum PipewireTarget {
     Serial(u64),
 }
 
-/// How Windows captures the game. Ignored on Linux, where the compositor
-/// decides (KWin streams the window, the portal a monitor).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum CaptureMethod {
-    /// The game's monitor through Windows Graphics Capture.
-    #[default]
-    Monitor,
-    /// The game's own window through Windows Graphics Capture (falls back
-    /// to `Monitor` if the window can't be captured).
-    Window,
-    /// The game's monitor through DXGI Desktop Duplication, the older API.
-    MonitorDxgi,
-}
-
 /// What the video source captures, per platform.
 #[derive(Debug, Clone, Copy)]
 pub enum CaptureTarget {
     #[cfg(target_os = "linux")]
     Pipewire(PipewireTarget),
-    /// The game on Windows: its monitor (`HMONITOR`) or its window (`HWND`).
+    /// The game's window on Windows, by `HWND`. Only the window is
+    /// recorded, never the rest of the screen.
     #[cfg(windows)]
-    Windows {
-        monitor: isize,
-        window: isize,
-        method: CaptureMethod,
-        cursor: bool,
-    },
+    Window { hwnd: isize, cursor: bool },
 }
 
 /// How frames travel from the compositor to the encoder.
@@ -225,49 +206,30 @@ fn make_source(
     Ok(src)
 }
 
-/// `d3d11screencapturesrc`: frames arrive as D3D11 textures (zero-copy into
-/// every Windows hardware encoder) or as system memory for the copy path.
-/// Neither API hooks the game's swap chain, but capturing a whole monitor
-/// can make Windows compose a fullscreen game instead of letting it flip
-/// straight to the display, which costs frame pacing (and G-Sync in
-/// fullscreen-only mode); [`CaptureMethod`] lets the user pick.
+/// `d3d11screencapturesrc` on the game's window, through Windows Graphics
+/// Capture: only that window is recorded (like Medal), so notifications,
+/// a second monitor or anything on top of the game stay out of clips.
+/// Frames arrive as D3D11 textures (zero-copy into every Windows hardware
+/// encoder) or as system memory for the copy path. WGC doesn't hook the
+/// game's swap chain, and capturing a window rather than a monitor lets a
+/// fullscreen game keep presenting straight to the display.
 #[cfg(windows)]
 fn make_source(
     target: CaptureTarget,
     _cfg: &VideoConfig,
     _path: CapturePath,
 ) -> Result<gst::Element> {
-    let CaptureTarget::Windows {
-        monitor,
-        window,
-        method,
-        cursor,
-    } = target;
+    let CaptureTarget::Window { hwnd, cursor } = target;
+    // A window handle selects WGC window capture by itself.
     let src = gst::ElementFactory::make("d3d11screencapturesrc")
         .name("screen")
+        .property("window-handle", hwnd as u64)
         .property("show-cursor", cursor)
         .build()
         .context("d3d11screencapturesrc missing (GStreamer d3d11 plugin)")?;
-    match method {
-        CaptureMethod::Window => {
-            // A window handle selects WGC window capture by itself; "client"
-            // leaves out the title bar and borders of a windowed game.
-            src.set_property("window-handle", window as u64);
-            if src.has_property("window-capture-mode") {
-                src.set_property_from_str("window-capture-mode", "client");
-            }
-        }
-        CaptureMethod::Monitor | CaptureMethod::MonitorDxgi => {
-            src.set_property("monitor-handle", monitor as u64);
-            if src.has_property("capture-api") {
-                let api = if method == CaptureMethod::MonitorDxgi {
-                    "dxgi"
-                } else {
-                    "wgc"
-                };
-                src.set_property_from_str("capture-api", api);
-            }
-        }
+    // The client area only: no title bar or borders on a windowed game.
+    if src.has_property("window-capture-mode") {
+        src.set_property_from_str("window-capture-mode", "client");
     }
     if src.has_property("show-border") {
         src.set_property("show-border", false);

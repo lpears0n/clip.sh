@@ -9,7 +9,6 @@
   import {
     api,
     type Capabilities,
-    type CaptureMethod,
     type Codec,
     type Encoder,
     type HotkeyBackend,
@@ -330,23 +329,8 @@
           {:else}
             <Row
               title="Capture method"
-              description={settings.capture_method === 'window'
-                ? 'Only the game’s window. Can keep Windows from composing a fullscreen game, which helps frame pacing and G-Sync. Falls back to the monitor if the game refuses.'
-                : settings.capture_method === 'monitor-dxgi'
-                  ? 'The game’s monitor through Desktop Duplication, the older capture API. Try it if the others stutter.'
-                  : 'The monitor your game is on, through Windows Graphics Capture. If games hitch while recording, try Game window.'}
-            >
-              <select
-                class="field w-48"
-                aria-label="Capture method"
-                value={settings.capture_method}
-                onchange={(e) => update({ capture_method: e.currentTarget.value as CaptureMethod })}
-              >
-                <option value="monitor">Monitor</option>
-                <option value="window">Game window</option>
-                <option value="monitor-dxgi">Monitor (Desktop Duplication)</option>
-              </select>
-            </Row>
+              description="Only the game’s own window is recorded, never the rest of your screen. Notifications, Discord and your other monitors stay out of clips."
+            />
           {/if}
           {#if status?.backend === 'portal'}
             <Row

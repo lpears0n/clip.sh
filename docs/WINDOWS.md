@@ -1,7 +1,8 @@
 # clip.sh on Windows
 
-The Windows build captures with **Windows Graphics Capture** and keeps
-every frame on the GPU: `d3d11screencapturesrc` (WGC) hands D3D11
+The Windows build captures the **game's window** with **Windows Graphics
+Capture** and keeps every frame on the GPU: `d3d11screencapturesrc` (WGC
+window capture) hands D3D11
 textures to the encoder (NVENC, AMD AMF, Intel Quick Sync or Media
 Foundation) through `d3d11convert`, and only the encoded packets reach the
 ring buffer. Nothing per frame runs on the CPU. Game detection walks the
@@ -29,16 +30,15 @@ compositor's copy is the only extra work the GPU does.
 - Zero-copy is the first path tried; if D3D11 negotiation fails, the
   recorder rebuilds on the system-memory path on its own and Settings →
   Recording says which is active.
-- **Capture method** (Settings → Recording): the game's monitor through
-  WGC (default), the game's window through WGC, or the monitor through
-  DXGI Desktop Duplication. Capturing a whole monitor can make Windows
-  compose a fullscreen game instead of letting it flip straight to the
-  display, which hurts frame pacing and drops G-Sync when G-Sync is set
-  to fullscreen only; the first report from a real machine was constant
-  hitching in Rainbow Six Siege with G-Sync on. Window capture falls back
-  to the monitor if the game refuses it. Which one hitches least on a
-  given machine is still to be measured (PresentMon's PresentMode column
-  shows whether the game is composed).
+- **Only the game's window is captured** (WGC window capture, client
+  area), like Medal: notifications, Discord and other monitors never end
+  up in clips. There is deliberately no fallback to monitor capture. If
+  the game replaces its window (splash screen, fullscreen switch) the
+  recorder follows the new one; with several windows it takes the
+  largest. Whether WGC can capture a given game in exclusive fullscreen,
+  and how it does for frame pacing next to monitor capture (which made
+  Windows compose the game and caused constant hitching in Rainbow Six
+  Siege with G-Sync on), is still to be confirmed on real machines.
 - The capture source now runs at the recording frame rate. Left to
   itself it settled on 30 fps and every clip had each frame twice.
 - The app logs to `%LOCALAPPDATA%\sh.clip.app\logs\clip.sh.log` (there is

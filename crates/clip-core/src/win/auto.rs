@@ -1,6 +1,7 @@
 //! Automatic capture on Windows: poll for game windows; when one appears,
-//! record the monitor it's on through Windows Graphics Capture; stop when
-//! it closes. Same public surface as the Linux `auto` module.
+//! record that window (only it, like Medal) through Windows Graphics
+//! Capture; follow it if the game replaces it; stop when it closes. Same
+//! public surface as the Linux `auto` module.
 
 use std::{
     collections::HashMap,
@@ -13,7 +14,6 @@ use tokio::sync::mpsc;
 
 pub use crate::backend::Backend;
 use crate::{
-    capture::CaptureMethod,
     encoder::{Codec, Encoder},
     game::Game,
     recorder::{CaptureSource, Recorder, RecorderConfig, Status},
@@ -40,6 +40,8 @@ pub enum Change {
 
 struct Active {
     game: Game,
+    /// The window being recorded.
+    hwnd: isize,
     recorder: Recorder,
 }
 
@@ -117,10 +119,19 @@ impl AutoRecorder {
         let Event::Games(games) = event;
         self.running = games;
         if let Some(a) = &self.active {
-            if self.running.iter().any(|g| g.game == a.game) {
+            let Some(now) = self.running.iter().find(|g| g.game == a.game).cloned() else {
+                return self.stop().await.map(|g| g.map(Change::Stopped));
+            };
+            if now.hwnd == a.hwnd {
                 return Ok(None);
             }
-            return self.stop().await.map(|g| g.map(Change::Stopped));
+            // Same game, new window (a splash screen gave way to the game,
+            // or it recreated its window switching to fullscreen): follow
+            // it. The play session carries on; the replay buffer restarts.
+            tracing::info!(game = %now.game.name, "game window changed; following it");
+            self.stop().await?;
+            self.start(now).await?;
+            return Ok(None);
         }
         let Some(next) = self.running.first().cloned() else {
             return Ok(None);
@@ -132,30 +143,18 @@ impl AutoRecorder {
         let mut cfg = self.cfg.clone();
         cfg.encoder = Some(self.resolve_encoder().await?);
         let target = Target {
-            monitor: running.monitor,
             window: running.hwnd,
-            method: cfg.capture_method,
             cursor: cfg.cursor,
         };
-        let recorder = match Recorder::start(&cfg, CaptureSource::Screen(target)).await {
-            Ok(r) => r,
-            // Some windows refuse capture; the monitor always works.
-            Err(e) if target.method == CaptureMethod::Window => {
-                tracing::warn!(
-                    game = %running.game.name,
-                    "window capture failed, capturing the monitor instead: {e:#}"
-                );
-                let target = Target {
-                    method: CaptureMethod::Monitor,
-                    ..target
-                };
-                Recorder::start(&cfg, CaptureSource::Screen(target)).await?
-            }
-            Err(e) => return Err(e),
-        };
-        tracing::info!(game = %running.game.name, method = ?target.method, "recording");
+        // No fallback to capturing the monitor: that would record the
+        // whole screen, which window capture exists to avoid.
+        let recorder = Recorder::start(&cfg, CaptureSource::Screen(target))
+            .await
+            .with_context(|| format!("can't capture the {} window", running.game.name))?;
+        tracing::info!(game = %running.game.name, "recording (window)");
         self.active = Some(Active {
             game: running.game.clone(),
+            hwnd: running.hwnd,
             recorder,
         });
         Ok(Change::Started(running.game))
