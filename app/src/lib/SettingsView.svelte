@@ -15,7 +15,9 @@
     type Settings,
     type Sound,
     type Status,
+    type UpdateInfo,
     type Usage,
+    onUpdateProgress,
   } from './api'
   import { bytes } from './format'
   import HotkeyBinder from './HotkeyBinder.svelte'
@@ -39,6 +41,7 @@
     caps,
     status,
     category = $bindable(),
+    update: available = $bindable(null),
     onchange,
     onchoosescreen,
   }: {
@@ -47,6 +50,8 @@
     caps: Capabilities | null
     status: Status | null
     category: Category
+    /** A newer release, once one has been found. */
+    update?: UpdateInfo | null
     onchange: (s: Settings) => Promise<void>
     onchoosescreen: () => void
   } = $props()
@@ -118,6 +123,58 @@
     else if (v !== 'custom') update({ storage_limit_gb: Number(v) })
     else if (settings.storage_limit_gb == null) update({ storage_limit_gb: 20 })
   }
+
+  // Updates
+  let support = $state<{ configured: boolean; version: string } | null>(null)
+  let checking = $state(false)
+  let checked = $state(false)
+  let installing = $state<number | null | undefined>(undefined)
+  let updateError = $state<string | null>(null)
+  $effect(() => {
+    if (category === 'General' && !support) api.updateSupport().then((s) => (support = s))
+  })
+
+  async function checkNow() {
+    checking = true
+    updateError = null
+    try {
+      available = await api.checkUpdate()
+      checked = true
+    } catch (e) {
+      updateError = String(e)
+    } finally {
+      checking = false
+    }
+  }
+
+  async function install() {
+    updateError = null
+    installing = null
+    const stop = await onUpdateProgress((f) => (installing = f))
+    try {
+      // Restarts into the new version; only a failure comes back.
+      await api.installUpdate()
+    } catch (e) {
+      updateError = String(e)
+    } finally {
+      installing = undefined
+      stop()
+    }
+  }
+
+  const updateText = $derived(
+    !support
+      ? ''
+      : !support.configured
+        ? 'This build can’t update itself. Installers from the Releases page can.'
+        : updateError
+          ? updateError
+          : available
+            ? `Version ${available.version} is available.`
+            : checked
+              ? 'You’re up to date.'
+              : 'Updates come from the GitHub releases, signed.',
+  )
 
   // Save sounds
   const SOUND_FILES = ['wav', 'mp3', 'ogg', 'oga', 'opus', 'flac', 'm4a']
@@ -266,6 +323,42 @@
               <Toggle label="In-game popup" checked={settings.overlay} onchange={(overlay) => update({ overlay })} />
             </Row>
           {/if}
+        </div>
+      </section>
+      <section class="space-y-2">
+        <h3 class="section-title px-1">Updates</h3>
+        <div class="card divide-y divide-line">
+          <Row title={support ? `clip.sh ${support.version}` : 'clip.sh'} description={updateText}>
+            {#if installing !== undefined}
+              <div class="flex items-center gap-3">
+                <div
+                  class="h-1.5 w-32 overflow-hidden rounded-full bg-line-strong"
+                  role="progressbar"
+                  aria-label="Downloading the update"
+                  aria-valuenow={installing === null ? undefined : Math.round(installing * 100)}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                >
+                  <div class="h-full rounded-full bg-accent transition-[width] duration-normal" style:width="{(installing ?? 0.1) * 100}%"></div>
+                </div>
+                <span class="text-secondary text-fg-2">Updating…</span>
+              </div>
+            {:else if available}
+              <button class="btn-primary h-9" onclick={install}>Update and restart</button>
+            {:else}
+              <button class="btn h-9" disabled={!support?.configured || checking} onclick={checkNow}>
+                {checking ? 'Checking…' : 'Check now'}
+              </button>
+            {/if}
+          </Row>
+          <Row title="Check automatically" description="Looks for a new release every few hours. Nothing downloads until you choose to update.">
+            <Toggle
+              label="Check for updates automatically"
+              checked={settings.check_for_updates}
+              disabled={!support?.configured}
+              onchange={(check_for_updates) => update({ check_for_updates })}
+            />
+          </Row>
         </div>
       </section>
     {:else if category === 'Recording'}

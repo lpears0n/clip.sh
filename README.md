@@ -23,6 +23,8 @@ To build a release binary instead, use `pnpm tauri build`. `pnpm test:ui`
 drives every view in a headless Chromium with the Tauri bridge mocked and
 leaves screenshots under `app/tests/shots/`; it runs in CI too. There's also a small CLI, `clipsh save` (and `clipsh screenshot`, `clipsh mark`), that talks to the running app. Bind it to a key in your desktop settings if the in-app hotkeys don't work for you.
 
+Releases, updates and Windows code signing: [docs/RELEASING.md](docs/RELEASING.md).
+
 ## How it works / Tech stack
 
 - **Tauri 2 + Svelte 5** for the UI. Tauri uses the system webview, so the app stays small compared to Electron.

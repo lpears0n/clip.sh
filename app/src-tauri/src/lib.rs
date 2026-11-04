@@ -10,6 +10,7 @@ mod settings;
 mod storage;
 mod system;
 mod thumbs;
+mod updates;
 mod watcher;
 
 use std::{
@@ -643,9 +644,15 @@ pub fn run() {
         logging::fatal(&format!("GStreamer failed to initialise: {e:#}"));
     }
 
+    let context = tauri::generate_context!();
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init());
+    // Only builds made with an update signing key can update themselves.
+    let builder = match updates::plugin(context.config()) {
+        Some(updater) => builder.plugin(updater),
+        None => builder,
+    };
     #[cfg(windows)]
     let builder = builder
         .plugin(hotkeys::plugin())
@@ -690,6 +697,7 @@ pub fn run() {
             });
             allow_clips_dir(app.handle(), &app.state::<AppState>().clips_dir());
             watch_clips_dir(app.handle(), &app.state::<AppState>().clips_dir());
+            updates::spawn_checks(app.handle());
             {
                 let handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
@@ -792,6 +800,9 @@ pub fn run() {
             export_plan,
             import_sound,
             preview_sound,
+            updates::update_support,
+            updates::check_update,
+            updates::install_update,
             ignore_current_game,
             list_clips,
             delete_clip,
@@ -811,6 +822,6 @@ pub fn run() {
             render_clip,
             cancel_render,
         ])
-        .run(tauri::generate_context!())
+        .run(context)
         .expect("error while running clip.sh");
 }

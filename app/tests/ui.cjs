@@ -52,7 +52,7 @@ function fixtures(scenario) {
       : { state: 'recording', game: 'ELDEN RING', steam_app_id: 1245620, session_start_ms: now - h, buffered_seconds: 30, replay_seconds: 30, encoder: 'nvenc', capture_path: 'zerocopy', error: null, backend: 'kwin', needs_screen: false, hdr: { sdr_white_nits: 240, peak_nits: 1000 }, hdr_tonemapped: false },
     get_settings: {
       replay_seconds: 30, mic: true, clips_dir: '/home/u/Videos/clip.sh', hotkey: 'F8', screenshot_hotkey: 'F9', marker_hotkey: 'F7', capture_backend: null,
-      launch_at_login: false, start_in_tray: true, close_to_tray: true, notify_on_save: true, sound_on_save: true, sound_volume: 100, clip_sound: { kind: 'builtin' }, screenshot_sound: null, overlay: true,
+      launch_at_login: false, start_in_tray: true, close_to_tray: true, notify_on_save: true, sound_on_save: true, sound_volume: 100, clip_sound: { kind: 'builtin' }, screenshot_sound: null, overlay: true, check_for_updates: true,
       fps: 60, bitrate_kbps: 20000, codec: 'h264', encoder: null, cursor: true, zero_copy: true, hdr_compatibility: false, ignored_games: [], desktop_audio: true, desktop_device: 'out-headset',
       mic_device: null, audio_bitrate_kbps: 160, storage_limit_gb: 25, protect_edits: true, use_trash: true, ads: false,
     },
@@ -62,6 +62,8 @@ function fixtures(scenario) {
     get_capabilities: { display_hz: 144, encoders: [{ encoder: 'nvenc', codecs: ['h264', 'hevc', 'av1'] }, { encoder: 'x264', codecs: ['h264'] }], mic_devices: [{ id: 'mic1', name: 'Blue Yeti' }], output_devices: [{ id: 'out-speakers', name: 'Speakers (Realtek Audio)' }, { id: 'out-headset', name: 'Headset Earphone (Arctis Nova 7)' }] },
     media_base: 'http://127.0.0.1:1/x/',
     hotkey_backend: 'kglobalaccel',
+    update_support: { configured: true, version: '0.1.0' },
+    check_update: { version: '0.2.0', current_version: '0.1.0', notes: null },
   }
 }
 
@@ -304,6 +306,14 @@ async function runScenario(scenario, browser) {
   assert.deepEqual(previews[0], { sound: { kind: 'builtin' }, volume: 100 }, 'preview plays the built-in sound')
   assert.equal(previews.at(-1).sound.name, 'airhorn.mp3', 'a picked sound is played once')
   await shot('settings-sounds')
+  // Updates: checked on request; an update shows in Settings and the top bar.
+  await page.getByText('clip.sh 0.1.0').waitFor()
+  await page.getByRole('button', { name: 'Check now' }).click()
+  await page.getByText('Version 0.2.0 is available.').waitFor()
+  assert.equal(await page.getByRole('button', { name: 'Update and restart' }).count(), 1, 'update button')
+  assert.equal(await page.locator('header').getByRole('button', { name: 'Update 0.2.0' }).count(), 1, 'top bar shows the update')
+  await page.getByRole('heading', { name: 'Updates' }).scrollIntoViewIfNeeded()
+  await shot('settings-updates')
   await page.getByRole('button', { name: 'Hotkeys' }).click()
   await page.waitForTimeout(150)
   assert.equal(await page.locator('kbd', { hasText: /^F9$/ }).count(), 1, 'screenshot hotkey row')
