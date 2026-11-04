@@ -113,6 +113,24 @@ async function runScenario(scenario, browser) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 }, colorScheme: 'dark' })
   page.on('pageerror', (e) => { throw new Error(`page error in ${scenario}: ${e.message}`) })
   await page.addInitScript(mockBridge, data)
+  // Every clip plays the same small ultrawide test video (VP9: the test
+  // Chromium has no H.264), so the viewer is shot with a real picture.
+  const video = fs.readFileSync(path.join(__dirname, 'fixtures', 'clip.webm'))
+  await page.route('http://127.0.0.1:1/**', (r) => {
+    // Byte ranges, like the app's media server, so the player can seek.
+    const m = /bytes=(\d+)-(\d*)/.exec(r.request().headers().range ?? '')
+    const from = m ? Number(m[1]) : 0
+    const to = m && m[2] ? Number(m[2]) : video.length - 1
+    return r.fulfill({
+      status: m ? 206 : 200,
+      body: video.subarray(from, to + 1),
+      headers: {
+        'Content-Type': 'video/webm',
+        'Accept-Ranges': 'bytes',
+        ...(m ? { 'Content-Range': `bytes ${from}-${to}/${video.length}` } : {}),
+      },
+    })
+  })
   await page.goto(`http://localhost:${PORT}/`)
   await page.waitForTimeout(800)
   const shot = (name) => page.screenshot({ path: path.join(out, `${scenario}-${name}.png`) })
@@ -166,7 +184,16 @@ async function runScenario(scenario, browser) {
 
   // Viewer: rename, star, label, shortcuts, trim.
   await page.getByRole('button', { name: /Open ELDEN RING clip/ }).nth(1).click()
-  await page.waitForTimeout(400)
+  await page.waitForFunction(() => document.querySelector('video')?.readyState >= 2)
+  await page.evaluate(
+    () =>
+      new Promise((done) => {
+        const v = document.querySelector('video')
+        v.addEventListener('seeked', done, { once: true })
+        v.currentTime = 2.5
+      }),
+  )
+  await page.waitForTimeout(300)
   await shot('viewer')
   await page.keyboard.press('n')
   await page.keyboard.type('Malenia no-hit, take 2')
@@ -185,8 +212,29 @@ async function runScenario(scenario, browser) {
   await shot('viewer-help')
   await page.keyboard.press('Escape')
   await page.keyboard.press('t')
-  await page.waitForTimeout(150)
+  const seekTo = (t) =>
+    page.evaluate(
+      (t) =>
+        new Promise((done) => {
+          const v = document.querySelector('video')
+          v.addEventListener('seeked', done, { once: true })
+          v.currentTime = t
+        }),
+      t,
+    )
+  await seekTo(1)
+  await page.keyboard.press('i')
+  await seekTo(4.5)
+  await page.keyboard.press('o')
+  await seekTo(2.5)
+  await page.waitForTimeout(200)
   await shot('viewer-trim')
+  // Trimming happens on the line over the video; no timeline under it.
+  assert.equal(await page.locator('.player [aria-label="Trim start"]').count(), 1, 'trim markers on the video')
+  assert.equal(await page.locator('[aria-label="Timeline"]').count(), 1, 'one timeline')
+  assert.equal(await page.locator('.player [aria-label="Timeline"]').count(), 1, 'and it is over the video')
+  assert.equal(await page.locator('[aria-label="Trim start"]').getAttribute('aria-valuenow'), '1', 'in at 1 s')
+  assert.equal(await page.locator('[aria-label="Trim end"]').getAttribute('aria-valuenow'), '4.5', 'out at 4.5 s')
   await page.keyboard.press('Escape')
   await page.keyboard.press('Escape')
 

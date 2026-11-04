@@ -423,99 +423,86 @@
         class="size-full object-contain"
       ></video>
 
-      {#if !trimming}
-        <div
-          class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent px-4 pt-12 pb-2.5 transition-opacity duration-normal
-            {showControls ? 'opacity-100' : 'pointer-events-none opacity-0'}"
-        >
-          <Timeline {duration} {time} trim={false} bind:start bind:end onseek={seek} />
-          <div class="mt-1 flex items-center gap-1 text-white">
-            <button class="glyph" onclick={toggle} aria-label={paused ? 'Play' : 'Pause'} title="Play/Pause (Space)">
-              {#if paused}<Play size={20} fill="currentColor" strokeWidth={0} />{:else}<Pause size={20} fill="currentColor" strokeWidth={0} />{/if}
-            </button>
-            <span class="ml-1 text-secondary tabular-nums">
-              {timecode(time)}<span class="text-white/55"> / {timecode(duration)}</span>
-            </span>
-            <div class="flex-1"></div>
-            <button class="glyph w-auto px-2 text-secondary font-semibold tabular-nums" onclick={cycleSpeed} title="Playback speed (< >)" aria-label="Playback speed {speed}x">
-              {speed}×
-            </button>
-            <button class="glyph {loop ? 'text-accent' : ''}" onclick={() => (loop = !loop)} title="Repeat (R)" aria-label="Repeat" aria-pressed={loop}>
-              <Repeat size={17} />
-            </button>
-            <div class="volume flex items-center">
-              <input
-                type="range"
-                min="0"
-                max="1"
-                step="0.05"
-                bind:value={volume}
-                oninput={() => (muted = false)}
-                class="slider w-0 opacity-0 transition-[width,opacity] duration-normal"
-                style:--fill="{(muted ? 0 : volume) * 100}%"
-                aria-label="Volume"
-              />
-              <button class="glyph" onclick={() => (muted = !muted)} aria-label={muted ? 'Unmute' : 'Mute'} title="Mute (M)">
-                {#if muted || volume === 0}<VolumeX size={19} />{:else}<Volume2 size={19} />{/if}
-              </button>
-            </div>
-            <button
-              class="glyph"
-              onclick={() => setFullscreen(!fullscreen)}
-              aria-label={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}
-              title="Fullscreen (F)"
-            >
-              {#if fullscreen}<Minimize size={18} />{:else}<Maximize size={18} />{/if}
+      <!-- Controls and the progress line, over the video's bottom edge. -->
+      <div
+        class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 via-black/25 to-transparent px-4 pt-10 pb-2 transition-opacity duration-normal
+          {showControls ? 'opacity-100' : 'pointer-events-none opacity-0'}"
+      >
+        <Timeline {duration} {time} trim={trimming} bind:start bind:end onseek={seek} />
+        <div class="mt-1 flex items-center gap-1 text-white">
+          <button class="glyph" onclick={toggle} aria-label={paused ? 'Play' : 'Pause'} title="Play/Pause (Space)">
+            {#if paused}<Play size={20} fill="currentColor" strokeWidth={0} />{:else}<Pause size={20} fill="currentColor" strokeWidth={0} />{/if}
+          </button>
+          <span class="ml-1 text-secondary tabular-nums">
+            {timecode(time)}<span class="text-white/55"> / {timecode(duration)}</span>
+          </span>
+          <div class="flex-1"></div>
+          <button class="glyph w-auto px-2 text-secondary font-semibold tabular-nums" onclick={cycleSpeed} title="Playback speed (< >)" aria-label="Playback speed {speed}x">
+            {speed}×
+          </button>
+          <button class="glyph {loop ? 'text-accent' : ''}" onclick={() => (loop = !loop)} title="Repeat (R)" aria-label="Repeat" aria-pressed={loop}>
+            <Repeat size={17} />
+          </button>
+          <div class="volume flex items-center">
+            <input
+              type="range"
+              min="0"
+              max="1"
+              step="0.05"
+              bind:value={volume}
+              oninput={() => (muted = false)}
+              class="slider w-0 opacity-0 transition-[width,opacity] duration-normal"
+              style:--fill="{(muted ? 0 : volume) * 100}%"
+              aria-label="Volume"
+            />
+            <button class="glyph" onclick={() => (muted = !muted)} aria-label={muted ? 'Unmute' : 'Mute'} title="Mute (M)">
+              {#if muted || volume === 0}<VolumeX size={19} />{:else}<Volume2 size={19} />{/if}
             </button>
           </div>
+          <button
+            class="glyph"
+            onclick={() => setFullscreen(!fullscreen)}
+            aria-label={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+            title="Fullscreen (F)"
+          >
+            {#if fullscreen}<Minimize size={18} />{:else}<Maximize size={18} />{/if}
+          </button>
         </div>
-      {/if}
+        </div>
     </div>
   </div>
 
   {#if trimming}
-    <div class="space-y-3">
-      <div class="flex items-center gap-3">
-        <button class="glyph text-white" onclick={toggle} aria-label={paused ? 'Play' : 'Pause'} title="Play/Pause (Space)">
-          {#if paused}<Play size={20} fill="currentColor" strokeWidth={0} />{:else}<Pause size={20} fill="currentColor" strokeWidth={0} />{/if}
-        </button>
-        <span class="w-32 flex-none text-secondary tabular-nums">
-          {timecode(time)} <span class="text-muted">/ {timecode(duration)}</span>
-        </span>
-        <div class="min-w-0 flex-1">
-          <Timeline {duration} {time} trim bind:start bind:end onseek={seek} />
-        </div>
-      </div>
-      <div class="flex items-center gap-5 border-t border-line pt-3 text-secondary">
-        <button class="action -ml-2 tabular-nums" onclick={() => (start = Math.min(time, end - 0.1))} title="Set start to playhead (I)">
-          <span class="text-muted">In</span>&nbsp;{timecode(start)}
-        </button>
-        <button class="action -ml-3 tabular-nums" onclick={() => (end = Math.max(time, start + 0.1))} title="Set end to playhead (O)">
-          <span class="text-muted">Out</span>&nbsp;{timecode(end)}
-        </button>
-        {#each levels as _, i (i)}
-          <label class="flex items-center gap-2.5">
-            <span class="text-muted">{trackName(i)}</span>
-            <input type="range" min="0" max="200" step="5" bind:value={levels[i]} class="w-24" style:--fill="{levels[i] / 2}%" />
-            <span class="w-10 tabular-nums">{levels[i]}%</span>
-          </label>
-        {/each}
-        <div class="flex-1"></div>
-        <span class="text-muted">Length <span class="font-semibold text-fg tabular-nums">{timecode(end - start)}</span></span>
-        {#if rendering}
-          <div class="flex items-center gap-3">
-            <div class="h-1.5 w-32 overflow-hidden rounded-full bg-line-strong" role="progressbar" aria-valuenow={Math.round(progress * 100)} aria-valuemin={0} aria-valuemax={100}>
-              <div class="h-full rounded-full bg-accent transition-[width] duration-normal" style:width="{progress * 100}%"></div>
-            </div>
-            <span class="w-9 text-fg tabular-nums">{Math.round(progress * 100)}%</span>
-            <button class="btn h-9" onclick={oncancel}>Cancel</button>
+    <!-- Trimming is done on the line over the video; this is the rest. -->
+    <div class="flex items-center gap-5 text-secondary">
+      <button class="action -ml-2 tabular-nums" onclick={() => (start = Math.min(time, end - 0.1))} title="Set start to playhead (I)">
+        <span class="text-muted">In</span>&nbsp;{timecode(start)}
+      </button>
+      <button class="action -ml-3 tabular-nums" onclick={() => (end = Math.max(time, start + 0.1))} title="Set end to playhead (O)">
+        <span class="text-muted">Out</span>&nbsp;{timecode(end)}
+      </button>
+      {#each levels as _, i (i)}
+        <label class="flex items-center gap-2.5">
+          <span class="text-muted">{trackName(i)}</span>
+          <input type="range" min="0" max="200" step="5" bind:value={levels[i]} class="w-24" style:--fill="{levels[i] / 2}%" />
+          <span class="w-10 tabular-nums">{levels[i]}%</span>
+        </label>
+      {/each}
+      <div class="flex-1"></div>
+      <span class="text-muted">Length <span class="font-semibold text-fg tabular-nums">{timecode(end - start)}</span></span>
+      {#if rendering}
+        <div class="flex items-center gap-3">
+          <div class="h-1.5 w-32 overflow-hidden rounded-full bg-line-strong" role="progressbar" aria-valuenow={Math.round(progress * 100)} aria-valuemin={0} aria-valuemax={100}>
+            <div class="h-full rounded-full bg-accent transition-[width] duration-normal" style:width="{progress * 100}%"></div>
           </div>
-        {:else}
-          <button class="btn-primary" disabled={end - start < 0.1} onclick={() => onrender(start, end, levels.map((l) => l / 100))}>
-            Render clip
-          </button>
-        {/if}
-      </div>
+          <span class="w-9 text-fg tabular-nums">{Math.round(progress * 100)}%</span>
+          <button class="btn h-9" onclick={oncancel}>Cancel</button>
+        </div>
+      {:else}
+        <button class="btn-primary" disabled={end - start < 0.1} onclick={() => onrender(start, end, levels.map((l) => l / 100))}>
+          Render clip
+        </button>
+      {/if}
     </div>
   {/if}
 </div>
