@@ -51,6 +51,10 @@ leaves screenshots under `app/tests/shots/`; it runs in CI too. There's also a s
 - **Settings → Audio** picks which output's sound is recorded as the game
   track (say, only your headset) and which microphone goes on its own
   track. An unplugged device falls back to the default.
+- The save sound can be any short file (WAV, MP3, OGG, Opus, FLAC; ten
+  seconds at most), with its own volume and, if you like, a different one
+  for screenshots: Settings → General. The file is copied in, so moving
+  the original doesn't break it.
 - On Windows a small popup over the game says **Ready to record** when a
   game starts recording and **Clip saved** when you clip. It never ends up
   in clips; turn it off under Settings → General.

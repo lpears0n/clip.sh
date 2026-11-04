@@ -225,6 +225,30 @@ async fn ignore_current_game(state: State<'_, AppState>) -> CmdResult<Settings> 
     Ok(settings)
 }
 
+/// Check a sound file the user picked and copy it in for `slot` ("clip" or
+/// "screenshot"). Returns the sound for the settings to point at.
+#[tauri::command]
+async fn import_sound(path: PathBuf, slot: String) -> CmdResult<settings::Sound> {
+    if !matches!(slot.as_str(), "clip" | "screenshot") {
+        return Err(format!("unknown sound slot {slot:?}"));
+    }
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let copy = tauri::async_runtime::spawn_blocking(move || system::import_sound(&path, &slot))
+        .await
+        .map_err(err)?
+        .map_err(|e| format!("{e:#}"))?;
+    Ok(settings::Sound::Custom { path: copy, name })
+}
+
+/// Play a sound now, for the Preview buttons in Settings.
+#[tauri::command]
+fn preview_sound(sound: settings::Sound, volume: u32) {
+    system::play_sound(&sound, volume);
+}
+
 #[tauri::command]
 async fn save_screenshot(state: State<'_, AppState>) -> CmdResult<PathBuf> {
     state.service.screenshot(state.clips_dir()).await
@@ -474,29 +498,58 @@ pub(crate) fn show_main(app: &AppHandle) {
     }
 }
 
-/// Notification, sound and overlay for a newly saved clip or screenshot,
-/// as configured. `popup` is the overlay to show over the game (none for
-/// edits rendered in the app).
-fn announce_saved(
-    app: &AppHandle,
-    summary: &'static str,
-    popup: Option<overlay::Kind>,
-    path: &std::path::Path,
-) {
+/// What was saved, for its notification, sound and popup.
+#[derive(Clone, Copy)]
+enum Saved {
+    Clip,
+    /// Rendered in the app: no popup over a game.
+    Edit,
+    Screenshot,
+}
+
+impl Saved {
+    fn summary(self) -> &'static str {
+        match self {
+            Saved::Clip => "Clip saved",
+            Saved::Edit => "Edit rendered",
+            Saved::Screenshot => "Screenshot saved",
+        }
+    }
+
+    fn popup(self) -> Option<overlay::Kind> {
+        match self {
+            Saved::Clip => Some(overlay::Kind::Saved),
+            Saved::Edit => None,
+            Saved::Screenshot => Some(overlay::Kind::Screenshot),
+        }
+    }
+}
+
+/// Notification, sound and overlay for a newly saved clip, edit or
+/// screenshot, as configured.
+fn announce_saved(app: &AppHandle, saved: Saved, path: &std::path::Path) {
     let (notify, sound) = {
         let state = app.state::<AppState>();
         let s = state.settings.lock().unwrap();
-        (s.notify_on_save, s.sound_on_save)
+        let sound = match saved {
+            Saved::Clip | Saved::Edit => s.clip_sound.clone(),
+            Saved::Screenshot => s.screenshot_sound().clone(),
+        };
+        (
+            s.notify_on_save,
+            s.sound_on_save.then_some((sound, s.sound_volume)),
+        )
     };
-    if sound {
-        system::play_save_sound();
+    if let Some((sound, volume)) = sound {
+        system::play_sound(&sound, volume);
     }
+    let summary = saved.summary();
     let game = path
         .parent()
         .and_then(std::path::Path::file_name)
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
-    if let Some(kind) = popup
+    if let Some(kind) = saved.popup()
         && overlay::enabled(app)
     {
         overlay::show(app, overlay::Popup::saved(kind, &game));
@@ -649,23 +702,19 @@ pub fn run() {
                 app.listen_any(service::CLIP_SAVED, move |event| {
                     enforce_storage(&handle);
                     let path: PathBuf = serde_json::from_str(event.payload()).unwrap_or_default();
-                    if library::is_edit(&path) {
-                        announce_saved(&handle, "Edit rendered", None, &path);
+                    let saved = if library::is_edit(&path) {
+                        Saved::Edit
                     } else {
-                        announce_saved(&handle, "Clip saved", Some(overlay::Kind::Saved), &path);
-                    }
+                        Saved::Clip
+                    };
+                    announce_saved(&handle, saved, &path);
                 });
             }
             {
                 let handle = app.handle().clone();
                 app.listen_any(service::SCREENSHOT_SAVED, move |event| {
                     let path: PathBuf = serde_json::from_str(event.payload()).unwrap_or_default();
-                    announce_saved(
-                        &handle,
-                        "Screenshot saved",
-                        Some(overlay::Kind::Screenshot),
-                        &path,
-                    );
+                    announce_saved(&handle, Saved::Screenshot, &path);
                 });
             }
             {
@@ -741,6 +790,8 @@ pub fn run() {
             save_clip,
             save_screenshot,
             export_plan,
+            import_sound,
+            preview_sound,
             ignore_current_game,
             list_clips,
             delete_clip,

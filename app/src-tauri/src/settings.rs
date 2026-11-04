@@ -20,6 +20,12 @@ pub struct Settings {
     pub close_to_tray: bool,
     pub notify_on_save: bool,
     pub sound_on_save: bool,
+    /// Loudness of the save sounds, in percent of the file's own level.
+    pub sound_volume: u32,
+    /// Played when a clip is saved or an edit renders.
+    pub clip_sound: Sound,
+    /// Played when a screenshot is saved; `None` = same as `clip_sound`.
+    pub screenshot_sound: Option<Sound>,
     /// Windows: a popup over the game when recording starts and on a save.
     pub overlay: bool,
 
@@ -73,6 +79,21 @@ pub struct Settings {
     pub ads: bool,
 }
 
+/// A save sound: the one that ships with clip.sh, or a file the user
+/// imported (a copy in the config folder, see `system::import_sound`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum Sound {
+    #[default]
+    Builtin,
+    Custom {
+        path: PathBuf,
+        /// The picked file's name, for display (the copy has its own).
+        #[serde(default)]
+        name: String,
+    },
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -81,6 +102,9 @@ impl Default for Settings {
             close_to_tray: true,
             notify_on_save: true,
             sound_on_save: true,
+            sound_volume: 100,
+            clip_sound: Sound::Builtin,
+            screenshot_sound: None,
             overlay: true,
             replay_seconds: 30,
             fps: 60,
@@ -156,6 +180,11 @@ impl Settings {
             hdr_compat: self.hdr_compatibility,
             ignored: self.ignored_games.clone(),
         }
+    }
+
+    /// The sound for a screenshot, resolving "same as clips".
+    pub fn screenshot_sound(&self) -> &Sound {
+        self.screenshot_sound.as_ref().unwrap_or(&self.clip_sound)
     }
 
     /// Every global hotkey, bound or not.

@@ -24,6 +24,8 @@ $plugins = @(
   'videorate', 'videocrop', 'videotestsrc', 'videoparsersbad', 'audioconvert',
   'audioresample', 'audiomixer', 'volume', 'audiotestsrc', 'audioparsers',
   'isomp4', 'libav', 'webp', 'jpeg', 'png',
+  # save sounds: playbin, WAV, MP3/OGG/Opus/FLAC, and an audio output
+  'wavparse', 'autodetect', 'ogg', 'vorbis', 'opus', 'flac', 'mpg123', 'directsound',
   # capture and encode on Windows
   'd3d11', 'd3d12', 'nvcodec', 'amfcodec', 'qsv', 'mediafoundation', 'wasapi2',
   'x264', 'openh264', 'fdkaac', 'voaacenc', 'dxgiscreencap'
@@ -43,6 +45,7 @@ $required = @(
   'videoconvert', 'videoscale', 'videorate', 'videocrop',
   'h264parse', 'h265parse', 'av1parse', 'aacparse', 'mp4mux', 'uridecodebin', 'decodebin',
   'audioconvert', 'audioresample', 'audiomixer', 'volume',
+  'playbin', 'wavparse', 'autoaudiosink', 'wasapi2sink',
   'd3d11screencapturesrc', 'd3d11convert', 'd3d11upload', 'wasapi2src',
   'pngenc', 'jpegenc', 'x264enc', 'mfh264enc', 'avdec_h264', 'avenc_aac'
 )
