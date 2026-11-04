@@ -46,6 +46,15 @@ compositor's copy is the only extra work the GPU does.
   game window's top-right, and skipped when clip.sh itself is in front.
   While visible it makes Windows compose the game, so it stays brief.
   Untested so far: whether it appears over exclusive-fullscreen games.
+- **Fixed encode size.** A window can change size mid-game (resolution
+  or display-mode switches); passing that on made the pipeline fail to
+  renegotiate ("not-negotiated") on the owner's machine, and with
+  restart-on-failure that became a restart every couple of seconds. The
+  encoder now runs at the size the window had when recording started
+  (its monitor's, if the window was tiny then); every frame is scaled
+  to it on the GPU, letterboxed if the shape changed. Repeated failures
+  back off (at once, 5 s, 15 s, 30 s, then every minute) and a restart
+  keeps the play session (no second "Ready to record").
 - The capture source now runs at the recording frame rate. Left to
   itself it settled on 30 fps and every clip had each frame twice.
 - The app logs to `%LOCALAPPDATA%\sh.clip.app\logs\clip.sh.log` (there is

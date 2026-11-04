@@ -50,6 +50,20 @@ fn zero_copy_default() -> bool {
     cfg!(windows)
 }
 
+/// How long to wait before restart attempt `failures` (1-based) of a
+/// recording that keeps failing: the first at once (the next scan), then
+/// 5 s, 15 s, 30 s, and a minute from then on.
+pub fn restart_backoff(failures: u32) -> std::time::Duration {
+    let secs = match failures {
+        0 | 1 => 0,
+        2 => 5,
+        3 => 15,
+        4 => 30,
+        _ => 60,
+    };
+    std::time::Duration::from_secs(secs)
+}
+
 /// A newest frame older than this at save time gets a log line.
 const STALE: gst::ClockTime = gst::ClockTime::from_seconds(2);
 
@@ -565,6 +579,12 @@ mod tests {
 
     fn s(secs: f64) -> gst::ClockTime {
         gst::ClockTime::from_nseconds((secs * 1e9) as u64)
+    }
+
+    #[test]
+    fn restarts_back_off_and_level_out() {
+        let d: Vec<u64> = (1..=7).map(|n| restart_backoff(n).as_secs()).collect();
+        assert_eq!(d, [0, 5, 15, 30, 60, 60, 60]);
     }
 
     #[test]

@@ -6,7 +6,7 @@
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use anyhow::{Context, Result, bail};
@@ -25,8 +25,9 @@ use crate::{
 /// health checked).
 const SCAN_INTERVAL: Duration = Duration::from_secs(2);
 
-/// After a failed start, how long to wait before trying again.
-const RETRY_AFTER: Duration = Duration::from_secs(10);
+/// A recording that ran this long before failing was healthy: its failure
+/// starts the back-off afresh.
+const HEALTHY: Duration = Duration::from_secs(60);
 
 /// Input for [`AutoRecorder::handle`].
 #[derive(Debug, Clone)]
@@ -46,6 +47,8 @@ struct Active {
     game: Game,
     /// The window being recorded.
     hwnd: isize,
+    /// When this recording started.
+    started: Instant,
     /// The game's display, if it is running in HDR.
     hdr: Option<crate::HdrDisplay>,
     recorder: Recorder,
@@ -57,7 +60,12 @@ pub struct AutoRecorder {
     running: Vec<RunningGame>,
     active: Option<Active>,
     /// No new start attempt before this, after one failed.
-    retry_at: Option<std::time::Instant>,
+    retry_at: Option<Instant>,
+    /// Failed recordings or starts in a row.
+    failures: u32,
+    /// The game whose recording is being restarted (after a failure or a
+    /// new window): starting it again continues its play session.
+    resume: Option<Game>,
 }
 
 impl AutoRecorder {
@@ -104,6 +112,8 @@ impl AutoRecorder {
                 running: vec![],
                 active: None,
                 retry_at: None,
+                failures: 0,
+                resume: None,
             },
             rx,
         ))
@@ -127,49 +137,88 @@ impl AutoRecorder {
         self.running = games;
         if let Some(a) = &self.active {
             let Some(now) = self.running.iter().find(|g| g.game == a.game).cloned() else {
+                self.failures = 0;
                 return self.stop().await.map(|g| g.map(Change::Stopped));
             };
             if now.hwnd == a.hwnd {
                 let Some(failure) = a.recorder.failure() else {
                     return Ok(None);
                 };
-                // The capture died (the window's capture was closed, the
-                // GPU was reset, ...). Left alone, every clip would replay
-                // the last moments before the failure.
-                tracing::warn!(game = %now.game.name, "capture failed, restarting it: {failure}");
-            } else {
-                // Same game, new window (a splash screen gave way to the
-                // game, or it recreated its window switching to fullscreen).
-                tracing::info!(game = %now.game.name, "game window changed; following it");
+                // The capture died. Left alone, every clip would replay the
+                // last moments before the failure: restart it, backing off
+                // when it keeps failing (each attempt opens an encoder
+                // session, and drivers allow only a few).
+                let healthy_for = a.started.elapsed();
+                let _ = self.stop().await;
+                let delay = self.note_failure(healthy_for, now.game.clone());
+                tracing::warn!(
+                    game = %now.game.name,
+                    consecutive = self.failures,
+                    retry_in = ?delay,
+                    "capture failed, restarting it: {failure}"
+                );
+                return Ok(None);
             }
-            // Either way the play session carries on; the replay buffer
-            // restarts.
+            // Same game, new window (a splash screen gave way to the game,
+            // or it recreated its window switching to fullscreen). The play
+            // session carries on; the replay buffer restarts.
+            tracing::info!(game = %now.game.name, "game window changed; following it");
             let _ = self.stop().await;
-            self.try_start(now).await?;
+            self.resume = Some(now.game.clone());
+        }
+
+        // Not recording. A game whose recording is being restarted that
+        // has since closed ends its session here.
+        if let Some(g) = &self.resume
+            && !self.running.iter().any(|r| &r.game == g)
+        {
+            self.failures = 0;
+            self.retry_at = None;
+            return Ok(self.resume.take().map(Change::Stopped));
+        }
+        if self.retry_at.is_some_and(|t| Instant::now() < t) {
             return Ok(None);
         }
-        if self.retry_at.is_some_and(|t| std::time::Instant::now() < t) {
-            return Ok(None);
-        }
-        let Some(next) = self.running.first().cloned() else {
+        // The game being restarted first, else whatever is in front.
+        let next = self
+            .resume
+            .as_ref()
+            .and_then(|g| self.running.iter().find(|r| &r.game == g))
+            .or(self.running.first())
+            .cloned();
+        let Some(next) = next else {
             return Ok(None);
         };
-        self.try_start(next).await.map(Some)
-    }
-
-    /// [`Self::start`], backing off for a while if it fails, so a game that
-    /// can't be captured isn't retried every scan.
-    async fn try_start(&mut self, running: RunningGame) -> Result<Change> {
-        match self.start(running).await {
-            Ok(c) => {
-                self.retry_at = None;
-                Ok(c)
+        match self.start(next.clone()).await {
+            // A restart continues the same play session: no new "Started"
+            // (which would also pop "Ready to record" over the game again).
+            Ok(_) if self.resume.as_ref() == Some(&next.game) => {
+                self.resume = None;
+                Ok(None)
+            }
+            Ok(change) => {
+                self.resume = None;
+                Ok(Some(change))
             }
             Err(e) => {
-                self.retry_at = Some(std::time::Instant::now() + RETRY_AFTER);
+                self.note_failure(Duration::ZERO, next.game);
                 Err(e)
             }
         }
+    }
+
+    /// Count a failed recording or start and schedule the next attempt.
+    /// `healthy_for`: how long the recording ran before failing; one that
+    /// ran a good while resets the count.
+    fn note_failure(&mut self, healthy_for: Duration, game: Game) -> Duration {
+        if healthy_for >= HEALTHY {
+            self.failures = 0;
+        }
+        self.failures += 1;
+        let delay = crate::recorder::restart_backoff(self.failures);
+        self.retry_at = Some(Instant::now() + delay);
+        self.resume = Some(game);
+        delay
     }
 
     async fn start(&mut self, running: RunningGame) -> Result<Change> {
@@ -196,6 +245,7 @@ impl AutoRecorder {
         self.active = Some(Active {
             game: running.game.clone(),
             hwnd: running.hwnd,
+            started: Instant::now(),
             hdr,
             recorder,
         });

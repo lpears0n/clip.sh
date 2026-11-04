@@ -101,6 +101,19 @@ pub fn add_video_branch(
         .build()?;
     let parse = cfg.codec.make_parser()?;
 
+    // The size the encoder sees, fixed for the whole recording when known
+    // (Windows). Frames of any other size are scaled to it, letterboxed, so
+    // a game window resizing or switching modes never makes the encoder
+    // renegotiate: that renegotiation failed ("not-negotiated") and killed
+    // the capture on the owner's machine. `None` follows the source (Linux).
+    #[cfg(windows)]
+    let fixed = fixed_output_size(target);
+    #[cfg(not(windows))]
+    let fixed: Option<(i32, i32)> = None;
+    if let Some((w, h)) = fixed {
+        tracing::info!(width = w, height = h, "encoding at a fixed size");
+    }
+
     let mut chain = vec![src.clone()];
     // The Windows source paces itself to the frame rate it negotiates, and
     // left alone it settles on 30 fps (videorate would then duplicate every
@@ -131,6 +144,9 @@ pub fn add_video_branch(
                 s.set("framerate", gst::Fraction::new(cfg.fps as i32, 1));
             }))?;
             chain.extend([crop, rate, rate_caps, queue]);
+            if let Some((w, h)) = fixed {
+                chain.extend(fixed_size_scaler(w, h)?);
+            }
             chain.extend(encoder.upload_chain()?);
         }
         CapturePath::ZeroCopy => {
@@ -143,14 +159,28 @@ pub fn add_video_branch(
                 s.set("framerate", gst::Fraction::new(cfg.fps as i32, 1));
             }))?;
             chain.extend([gpu, rate, rate_caps, queue]);
-            chain.extend(encoder.gpu_chain()?);
-            // The GPU converter also scales: ask for an even size so 4:2:0
-            // encoders accept odd window streams.
-            let even = capsfilter(raw_caps(Some(memory), |_| {}))?;
-            {
-                let even = even.clone();
+            let convert = encoder.gpu_chain()?;
+            for c in &convert {
+                // Letterbox rather than stretch when the shape changes.
+                if c.has_property("add-borders") {
+                    c.set_property("add-borders", true);
+                }
+            }
+            chain.extend(convert);
+            // The GPU converter also scales. With a fixed size it scales
+            // everything to that; otherwise it follows the source, asking
+            // for an even size so 4:2:0 encoders accept odd window streams.
+            let size = capsfilter(raw_caps(Some(memory), |s| {
+                if let Some((w, h)) = fixed {
+                    s.set("width", w);
+                    s.set("height", h);
+                    s.set("pixel-aspect-ratio", gst::Fraction::new(1, 1));
+                }
+            }))?;
+            if fixed.is_none() {
+                let size = size.clone();
                 on_caps(&src, move |w, h| {
-                    even.set_property(
+                    size.set_property(
                         "caps",
                         raw_caps(Some(memory), |s| {
                             s.set("width", w & !1);
@@ -159,7 +189,7 @@ pub fn add_video_branch(
                     );
                 })?;
             }
-            chain.push(even);
+            chain.push(size);
         }
     }
     chain.push(enc);
@@ -168,6 +198,20 @@ pub fn add_video_branch(
     pipeline.add_many(&chain)?;
     gst::Element::link_many(&chain)?;
     Ok(parse)
+}
+
+/// System-memory frames of any size out at `width`×`height`, letterboxed
+/// (passthrough while they already are that size).
+fn fixed_size_scaler(width: i32, height: i32) -> Result<[gst::Element; 2]> {
+    let scale = gst::ElementFactory::make("videoscale")
+        .property("add-borders", true)
+        .build()?;
+    let size = capsfilter(raw_caps(None, |s| {
+        s.set("width", width);
+        s.set("height", height);
+        s.set("pixel-aspect-ratio", gst::Fraction::new(1, 1));
+    }))?;
+    Ok([scale, size])
 }
 
 /// `videorate`, which turns the source's frames into a constant rate.
@@ -183,6 +227,43 @@ fn make_rate() -> Result<gst::Element> {
             gst::ClockTime::from_seconds(1).nseconds(),
         )
         .build()?)
+}
+
+/// The size to encode a Windows game window at: its client area when
+/// recording starts, or its monitor's size if the window is tiny then
+/// (minimized, or a splash screen), rounded down to even numbers for 4:2:0
+/// encoders.
+#[cfg(windows)]
+fn fixed_output_size(target: CaptureTarget) -> Option<(i32, i32)> {
+    use windows::Win32::{
+        Foundation::{HWND, RECT},
+        Graphics::Gdi::{
+            GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow,
+        },
+        UI::WindowsAndMessaging::GetClientRect,
+    };
+    let CaptureTarget::Window { hwnd, .. } = target;
+    let hwnd = HWND(hwnd as *mut _);
+    let mut r = RECT::default();
+    // SAFETY: plain queries on a window handle; a stale one just fails.
+    let (w, h) = unsafe {
+        if GetClientRect(hwnd, &mut r).is_ok() && r.right - r.left >= 640 && r.bottom - r.top >= 360
+        {
+            (r.right - r.left, r.bottom - r.top)
+        } else {
+            let monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+            let mut info = MONITORINFO {
+                cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+                ..Default::default()
+            };
+            if !GetMonitorInfoW(monitor, &mut info).as_bool() {
+                return None;
+            }
+            let m = info.rcMonitor;
+            (m.right - m.left, m.bottom - m.top)
+        }
+    };
+    (w >= 2 && h >= 2).then_some((w & !1, h & !1))
 }
 
 /// The GPU memory the platform's capture source hands out.
@@ -291,6 +372,8 @@ fn on_caps(src: &gst::Element, f: impl Fn(i32, i32) + Send + Sync + 'static) -> 
 
 #[cfg(test)]
 mod tests {
+    use gstreamer_video as gst_video;
+
     use super::*;
 
     /// 1 s of 30 fps frames, a 3 s pause, 1 s more: the pause must not come
@@ -346,6 +429,79 @@ mod tests {
         // 60 real frames, give or take videorate's edge frames; a filled
         // gap would be ~150.
         assert!((55..=70).contains(&out), "{out} frames out");
+    }
+
+    /// A source that changes size mid-stream (a game window switching
+    /// resolution) still reaches the encoder at one size, and every frame
+    /// gets through.
+    #[test]
+    fn size_changes_are_scaled_to_the_fixed_size() {
+        use gstreamer_app as gst_app;
+        crate::init().unwrap();
+        let pipeline = gst::Pipeline::new();
+        let src = gst_app::AppSrc::builder().format(gst::Format::Time).build();
+        let [scale, size] = fixed_size_scaler(320, 180).unwrap();
+        let convert = gst::ElementFactory::make("videoconvert").build().unwrap();
+        let enc = gst::ElementFactory::make("x264enc")
+            .property_from_str("tune", "zerolatency")
+            .build()
+            .unwrap();
+        let sink = gst_app::AppSink::builder().sync(false).build();
+        let chain = [
+            src.upcast_ref(),
+            &scale,
+            &size,
+            &convert,
+            &enc,
+            sink.upcast_ref(),
+        ];
+        pipeline.add_many(chain).unwrap();
+        gst::Element::link_many(chain).unwrap();
+        pipeline.set_state(gst::State::Playing).unwrap();
+
+        let frame = gst::ClockTime::from_nseconds(1_000_000_000 / 30);
+        let mut n = 0u64;
+        for (w, h) in [(320u32, 180u32), (400, 300), (250, 250), (1280, 720)] {
+            src.set_caps(Some(
+                &gst::Caps::builder("video/x-raw")
+                    .field("format", "I420")
+                    .field("width", w as i32)
+                    .field("height", h as i32)
+                    .field("framerate", gst::Fraction::new(30, 1))
+                    .build(),
+            ));
+            for _ in 0..10 {
+                let len = gst_video::VideoInfo::builder(gst_video::VideoFormat::I420, w, h)
+                    .build()
+                    .unwrap()
+                    .size();
+                let mut b = gst::Buffer::from_slice(vec![16u8; len]);
+                let bm = b.get_mut().unwrap();
+                bm.set_pts(frame * n);
+                bm.set_duration(frame);
+                src.push_buffer(b).unwrap();
+                n += 1;
+            }
+        }
+        src.end_of_stream().unwrap();
+        let mut out = 0;
+        let mut sizes = std::collections::HashSet::new();
+        while let Some(s) = sink.try_pull_sample(gst::ClockTime::from_seconds(5)) {
+            let st = s.caps().unwrap().structure(0).unwrap().to_owned();
+            sizes.insert((
+                st.get::<i32>("width").unwrap(),
+                st.get::<i32>("height").unwrap(),
+            ));
+            out += 1;
+        }
+        let errors = pipeline
+            .bus()
+            .unwrap()
+            .pop_filtered(&[gst::MessageType::Error]);
+        pipeline.set_state(gst::State::Null).unwrap();
+        assert!(errors.is_none(), "{errors:?}");
+        assert_eq!(out, 40, "every frame encoded");
+        assert_eq!(sizes, [(320, 180)].into(), "one size reached the encoder");
     }
 
     #[test]
