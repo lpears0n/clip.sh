@@ -51,6 +51,16 @@ export interface Clip {
   markers: number[]
 }
 
+/** How a size-limited export will be encoded. */
+export interface ExportPlan {
+  video_kbps: number
+  audio_kbps: number
+  /** 16:9 height of the picture class (wider pictures keep its pixel count). */
+  max_height: number
+  /** Frame rate it drops to; null keeps the clip's. */
+  fps: number | null
+}
+
 /** Fields of a clip the user can change; omitted ones are left alone. */
 export interface ClipPatch {
   /** Empty string clears the title. */
@@ -155,8 +165,12 @@ export const api = {
   settings: () => invoke<Settings>('get_settings'),
   setSettings: (settings: Settings) => invoke<void>('set_settings', { settings }),
   openForEdit: (path: string) => invoke<Clip>('open_for_edit', { path }),
-  render: (path: string, start: number, end: number, volumes: number[]) =>
-    invoke<string>('render_clip', { path, start, end, volumes }),
+  /** `maxMb`: fit the file under this size (null = full quality). */
+  render: (path: string, start: number, end: number, volumes: number[], maxMb: number | null) =>
+    invoke<string>('render_clip', { path, start, end, volumes, maxMb }),
+  /** How a clip of `seconds` would be fitted under `maxMb`; rejects with how long fits. */
+  exportPlan: (maxMb: number, seconds: number, audio: boolean) =>
+    invoke<ExportPlan>('export_plan', { maxMb, seconds, audio }),
   cancelRender: () => invoke<void>('cancel_render'),
 }
 

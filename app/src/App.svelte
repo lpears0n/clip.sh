@@ -171,12 +171,12 @@
     if (typeof path === 'string') open(path)
   }
 
-  async function render(start: number, end: number, volumes: number[]) {
+  async function render(start: number, end: number, volumes: number[], maxMb: number | null) {
     if (!viewing) return
     rendering = true
     renderProgress = 0
     try {
-      await api.render(viewing.path, start, end, volumes)
+      await api.render(viewing.path, start, end, volumes, maxMb)
     } catch (e) {
       if (!/cancelled/.test(String(e))) notify(String(e), true)
     } finally {

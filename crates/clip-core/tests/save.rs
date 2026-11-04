@@ -144,6 +144,7 @@ fn saves_last_n_seconds_as_mp4() {
         start: gst::ClockTime::from_mseconds(500),
         end: gst::ClockTime::from_mseconds(2000),
         volumes: vec![0.5],
+        max_bytes: None,
     };
     let cfg = VideoConfig {
         fps: 30,
@@ -162,6 +163,77 @@ fn saves_last_n_seconds_as_mp4() {
         (1.4..=1.6).contains(&duration),
         "edited duration {duration}"
     );
+
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// A size-limited export lands under the limit, scaled down and at 30 fps
+/// when the budget calls for it.
+#[test]
+fn fits_an_export_under_a_size_limit() {
+    clip_core::init().unwrap();
+    let dir = std::env::temp_dir().join(format!("clipsh-fit-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let source = dir.join("source.mp4");
+    // Four seconds of 720p60 with audio, at a generous rate.
+    let aac = aac_encoder();
+    let pipeline = gst::parse::launch(&format!(
+        "videotestsrc num-buffers=240 pattern=ball ! video/x-raw,width=1280,height=720,framerate=60/1 \
+         ! videoconvert ! x264enc bitrate=8000 key-int-max=60 speed-preset=ultrafast ! h264parse ! mp4mux name=m \
+         ! filesink name=out \
+         audiotestsrc num-buffers=188 samplesperbuffer=1024 ! audio/x-raw,rate=48000,channels=2 \
+         ! audioconvert ! {aac} ! aacparse ! m.",
+    ))
+    .unwrap()
+    .downcast::<gst::Bin>()
+    .unwrap();
+    // Set as a property, not in the launch string: the launch syntax eats
+    // the backslashes of a Windows path.
+    pipeline
+        .by_name("out")
+        .unwrap()
+        .set_property("location", source.to_str().unwrap());
+    pipeline.set_state(gst::State::Playing).unwrap();
+    let bus = pipeline.bus().unwrap();
+    bus.timed_pop_filtered(gst::ClockTime::from_seconds(60), &[gst::MessageType::Eos])
+        .expect("source rendered");
+    pipeline.set_state(gst::State::Null).unwrap();
+
+    // 3 s in 300 kB: ~640 kb/s of video, the 480p/30 fps class.
+    let max_bytes = 300_000;
+    let plan = clip_core::export::plan_size(max_bytes, 3.0, true).unwrap();
+    assert_eq!((plan.max_height, plan.fps), (480, Some(30)));
+    let out = dir.join("fitted.mp4");
+    let edit = clip_core::export::Edit {
+        start: gst::ClockTime::from_mseconds(500),
+        end: gst::ClockTime::from_mseconds(3500),
+        volumes: vec![1.0],
+        max_bytes: Some(max_bytes),
+    };
+    let cfg = VideoConfig {
+        fps: 60,
+        bitrate_kbps: 20_000,
+        ..Default::default()
+    };
+    clip_core::export::render(&source, &out, &edit, Encoder::X264, &cfg).unwrap();
+
+    let size = std::fs::metadata(&out).unwrap().len();
+    assert!(size <= max_bytes, "{size} bytes");
+    let video = ffprobe(&out, "stream=width,height,r_frame_rate");
+    assert_eq!(video.lines().next().unwrap(), "854,480,30/1", "{video}");
+    let duration: f64 = ffprobe(&out, "format=duration").trim().parse().unwrap();
+    assert!((2.9..=3.1).contains(&duration), "duration {duration}");
+
+    // Far too small: refused up front, with how long would fit.
+    let edit = clip_core::export::Edit {
+        max_bytes: Some(20_000),
+        ..edit
+    };
+    let err = clip_core::export::render(&source, &dir.join("no.mp4"), &edit, Encoder::X264, &cfg)
+        .unwrap_err()
+        .to_string();
+    assert!(err.starts_with("too long to fit in 20 kB"), "{err}");
+    assert!(!dir.join("no.mp4").exists());
 
     std::fs::remove_dir_all(dir).unwrap();
 }
