@@ -3,6 +3,10 @@
 # runtime (scripts/collect-gstreamer.ps1 + tauri.windows.conf.json), so
 # users need nothing else. Run by hand on a branch, it builds the same
 # installers and keeps them as artifacts of the run instead of a release.
+#
+# Updates and Windows code signing switch on by themselves once their
+# secrets and variables exist; see docs/RELEASING.md. Without them the
+# installers are built exactly as before.
 name: Release
 
 on:
@@ -17,6 +21,10 @@ jobs:
   build:
     name: Build · ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
+    env:
+      # Only whether they are set; the secrets themselves are given to the
+      # steps that use them.
+      HAS_WINDOWS_CERT: ${{ secrets.WINDOWS_CERTIFICATE != '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -78,12 +86,42 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: pwsh scripts/collect-gstreamer.ps1
+      - name: Import the code signing certificate (Windows)
+        if: runner.os == 'Windows' && env.HAS_WINDOWS_CERT == 'true' && vars.WINDOWS_SIGN_COMMAND == ''
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP 'signing.pfx'
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
+          $password = ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
+          $cert = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $password
+          Remove-Item $pfx
+          "WINDOWS_CERT_THUMBPRINT=$($cert.Thumbprint)" >> $env:GITHUB_ENV
+      - name: Install the Trusted Signing client (Windows)
+        if: runner.os == 'Windows' && startsWith(vars.WINDOWS_SIGN_COMMAND, 'trusted-signing-cli')
+        run: cargo install trusted-signing-cli --locked
+      - name: Release config (updates, signing)
+        env:
+          UPDATER_PUBKEY: ${{ vars.UPDATER_PUBKEY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          WINDOWS_SIGN_COMMAND: ${{ runner.os == 'Windows' && vars.WINDOWS_SIGN_COMMAND || '' }}
+          WINDOWS_TIMESTAMP_URL: ${{ vars.WINDOWS_TIMESTAMP_URL }}
+        run: node scripts/release-config.mjs
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Signs the update bundles (with createUpdaterArtifacts on).
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Azure Trusted Signing, read by trusted-signing-cli.
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
         with:
           projectPath: app
-          args: --bundles ${{ matrix.bundles }}
+          args: --bundles ${{ matrix.bundles }} ${{ env.RELEASE_CONFIG_ARGS }}
           # Without a tag name the action only builds.
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
           releaseName: clip.sh ${{ github.ref_name }}
@@ -98,6 +136,8 @@ jobs:
           if-no-files-found: error
           path: |
             target/release/bundle/nsis/*.exe
+            target/release/bundle/nsis/*.sig
             target/release/bundle/appimage/*.AppImage
+            target/release/bundle/appimage/*.sig
             target/release/bundle/deb/*.deb
             target/release/bundle/rpm/*.rpm

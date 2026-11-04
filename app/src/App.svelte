@@ -14,12 +14,14 @@
     onClipSaved,
     onScreenshotSaved,
     onMarked,
+    onUpdateAvailable,
     onLibraryChanged,
     onRenderProgress,
     onStatusChanged,
     onThumbnailReady,
     type Settings,
     type Status,
+    type UpdateInfo,
     type Usage,
   } from './lib/api'
   import { readLibraryCache, writeLibraryCache } from './lib/cache'
@@ -49,6 +51,8 @@
 
   let status = $state<Status | null>(null)
   let settings = $state<Settings | null>(null)
+  /** A newer release, found by the background check or Settings. */
+  let newRelease = $state<UpdateInfo | null>(null)
   let usage = $state<Usage | null>(null)
   let caps = $state<Capabilities | null>(null)
   // Raw: replaced wholesale on every refresh; a deep proxy over thousands of
@@ -334,6 +338,7 @@
         notify(`Screenshot saved as ${path.split(/[\\/]/).pop()}`)
       }),
       onMarked(() => notify('Moment marked')),
+      onUpdateAvailable((u) => (newRelease = u)),
       onLibraryChanged(() => {
         refreshLibrary()
         refreshUsage()
@@ -381,6 +386,11 @@
       </button>
       <h1 class="display-face truncate text-title font-semibold">{title}</h1>
       <div class="min-w-0 flex-1"></div>
+      {#if newRelease}
+        <button class="btn h-8 flex-none px-3 text-secondary" onclick={() => openSettings('General')} title="See the update in Settings">
+          Update {newRelease.version}
+        </button>
+      {/if}
       <StatusBar {status} {now} {flash} {saving} {hotkey} onsave={save} onopen={pickVideo} onchoosescreen={chooseScreen} onignore={ignoreGame} />
     </header>
 
@@ -425,7 +435,7 @@
             onfavorite={(c) => update(c, { favorite: !c.favorite })}
           />
         {:else if view === 'settings' && settings}
-          <SettingsView {settings} {usage} {caps} {status} bind:category onchange={changeSettings} onchoosescreen={chooseScreen} />
+          <SettingsView {settings} {usage} {caps} {status} bind:category bind:update={newRelease} onchange={changeSettings} onchoosescreen={chooseScreen} />
         {:else}
           <GamesView
             {games}

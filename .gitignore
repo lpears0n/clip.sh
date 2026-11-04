@@ -4,3 +4,4 @@ dist/
 *.mp4
 # GStreamer runtime collected for the Windows installer
 app/src-tauri/gst/**/*.dll
+app/src-tauri/release.conf.json

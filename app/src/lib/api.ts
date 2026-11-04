@@ -69,6 +69,13 @@ export interface ClipPatch {
   labels?: string[]
 }
 
+/** A newer release than the running one. */
+export interface UpdateInfo {
+  version: string
+  current_version: string
+  notes: string | null
+}
+
 /** A save sound: the built-in beep, or a file the user imported. */
 export type Sound = { kind: 'builtin' } | { kind: 'custom'; path: string; name: string }
 
@@ -95,6 +102,8 @@ export interface Settings {
   screenshot_sound: Sound | null
   /** Windows: popup over the game when recording starts and on a save. */
   overlay: boolean
+  /** Look for new releases now and then (builds that can update only). */
+  check_for_updates: boolean
   fps: number
   bitrate_kbps: number
   codec: Codec
@@ -184,6 +193,11 @@ export const api = {
   /** Check a picked sound file and copy it in; resolves to the sound to store. */
   importSound: (path: string, slot: 'clip' | 'screenshot') => invoke<Sound>('import_sound', { path, slot }),
   previewSound: (sound: Sound, volume: number) => invoke<void>('preview_sound', { sound, volume }),
+  /** Whether this build can update itself, and its version. */
+  updateSupport: () => invoke<{ configured: boolean; version: string }>('update_support'),
+  checkUpdate: () => invoke<UpdateInfo | null>('check_update'),
+  /** Downloads, installs and restarts; resolves only on failure. */
+  installUpdate: () => invoke<void>('install_update'),
 }
 
 export const onRenderProgress = (f: (p: { path: string; fraction: number }) => void): Promise<UnlistenFn> =>
@@ -200,6 +214,13 @@ export const onClipSaved = (f: (path: string) => void): Promise<UnlistenFn> =>
 
 export const onScreenshotSaved = (f: (path: string) => void): Promise<UnlistenFn> =>
   listen<string>('screenshot-saved', (e) => f(e.payload))
+
+export const onUpdateAvailable = (f: (u: UpdateInfo) => void): Promise<UnlistenFn> =>
+  listen<UpdateInfo>('update-available', (e) => f(e.payload))
+
+/** Download progress of an update being installed, 0–1 (null: size unknown). */
+export const onUpdateProgress = (f: (fraction: number | null) => void): Promise<UnlistenFn> =>
+  listen<number | null>('update-progress', (e) => f(e.payload))
 
 /** A moment was marked in the recording. */
 export const onMarked = (f: (m: { game: string; at: number }) => void): Promise<UnlistenFn> =>

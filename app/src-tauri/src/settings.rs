@@ -28,6 +28,8 @@ pub struct Settings {
     pub screenshot_sound: Option<Sound>,
     /// Windows: a popup over the game when recording starts and on a save.
     pub overlay: bool,
+    /// Look for a new release now and then (builds that can update only).
+    pub check_for_updates: bool,
 
     // Recording
     pub replay_seconds: u32,
@@ -101,6 +103,7 @@ impl Default for Settings {
             start_in_tray: true,
             close_to_tray: true,
             notify_on_save: true,
+            check_for_updates: true,
             sound_on_save: true,
             sound_volume: 100,
             clip_sound: Sound::Builtin,
