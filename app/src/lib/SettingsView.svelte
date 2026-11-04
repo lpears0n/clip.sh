@@ -340,10 +340,24 @@
               description="Only the game’s own window is recorded, never the rest of your screen. Notifications, Discord and your other monitors stay out of clips."
             />
           {/if}
+          {#if status?.backend === 'windows'}
+            <Row
+              title="HDR compatibility"
+              description="On an HDR display, tone-map HDR games so clips look right instead of blown out. This records the game’s area of the screen rather than its window, so a notification or overlay on top of the game can show up in clips. Applies from the next game; no effect on SDR displays."
+            >
+              <Toggle
+                label="HDR compatibility"
+                checked={settings.hdr_compatibility}
+                onchange={(hdr_compatibility) => update({ hdr_compatibility })}
+              />
+            </Row>
+          {/if}
           {#if status?.hdr}
             <Row
               title="HDR display"
-              description={`The game’s display is in HDR (SDR white at ${Math.round(status.hdr.sdr_white_nits)} nits). Clips are recorded in SDR for now, so bright HDR highlights look blown out. Proper HDR support is in progress.`}
+              description={status.hdr_tonemapped
+                ? `The game’s display is in HDR (SDR white at ${Math.round(status.hdr.sdr_white_nits)} nits). HDR is tone-mapped into your clips.`
+                : `The game’s display is in HDR (SDR white at ${Math.round(status.hdr.sdr_white_nits)} nits). Clips are SDR, so bright HDR highlights look blown out${status.backend === 'windows' ? '; turn on HDR compatibility to fix that' : ''}.`}
             />
           {/if}
           {#if status?.backend === 'portal'}

@@ -32,6 +32,19 @@ So stock elements give HDR-correct output only for whole-monitor DXGI
 capture, and clip.sh records only the game's window (owner's decision:
 like Medal, nothing else on screen ends up in clips).
 
+## HDR compatibility (Settings → Recording)
+
+A toggle, off by default. When it is on and the game's display is in
+HDR, recording uses `d3d12screencapturesrc` through DXGI Desktop
+Duplication, cropped to the game window's area, with Reinhard tone
+mapping at Windows' SDR white level; `d3d12convert` scales it to the
+fixed encode size and `d3d12download` hands it to the usual D3D11
+encoders, so it stays on the GPU. The trade-off, stated in the UI: it
+records the game's area of the screen, so a notification or overlay
+drawn on top of the game in that area can appear in clips. If that
+capture can't start, recording falls back to window capture (SDR,
+highlights clipped). Not yet run on an HDR machine.
+
 ## Plan
 
 1. **Detect and report** (done). Gives the owner's machine a way to say

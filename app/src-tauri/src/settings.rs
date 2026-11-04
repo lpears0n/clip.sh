@@ -34,6 +34,9 @@ pub struct Settings {
     /// to copying through system memory by itself. On by default on
     /// Windows (D3D11 is the native path), off on Linux.
     pub zero_copy: bool,
+    /// Windows: tone-map HDR games through Desktop Duplication (captures
+    /// the game window's area of the screen) when the display is in HDR.
+    pub hdr_compatibility: bool,
 
     // Audio
     pub desktop_audio: bool,
@@ -81,6 +84,7 @@ impl Default for Settings {
             encoder: None,
             cursor: true,
             zero_copy: cfg!(windows),
+            hdr_compatibility: false,
             desktop_audio: true,
             desktop_device: None,
             mic: false,
@@ -142,6 +146,7 @@ impl Settings {
             audio_bitrate: (self.audio_bitrate_kbps.clamp(64, 320) * 1000) as i32,
             cursor: self.cursor,
             zero_copy: self.zero_copy,
+            hdr_compat: self.hdr_compatibility,
         }
     }
 

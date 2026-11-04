@@ -60,6 +60,16 @@ pub enum CaptureTarget {
     /// recorded, never the rest of the screen.
     #[cfg(windows)]
     Window { hwnd: isize, cursor: bool },
+    /// HDR compatibility (Windows): the game window's area of its HDR
+    /// monitor, through DXGI Desktop Duplication with tone mapping. Unlike
+    /// `Window`, anything drawn on top of the game in that area is
+    /// recorded too.
+    #[cfg(windows)]
+    HdrRegion {
+        hwnd: isize,
+        monitor: isize,
+        cursor: bool,
+    },
 }
 
 /// How frames travel from the compositor to the encoder.
@@ -86,15 +96,19 @@ pub fn add_video_branch(
     if path == CapturePath::ZeroCopy && encoder.gpu_memory().is_none() {
         bail!("{encoder:?} has no zero-copy path");
     }
+    #[cfg(windows)]
+    if let CaptureTarget::HdrRegion {
+        hwnd,
+        monitor,
+        cursor,
+    } = target
+    {
+        return add_hdr_branch(pipeline, hwnd, monitor, cursor, encoder, cfg, path);
+    }
     let src = make_source(target, cfg, path)?;
 
     let rate = make_rate()?;
-    let queue = gst::ElementFactory::make("queue")
-        .property("max-size-buffers", 4u32)
-        .property("max-size-time", 0u64)
-        .property("max-size-bytes", 0u32)
-        .property_from_str("leaky", "downstream")
-        .build()?;
+    let queue = make_queue()?;
     let enc = encoder.build(cfg)?;
     let enc_caps = gst::ElementFactory::make("capsfilter")
         .property("caps", cfg.codec.caps())
@@ -214,6 +228,147 @@ fn fixed_size_scaler(width: i32, height: i32) -> Result<[gst::Element; 2]> {
     Ok([scale, size])
 }
 
+/// The frame queue in front of the encoder: a few frames, dropping the
+/// oldest when the encoder falls behind rather than stalling capture.
+fn make_queue() -> Result<gst::Element> {
+    Ok(gst::ElementFactory::make("queue")
+        .property("max-size-buffers", 4u32)
+        .property("max-size-time", 0u64)
+        .property("max-size-bytes", 0u32)
+        .property_from_str("leaky", "downstream")
+        .build()?)
+}
+
+/// HDR compatibility: `d3d12screencapturesrc` duplicates the HDR monitor
+/// in 16-bit float and tone-maps it to SDR (Reinhard, using Windows' SDR
+/// white level), cropped to the game window's area. `d3d12convert` scales
+/// it to the fixed size and converts it for the encoder, and
+/// `d3d12download` hands it over as D3D11 textures, so the frame never
+/// leaves the GPU and the usual hardware encoders take it. GPU only: the
+/// copy path would move 16-bit frames through system memory.
+#[cfg(windows)]
+fn add_hdr_branch(
+    pipeline: &gst::Pipeline,
+    hwnd: isize,
+    monitor: isize,
+    cursor: bool,
+    encoder: Encoder,
+    cfg: &VideoConfig,
+    path: CapturePath,
+) -> Result<gst::Element> {
+    if path != CapturePath::ZeroCopy {
+        bail!("HDR capture only runs on the GPU path");
+    }
+    let memory = encoder
+        .gpu_memory()
+        .with_context(|| format!("{encoder:?} takes no GPU frames"))?;
+    let target = CaptureTarget::HdrRegion {
+        hwnd,
+        monitor,
+        cursor,
+    };
+    let (w, h) = fixed_output_size(target).context("can't size the game window")?;
+    tracing::info!(
+        width = w,
+        height = h,
+        "encoding at a fixed size (HDR capture)"
+    );
+
+    let src = gst::ElementFactory::make("d3d12screencapturesrc")
+        .name("screen")
+        .property("monitor-handle", monitor as u64)
+        .property("show-cursor", cursor)
+        .build()
+        .context("d3d12screencapturesrc missing (GStreamer d3d12 plugin)")?;
+    if src.has_property("capture-api") {
+        src.set_property_from_str("capture-api", "dxgi");
+    }
+    if src.has_property("tonemap") {
+        src.set_property_from_str("tonemap", "reinhard");
+    }
+    if let Some((x, y, cw, ch)) = window_crop(hwnd, monitor) {
+        src.set_property("crop-x", x);
+        src.set_property("crop-y", y);
+        src.set_property("crop-width", cw);
+        src.set_property("crop-height", ch);
+    }
+
+    const D3D12: &str = "memory:D3D12Memory";
+    let rate_of = |s: &mut gst::StructureRef| {
+        s.set("framerate", gst::Fraction::new(cfg.fps as i32, 1));
+    };
+    let convert = gst::ElementFactory::make("d3d12convert")
+        .build()
+        .context("d3d12convert missing (GStreamer d3d12 plugin)")?;
+    if convert.has_property("add-borders") {
+        convert.set_property("add-borders", true);
+    }
+    let download = gst::ElementFactory::make("d3d12download")
+        .build()
+        .context("d3d12download missing (GStreamer d3d12 plugin)")?;
+    let parse = cfg.codec.make_parser()?;
+    let chain = [
+        src,
+        capsfilter(raw_caps(Some(D3D12), rate_of))?,
+        make_rate()?,
+        capsfilter(raw_caps(Some(D3D12), rate_of))?,
+        make_queue()?,
+        convert,
+        capsfilter(raw_caps(Some(D3D12), |s| {
+            s.set("width", w);
+            s.set("height", h);
+            s.set("pixel-aspect-ratio", gst::Fraction::new(1, 1));
+        }))?,
+        download,
+        capsfilter(raw_caps(Some(memory), |_| {}))?,
+        encoder.build(cfg)?,
+        gst::ElementFactory::make("capsfilter")
+            .property("caps", cfg.codec.caps())
+            .build()?,
+        parse.clone(),
+    ];
+    pipeline.add_many(&chain)?;
+    gst::Element::link_many(&chain)?;
+    Ok(parse)
+}
+
+/// The game window's client area in its monitor's coordinates, for the
+/// duplication crop; `None` when it covers the whole monitor (fullscreen)
+/// or can't be read.
+#[cfg(windows)]
+fn window_crop(hwnd: isize, monitor: isize) -> Option<(u32, u32, u32, u32)> {
+    use windows::Win32::{
+        Foundation::{HWND, POINT, RECT},
+        Graphics::Gdi::{ClientToScreen, GetMonitorInfoW, HMONITOR, MONITORINFO},
+        UI::WindowsAndMessaging::GetClientRect,
+    };
+    let hwnd = HWND(hwnd as *mut _);
+    let mut client = RECT::default();
+    let mut origin = POINT::default();
+    let mut info = MONITORINFO {
+        cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+        ..Default::default()
+    };
+    // SAFETY: plain queries; stale handles just fail.
+    unsafe {
+        GetClientRect(hwnd, &mut client).ok()?;
+        ClientToScreen(hwnd, &mut origin).ok().ok()?;
+        GetMonitorInfoW(HMONITOR(monitor as *mut _), &mut info)
+            .ok()
+            .ok()?;
+    }
+    let m = info.rcMonitor;
+    let x = (origin.x - m.left).max(0);
+    let y = (origin.y - m.top).max(0);
+    let w = (client.right - client.left).min(m.right - m.left - x);
+    let h = (client.bottom - client.top).min(m.bottom - m.top - y);
+    if w <= 0 || h <= 0 {
+        return None;
+    }
+    let full = x == 0 && y == 0 && w == m.right - m.left && h == m.bottom - m.top;
+    (!full).then_some((x as u32, y as u32, (w & !1) as u32, (h & !1) as u32))
+}
+
 /// `videorate`, which turns the source's frames into a constant rate.
 /// When the source pauses (Windows: a window only yields frames while the
 /// game draws), the gap is not filled with copies: on resume that would be
@@ -242,7 +397,7 @@ fn fixed_output_size(target: CaptureTarget) -> Option<(i32, i32)> {
         },
         UI::WindowsAndMessaging::GetClientRect,
     };
-    let CaptureTarget::Window { hwnd, .. } = target;
+    let (CaptureTarget::Window { hwnd, .. } | CaptureTarget::HdrRegion { hwnd, .. }) = target;
     let hwnd = HWND(hwnd as *mut _);
     let mut r = RECT::default();
     // SAFETY: plain queries on a window handle; a stale one just fails.
@@ -313,7 +468,9 @@ fn make_source(
     _cfg: &VideoConfig,
     _path: CapturePath,
 ) -> Result<gst::Element> {
-    let CaptureTarget::Window { hwnd, cursor } = target;
+    let CaptureTarget::Window { hwnd, cursor } = target else {
+        bail!("HDR region capture is built by add_hdr_branch");
+    };
     // A window handle selects WGC window capture by itself.
     let src = gst::ElementFactory::make("d3d11screencapturesrc")
         .name("screen")

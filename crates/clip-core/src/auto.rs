@@ -346,6 +346,11 @@ impl AutoRecorder {
         None
     }
 
+    /// HDR tone mapping isn't available on Linux yet.
+    pub fn hdr_tonemapped(&self) -> bool {
+        false
+    }
+
     pub fn current_game(&self) -> Option<&Game> {
         self.active.as_ref().map(|a| &a.game)
     }
