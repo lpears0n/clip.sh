@@ -127,8 +127,14 @@ ship on its own.
   `pitch`/`scaletempo`). Medal's most-used effect.
 - **Crop / zoom** with a draggable rectangle on the preview (`videocrop`
   + `videoscale`).
-- **Export presets:** Discord (25 MB / 10 MB cap: two-pass bitrate from
-  duration), 9:16 vertical with the crop above, GIF (`gifenc` via libav).
+- ~~**Export size presets.**~~ Done: Full quality, 10 MB (Discord), 50 MB
+  (Nitro Basic), 500 MB (Nitro). The bitrate comes from the trimmed length
+  with a margin for the container; when the budget is too thin for the
+  full picture it steps down (1080p → 720p → 720p30 → 480p30 → 360p30,
+  same pixel count for ultrawide) and audio drops to 96/64 kb/s. A file
+  that still comes out over is redone at a rate scaled by the miss. Too
+  long to fit says how long would. Still to do: 9:16 vertical with the
+  crop below, GIF (`gifenc` via libav).
 - **Audio**: per-track mute buttons on the timeline, waveform strip under
   the trim track (`level` element at inspect time, cached next to the
   thumbnail).

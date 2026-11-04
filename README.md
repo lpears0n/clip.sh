@@ -42,6 +42,10 @@ leaves screenshots under `app/tests/shots/`; it runs in CI too. There's also a s
 - Hover a clip for a silent preview; open it to watch or trim. Press `?` in
   the viewer for every keyboard shortcut (speed, frame stepping, in/out
   points, repeat).
+- When trimming, pick a size to render under, such as 10 MB for Discord.
+  The bitrate comes from the clip's length, the picture drops to 720p or
+  480p (and 30 fps) when it has to, and if a clip is too long to fit you
+  are told how long would.
 - Detected something that isn't a game? The × next to its name in the
   top bar stops recording it for good (undo under Settings → Recording).
 - **Settings → Audio** picks which output's sound is recorded as the game

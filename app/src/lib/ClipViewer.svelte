@@ -5,7 +5,7 @@
 <script lang="ts">
   import { ArrowLeft, CircleHelp, Maximize, Minimize, Pause, Pencil, Play, Plus, Repeat, Star, Volume2, VolumeX, X } from '@lucide/svelte'
   import { getCurrentWindow } from '@tauri-apps/api/window'
-  import { type Clip, type ClipPatch, videoUrl } from './api'
+  import { api, type Clip, type ClipPatch, type ExportPlan, videoUrl } from './api'
   import { clock, dayLabel, size, timecode, trackName } from './format'
   import { playbackStats } from './playbackStats'
   import Timeline from './Timeline.svelte'
@@ -26,7 +26,8 @@
     /** Fraction of the render done, while `rendering`. */
     progress?: number
     onback: () => void
-    onrender: (start: number, end: number, volumes: number[]) => void
+    /** `maxMb`: fit the file under this size; null keeps full quality. */
+    onrender: (start: number, end: number, volumes: number[], maxMb: number | null) => void
     oncancel: () => void
     ondelete: () => void
     onshare: () => void
@@ -266,6 +267,67 @@
     poke()
   }
 
+  // Export size: full quality, or fitted under an upload limit.
+  const SIZES: [number, string][] = [
+    [0, 'Full quality'],
+    [10, '10 MB · Discord'],
+    [50, '50 MB · Nitro Basic'],
+    [500, '500 MB · Nitro'],
+  ]
+  const SIZE_KEY = 'clipsh.export-size'
+  let sizeMb = $state(readSize())
+  let plan = $state<ExportPlan | null>(null)
+  let planError = $state<string | null>(null)
+
+  function readSize(): number {
+    try {
+      const v = Number(localStorage.getItem(SIZE_KEY))
+      return SIZES.some(([mb]) => mb === v) ? v : 0
+    } catch {
+      return 0
+    }
+  }
+
+  function setSize(mb: number) {
+    sizeMb = mb
+    try {
+      localStorage.setItem(SIZE_KEY, String(mb))
+    } catch {
+      // Remembering the choice is a convenience.
+    }
+  }
+
+  $effect(() => {
+    const mb = sizeMb
+    const seconds = end - start
+    const audio = clip.audio_tracks > 0
+    if (!trimming || mb === 0 || seconds < 0.1) {
+      plan = null
+      planError = null
+      return
+    }
+    let stale = false
+    api.exportPlan(mb, seconds, audio).then(
+      (p) => {
+        if (stale) return
+        plan = p
+        planError = null
+      },
+      (e) => {
+        if (stale) return
+        plan = null
+        planError = String(e)
+      },
+    )
+    return () => {
+      stale = true
+    }
+  })
+
+  const planLabel = $derived(
+    plan ? `${plan.max_height}p${plan.fps ?? ''} · ${(plan.video_kbps / 1000).toFixed(1)} Mb/s` : null,
+  )
+
   const SHORTCUTS: [string, string][] = [
     ['Space / K', 'Play or pause'],
     ['J / L', 'Back or forward 10 s'],
@@ -498,7 +560,7 @@
 
   {#if trimming}
     <!-- Trimming is done on the line over the video; this is the rest. -->
-    <div class="flex items-center gap-5 text-secondary">
+    <div class="flex flex-wrap items-center gap-x-5 gap-y-3 text-secondary">
       <button class="action -ml-2 tabular-nums" onclick={() => (start = Math.min(time, end - 0.1))} title="Set start to playhead (I)">
         <span class="text-muted">In</span>&nbsp;{timecode(start)}
       </button>
@@ -512,7 +574,21 @@
           <span class="w-10 tabular-nums">{levels[i]}%</span>
         </label>
       {/each}
-      <div class="flex-1"></div>
+      <!-- The export half; it moves to its own line when the row is full. -->
+      <div class="ml-auto flex items-center gap-5 whitespace-nowrap">
+      <label class="flex items-center gap-2.5">
+        <span class="text-muted">Size</span>
+        <select class="field w-44 flex-none" value={sizeMb} onchange={(e) => setSize(Number(e.currentTarget.value))} aria-label="Export size">
+          {#each SIZES as [mb, label] (mb)}
+            <option value={mb}>{label}</option>
+          {/each}
+        </select>
+      </label>
+      {#if planError}
+        <span class="max-w-64 whitespace-normal text-danger" role="status">{planError.charAt(0).toUpperCase() + planError.slice(1)}</span>
+      {:else if planLabel}
+        <span class="text-muted tabular-nums" role="status" title="How the clip will be fitted">{planLabel}</span>
+      {/if}
       <span class="text-muted">Length <span class="font-semibold text-fg tabular-nums">{timecode(end - start)}</span></span>
       {#if rendering}
         <div class="flex items-center gap-3">
@@ -523,10 +599,15 @@
           <button class="btn h-9" onclick={oncancel}>Cancel</button>
         </div>
       {:else}
-        <button class="btn-primary" disabled={end - start < 0.1} onclick={() => onrender(start, end, levels.map((l) => l / 100))}>
+        <button
+          class="btn-primary"
+          disabled={end - start < 0.1 || planError !== null}
+          onclick={() => onrender(start, end, levels.map((l) => l / 100), sizeMb || null)}
+        >
           Render clip
         </button>
       {/if}
+      </div>
     </div>
   {/if}
 </div>

@@ -98,6 +98,12 @@ function mockBridge(data) {
         data.get_settings.ignored_games.push({ name: data.get_status.game, exe: 'eldenring' })
         return data.get_settings
       }
+      if (cmd === 'export_plan') {
+        // The real planner is tested in Rust; this only feeds the hint.
+        const kbps = Math.round((args.maxMb * 1e6 * 8 * 0.92) / args.seconds / 1000)
+        return { video_kbps: kbps - 128, audio_kbps: 128, max_height: 720, fps: 30 }
+      }
+      if (cmd === 'render_clip') { window.__lastRender = args; return args.path }
       if (cmd === 'delete_clip') { data.list_clips = data.list_clips.filter((c) => c.path !== args.path); return null }
       if (cmd === 'plugin:event|listen') {
         // Remember the handler so a test can fire the event at the page.
@@ -251,6 +257,15 @@ async function runScenario(scenario, browser) {
   assert.equal(await page.locator('.player [aria-label="Timeline"]').count(), 1, 'and it is over the video')
   assert.equal(await page.locator('[aria-label="Trim start"]').getAttribute('aria-valuenow'), '1', 'in at 1 s')
   assert.equal(await page.locator('[aria-label="Trim end"]').getAttribute('aria-valuenow'), '4.5', 'out at 4.5 s')
+  // Export size: fitted under Discord's limit, with a hint of how.
+  await page.getByLabel('Export size').selectOption('10')
+  await page.getByRole('status').filter({ hasText: '720p30' }).waitFor()
+  await shot('viewer-export-size')
+  await page.getByRole('button', { name: 'Render clip' }).click()
+  await page.waitForFunction(() => window.__lastRender)
+  const rendered = await page.evaluate(() => window.__lastRender)
+  assert.equal(rendered.maxMb, 10, 'render asks for the 10 MB fit')
+  assert.deepEqual([rendered.start, rendered.end], [1, 4.5], 'the trimmed range')
   await page.keyboard.press('Escape')
   await page.keyboard.press('Escape')
 

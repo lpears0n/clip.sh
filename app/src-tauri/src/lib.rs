@@ -376,6 +376,7 @@ async fn render_clip(
     start: f64,
     end: f64,
     volumes: Vec<f64>,
+    max_mb: Option<f64>,
 ) -> CmdResult<PathBuf> {
     let (out, cfg) = {
         let s = state.settings.lock().unwrap();
@@ -395,6 +396,7 @@ async fn render_clip(
         start: clip_core::gst::ClockTime::from_nseconds((start.max(0.0) * 1e9) as u64),
         end: clip_core::gst::ClockTime::from_nseconds((end.max(0.0) * 1e9) as u64),
         volumes,
+        max_bytes: max_mb.filter(|mb| *mb > 0.0).map(megabytes),
     };
     let result = out.clone();
     let source = path.clone();
@@ -423,6 +425,18 @@ async fn render_clip(
     library::copy_meta(&source, &result, start, end);
     let _ = app.emit(service::CLIP_SAVED, &result);
     Ok(result)
+}
+
+/// How a clip of `seconds` would be fitted under `max_mb`, for the export
+/// size picker; an error says how long a clip may be.
+#[tauri::command]
+fn export_plan(max_mb: f64, seconds: f64, audio: bool) -> CmdResult<clip_core::export::SizePlan> {
+    clip_core::export::plan_size(megabytes(max_mb), seconds, audio).map_err(|e| format!("{e:#}"))
+}
+
+/// Upload limits are in decimal megabytes.
+fn megabytes(mb: f64) -> u64 {
+    (mb * 1e6) as u64
 }
 
 /// Let the webview load videos and thumbnails through the asset protocol.
@@ -726,6 +740,7 @@ pub fn run() {
             get_status,
             save_clip,
             save_screenshot,
+            export_plan,
             ignore_current_game,
             list_clips,
             delete_clip,
