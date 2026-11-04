@@ -49,6 +49,9 @@ pub struct RecorderConfig {
     /// games look right in clips. Off: window capture, HDR highlights clip.
     #[serde(default)]
     pub hdr_compat: bool,
+    /// Apps the user said aren't games; never recorded.
+    #[serde(default)]
+    pub ignored: Vec<crate::game::IgnoredGame>,
 }
 
 fn zero_copy_default() -> bool {
@@ -137,6 +140,7 @@ impl Default for RecorderConfig {
             cursor: true,
             zero_copy: zero_copy_default(),
             hdr_compat: false,
+            ignored: Vec::new(),
         }
     }
 }

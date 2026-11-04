@@ -192,6 +192,14 @@ impl AutoRecorder {
     /// would replay the moments before the failure), backing off when it
     /// keeps failing. The play session carries on across restarts.
     async fn tick(&mut self) -> Result<Option<Change>> {
+        // A game just marked "not a game" stops here.
+        if self
+            .active
+            .as_ref()
+            .is_some_and(|a| crate::game::is_ignored(&self.cfg.ignored, &a.game.name, None))
+        {
+            return self.stop().await.map(|g| g.map(Change::Stopped));
+        }
         if let Some(a) = &self.active {
             let Some(failure) = a.recorder.failure() else {
                 return Ok(None);
@@ -254,6 +262,8 @@ impl AutoRecorder {
         else {
             return Ok(None);
         };
+        let mut games = games;
+        games.retain(|g| !crate::game::is_ignored(&self.cfg.ignored, &g.name, None));
         *running = games.clone();
         if let Some(r) = &self.resume {
             if games.contains(&r.game) {
@@ -371,7 +381,8 @@ impl AutoRecorder {
             return None;
         }
         if !games.contains_key(uuid) {
-            let g = game::detect(w.pid, &w.title);
+            let g = game::detect(w.pid, &w.title)
+                .filter(|g| !game::is_ignored(&self.cfg.ignored, &g.name, None));
             if let Some(g) = &g {
                 tracing::info!(app_id = %w.app_id, pid = w.pid, game = %g.name, "game window detected");
             }
@@ -448,6 +459,15 @@ impl AutoRecorder {
             .encoder
             .filter(|e| e.element(self.cfg.video.codec).is_some())
             .or_else(|| self.probed.get(&self.cfg.video.codec).copied())
+    }
+
+    /// What to put on the ignore list to stop recording the current game
+    /// for good ("not a game"). By name: Linux detection names are stable.
+    pub fn ignore_entry(&self) -> Option<crate::game::IgnoredGame> {
+        self.active.as_ref().map(|a| crate::game::IgnoredGame {
+            name: a.game.name.clone(),
+            exe: None,
+        })
     }
 
     /// The recorded game's display, if it is running in HDR. Not detected

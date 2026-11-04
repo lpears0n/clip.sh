@@ -81,6 +81,8 @@ export interface Settings {
   zero_copy: boolean
   /** Windows: tone-map HDR games (captures the game's area of the screen). */
   hdr_compatibility: boolean
+  /** Apps marked "not a game"; never recorded. */
+  ignored_games: { name: string; exe?: string }[]
   desktop_audio: boolean
   /** Output whose sound is recorded; null = the system default. */
   desktop_device: string | null
@@ -139,6 +141,7 @@ export const api = {
   status: () => invoke<Status>('get_status'),
   save: () => invoke<string>('save_clip'),
   screenshot: () => invoke<string>('save_screenshot'),
+  ignoreCurrentGame: () => invoke<Settings>('ignore_current_game'),
   clips: () => invoke<Clip[]>('list_clips'),
   games: () => invoke<GameEntry[]>('list_games'),
   deleteClip: (path: string) => invoke<void>('delete_clip', { path }),

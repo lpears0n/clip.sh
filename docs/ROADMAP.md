@@ -150,6 +150,11 @@ ship on its own.
   failed recording with the same back-off as Windows (shared
   `RestartPolicy`), and the encode size is locked at the first frame so
   window resizes are scaled instead of renegotiated.
+- ~~**Detection beyond Steam.**~~ Done on Windows: Epic, Riot, GOG,
+  Ubisoft Connect, EA and Battle.net installs and Xbox/Game Pass folders
+  are recognised even windowed; Microsoft Store apps are traced to their
+  own process; "Not a game" (× in the top bar) ignores an app for good,
+  undone under Settings → Recording.
 - **HDR** (see `docs/HDR.md`): detection is done; next is tone-mapped
   SDR from HDR games through clip.sh's own FP16 window capture, then
   optional HDR10 recording.

@@ -59,6 +59,8 @@ enum Cmd {
     Screenshot(PathBuf, oneshot::Sender<Result<PathBuf, String>>),
     Configure(RecorderConfig),
     ChooseScreen(oneshot::Sender<Result<(), String>>),
+    /// What to add to the ignore list for the game being recorded.
+    IgnoreEntry(oneshot::Sender<Option<clip_core::game::IgnoredGame>>),
 }
 
 #[derive(Clone)]
@@ -105,6 +107,13 @@ impl Service {
         let (tx, rx) = oneshot::channel();
         self.send(Cmd::Screenshot(clips_dir, tx))?;
         rx.await.map_err(|_| "recorder stopped".to_string())?
+    }
+
+    /// The ignore-list entry for the game being recorded, if any.
+    pub async fn ignore_entry(&self) -> Result<Option<clip_core::game::IgnoredGame>, String> {
+        let (tx, rx) = oneshot::channel();
+        self.send(Cmd::IgnoreEntry(tx))?;
+        rx.await.map_err(|_| "recorder stopped".to_string())
     }
 
     pub fn configure(&self, cfg: RecorderConfig) -> Result<(), String> {
@@ -155,6 +164,7 @@ async fn run(
                     Cmd::ChooseScreen(r) => {
                         drop(r.send(Err("automatic capture is unavailable".into())))
                     }
+                    Cmd::IgnoreEntry(r) => drop(r.send(None)),
                 }
             }
             return;
@@ -221,6 +231,7 @@ async fn run(
                         drop(r.send(res));
                         let _ = app.emit(STATUS_CHANGED, status(&auto, replay_seconds, session.as_ref()));
                     }
+                    Cmd::IgnoreEntry(r) => drop(r.send(auto.ignore_entry())),
                     Cmd::Configure(cfg) => {
                         replay_seconds = cfg.replay_seconds;
                         auto.set_config(cfg);

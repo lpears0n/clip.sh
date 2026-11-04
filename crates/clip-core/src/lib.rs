@@ -7,6 +7,7 @@ pub mod encoder;
 pub mod export;
 pub mod game;
 pub mod hdr;
+pub mod launchers;
 pub mod media;
 pub mod recorder;
 pub mod ring;

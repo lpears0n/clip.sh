@@ -128,7 +128,10 @@ impl AutoRecorder {
     }
 
     pub async fn handle(&mut self, event: Event) -> Result<Option<Change>> {
-        let Event::Games(games) = event;
+        let Event::Games(mut games) = event;
+        // Apps marked "not a game" don't exist as far as recording goes; a
+        // game marked while it records stops on this scan.
+        games.retain(|g| !crate::game::is_ignored(&self.cfg.ignored, &g.game.name, Some(&g.exe)));
         self.running = games;
         if let Some(a) = &self.active {
             let Some(now) = self.running.iter().find(|g| g.game == a.game).cloned() else {
@@ -313,6 +316,21 @@ impl AutoRecorder {
             .encoder
             .filter(|e| e.element(self.cfg.video.codec).is_some())
             .or_else(|| self.probed.get(&self.cfg.video.codec).copied())
+    }
+
+    /// What to put on the ignore list to stop recording the current game
+    /// for good ("not a game").
+    pub fn ignore_entry(&self) -> Option<crate::game::IgnoredGame> {
+        let a = self.active.as_ref()?;
+        let exe = self
+            .running
+            .iter()
+            .find(|g| g.game == a.game)
+            .map(|g| g.exe.clone());
+        Some(crate::game::IgnoredGame {
+            name: a.game.name.clone(),
+            exe,
+        })
     }
 
     /// The recorded game's display, if it is running in HDR.

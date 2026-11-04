@@ -42,6 +42,8 @@ leaves screenshots under `app/tests/shots/`; it runs in CI too. There's also a s
 - Hover a clip for a silent preview; open it to watch or trim. Press `?` in
   the viewer for every keyboard shortcut (speed, frame stepping, in/out
   points, repeat).
+- Detected something that isn't a game? The × next to its name in the
+  top bar stops recording it for good (undo under Settings → Recording).
 - **Settings → Audio** picks which output's sound is recorded as the game
   track (say, only your headset) and which microphone goes on its own
   track. An unplugged device falls back to the default.

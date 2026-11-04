@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use clip_core::{
     Action, AudioSource, Binding, Codec, Encoder, RecorderConfig, VideoConfig, auto::Backend,
+    game::IgnoredGame,
 };
 use serde::{Deserialize, Serialize};
 
@@ -37,6 +38,8 @@ pub struct Settings {
     /// Windows: tone-map HDR games through Desktop Duplication (captures
     /// the game window's area of the screen) when the display is in HDR.
     pub hdr_compatibility: bool,
+    /// Apps marked "not a game"; never recorded.
+    pub ignored_games: Vec<IgnoredGame>,
 
     // Audio
     pub desktop_audio: bool,
@@ -85,6 +88,7 @@ impl Default for Settings {
             cursor: true,
             zero_copy: cfg!(windows),
             hdr_compatibility: false,
+            ignored_games: Vec::new(),
             desktop_audio: true,
             desktop_device: None,
             mic: false,
@@ -147,6 +151,7 @@ impl Settings {
             cursor: self.cursor,
             zero_copy: self.zero_copy,
             hdr_compat: self.hdr_compatibility,
+            ignored: self.ignored_games.clone(),
         }
     }
 

@@ -1,6 +1,6 @@
 <!-- Recorder state, in one place: the right side of the top bar. -->
 <script lang="ts">
-  import { FolderOpen } from '@lucide/svelte'
+  import { FolderOpen, X } from '@lucide/svelte'
   import type { Status } from './api'
 
   let {
@@ -12,6 +12,7 @@
     onsave,
     onopen,
     onchoosescreen,
+    onignore,
   }: {
     status: Status | null
     /** Wall clock from the app's local tick; the buffer fill is derived from it. */
@@ -23,6 +24,8 @@
     onsave: () => void
     onopen: () => void
     onchoosescreen: () => void
+    /** "Not a game": stop recording it and never detect it again. */
+    onignore: () => void
   } = $props()
 
   const recording = $derived(status?.state === 'recording')
@@ -46,6 +49,14 @@
       <span class="size-2 flex-none rounded-full bg-danger"></span>
       <span class="display-face max-w-64 truncate text-body font-semibold">{status?.game}</span>
       <span class="text-secondary text-muted tabular-nums">{buffered}s</span>
+      <button
+        class="btn-icon size-7 text-muted"
+        onclick={onignore}
+        title="Not a game? Stop recording it and don’t detect it again"
+        aria-label="Not a game"
+      >
+        <X size={14} />
+      </button>
     </div>
     <button class="btn-primary relative h-8 overflow-hidden px-3" onclick={onsave} disabled={saving}>
       Clip <kbd class="h-5 border-black/20 bg-black/15 text-on-accent">{hotkey}</kbd>

@@ -14,6 +14,30 @@ pub struct Game {
     pub steam_app_id: Option<u32>,
 }
 
+/// An app the user said isn't a game: never recorded again. Matched by
+/// executable (lower-case file stem) when known, which survives a changing
+/// window title; else by name.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct IgnoredGame {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exe: Option<String>,
+}
+
+impl IgnoredGame {
+    pub fn matches(&self, name: &str, exe: Option<&str>) -> bool {
+        match (&self.exe, exe) {
+            (Some(a), Some(b)) => a.eq_ignore_ascii_case(b),
+            _ => self.name.eq_ignore_ascii_case(name),
+        }
+    }
+}
+
+/// Whether `name` (with executable `exe`, if known) is on the ignore list.
+pub fn is_ignored(list: &[IgnoredGame], name: &str, exe: Option<&str>) -> bool {
+    list.iter().any(|i| i.matches(name, exe))
+}
+
 #[cfg(target_os = "linux")]
 mod proc {
     use super::*;
@@ -318,6 +342,32 @@ pub(crate) fn vdf_value(text: &str, key: &str) -> Option<String> {
         let v = rest.strip_prefix('"')?.strip_suffix('"')?;
         Some(v.replace("\\\\", "\\"))
     })
+}
+
+#[cfg(test)]
+mod ignore_tests {
+    use super::*;
+
+    #[test]
+    fn ignored_games_match_by_exe_then_name() {
+        let list = [
+            IgnoredGame {
+                name: "Some Video Player".into(),
+                exe: Some("vlcish".into()),
+            },
+            IgnoredGame {
+                name: "Benchmark".into(),
+                exe: None,
+            },
+        ];
+        // By executable, whatever the window title says now.
+        assert!(is_ignored(&list, "Movie.mkv - Player", Some("VLCish")));
+        assert!(!is_ignored(&list, "Some Video Player", Some("other")));
+        // By name when the entry or the game has no executable.
+        assert!(is_ignored(&list, "benchmark", Some("bench")));
+        assert!(is_ignored(&list, "Some Video Player", None));
+        assert!(!is_ignored(&list, "Real Game", Some("game")));
+    }
 }
 
 #[cfg(test)]
