@@ -180,12 +180,19 @@ fn fits_an_export_under_a_size_limit() {
     let pipeline = gst::parse::launch(&format!(
         "videotestsrc num-buffers=240 pattern=ball ! video/x-raw,width=1280,height=720,framerate=60/1 \
          ! videoconvert ! x264enc bitrate=8000 key-int-max=60 speed-preset=ultrafast ! h264parse ! mp4mux name=m \
-         ! filesink location={src} \
+         ! filesink name=out \
          audiotestsrc num-buffers=188 samplesperbuffer=1024 ! audio/x-raw,rate=48000,channels=2 \
          ! audioconvert ! {aac} ! aacparse ! m.",
-        src = source.display(),
     ))
+    .unwrap()
+    .downcast::<gst::Bin>()
     .unwrap();
+    // Set as a property, not in the launch string: the launch syntax eats
+    // the backslashes of a Windows path.
+    pipeline
+        .by_name("out")
+        .unwrap()
+        .set_property("location", source.to_str().unwrap());
     pipeline.set_state(gst::State::Playing).unwrap();
     let bus = pipeline.bus().unwrap();
     bus.timed_pop_filtered(gst::ClockTime::from_seconds(60), &[gst::MessageType::Eos])
