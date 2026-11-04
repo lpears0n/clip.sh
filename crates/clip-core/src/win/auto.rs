@@ -51,6 +51,8 @@ struct Active {
     started: Instant,
     /// The game's display, if it is running in HDR.
     hdr: Option<crate::HdrDisplay>,
+    /// Captured with HDR tone mapping (HDR compatibility).
+    tonemapped: bool,
     recorder: Recorder,
 }
 
@@ -224,29 +226,56 @@ impl AutoRecorder {
     async fn start(&mut self, running: RunningGame) -> Result<Change> {
         let mut cfg = self.cfg.clone();
         cfg.encoder = Some(self.resolve_encoder().await?);
-        let target = Target {
+        let hdr = crate::win::display::hdr_display(running.monitor);
+        let window = Target {
             window: running.hwnd,
             cursor: cfg.cursor,
+            hdr_monitor: None,
         };
-        // No fallback to capturing the monitor: that would record the
-        // whole screen, which window capture exists to avoid.
-        let recorder = Recorder::start(&cfg, CaptureSource::Screen(target))
-            .await
-            .with_context(|| format!("can't capture the {} window", running.game.name))?;
-        tracing::info!(game = %running.game.name, hwnd = running.hwnd, "recording (window)");
-        let hdr = crate::win::display::hdr_display(running.monitor);
-        if let Some(h) = hdr {
+        let mut tonemapped = false;
+        let recorder = if let (true, Some(h)) = (cfg.hdr_compat, hdr) {
             tracing::info!(
                 sdr_white_nits = h.sdr_white_nits,
                 peak_nits = h.peak_nits,
-                "the game's display is in HDR; clips are SDR, so HDR highlights clip"
+                "the game's display is in HDR; capturing with tone mapping (HDR compatibility)"
             );
-        }
+            let region = Target {
+                hdr_monitor: Some(running.monitor),
+                ..window
+            };
+            match Recorder::start(&cfg, CaptureSource::Screen(region)).await {
+                Ok(r) => {
+                    tonemapped = true;
+                    r
+                }
+                Err(e) => {
+                    tracing::warn!("HDR capture failed, using window capture: {e:#}");
+                    Self::start_window(&cfg, window, &running.game).await?
+                }
+            }
+        } else {
+            if let Some(h) = hdr {
+                tracing::info!(
+                    sdr_white_nits = h.sdr_white_nits,
+                    peak_nits = h.peak_nits,
+                    "the game's display is in HDR; clips are SDR, so HDR highlights clip \
+                     (turn on HDR compatibility to tone-map them)"
+                );
+            }
+            Self::start_window(&cfg, window, &running.game).await?
+        };
+        tracing::info!(
+            game = %running.game.name,
+            hwnd = running.hwnd,
+            tonemapped,
+            "recording"
+        );
         self.active = Some(Active {
             game: running.game.clone(),
             hwnd: running.hwnd,
             started: Instant::now(),
             hdr,
+            tonemapped,
             recorder,
         });
         Ok(Change::Started(running.game))
@@ -303,6 +332,21 @@ impl AutoRecorder {
     /// The recorded game's display, if it is running in HDR.
     pub fn hdr(&self) -> Option<crate::HdrDisplay> {
         self.active.as_ref().and_then(|a| a.hdr)
+    }
+
+    /// Whether the recording tone-maps HDR (HDR compatibility is on, the
+    /// display is in HDR, and that capture started).
+    pub fn hdr_tonemapped(&self) -> bool {
+        self.active.as_ref().is_some_and(|a| a.tonemapped)
+    }
+
+    /// Window capture of `game`'s window. No fallback to capturing the
+    /// monitor: that would record the whole screen, which window capture
+    /// exists to avoid.
+    async fn start_window(cfg: &RecorderConfig, target: Target, game: &Game) -> Result<Recorder> {
+        Recorder::start(cfg, CaptureSource::Screen(target))
+            .await
+            .with_context(|| format!("can't capture the {} window", game.name))
     }
 
     pub fn current_game(&self) -> Option<&Game> {

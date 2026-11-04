@@ -25,6 +25,8 @@ export interface Status {
   needs_screen: boolean
   /** While recording: the game's display, when it runs in HDR. */
   hdr: { sdr_white_nits: number; peak_nits: number } | null
+  /** While recording: HDR is tone-mapped into the clips. */
+  hdr_tonemapped: boolean
 }
 
 export interface Clip {
@@ -77,6 +79,8 @@ export interface Settings {
   cursor: boolean
   /** Try DMA-BUF capture into GPU memory first; falls back by itself. */
   zero_copy: boolean
+  /** Windows: tone-map HDR games (captures the game's area of the screen). */
+  hdr_compatibility: boolean
   desktop_audio: boolean
   /** Output whose sound is recorded; null = the system default. */
   desktop_device: string | null

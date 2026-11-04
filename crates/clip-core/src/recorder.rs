@@ -44,6 +44,11 @@ pub struct RecorderConfig {
     /// and the GL import path did no better.
     #[serde(default = "zero_copy_default")]
     pub zero_copy: bool,
+    /// Windows: on an HDR display, capture through Desktop Duplication
+    /// with tone mapping (the game window's area of the screen) so HDR
+    /// games look right in clips. Off: window capture, HDR highlights clip.
+    #[serde(default)]
+    pub hdr_compat: bool,
 }
 
 fn zero_copy_default() -> bool {
@@ -89,6 +94,7 @@ impl Default for RecorderConfig {
             audio_bitrate: default_audio_bitrate(),
             cursor: true,
             zero_copy: zero_copy_default(),
+            hdr_compat: false,
         }
     }
 }
@@ -126,9 +132,16 @@ impl CaptureSource {
                 CaptureTarget::Pipewire(PipewireTarget::Serial(s.pipewire_serial()))
             }
             #[cfg(windows)]
-            CaptureSource::Screen(t) => CaptureTarget::Window {
-                hwnd: t.window,
-                cursor: t.cursor,
+            CaptureSource::Screen(t) => match t.hdr_monitor {
+                Some(monitor) => CaptureTarget::HdrRegion {
+                    hwnd: t.window,
+                    monitor,
+                    cursor: t.cursor,
+                },
+                None => CaptureTarget::Window {
+                    hwnd: t.window,
+                    cursor: t.cursor,
+                },
             },
         }
     }

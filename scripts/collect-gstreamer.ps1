@@ -57,3 +57,10 @@ foreach ($e in $required) {
 }
 if ($missing.Count -gt 0) { throw "elements missing from the bundle: $($missing -join ', ')" }
 Write-Host "all $($required.Count) required elements load from the bundle"
+
+# Optional features: the app falls back without them, so warn rather than
+# fail. HDR compatibility (tone-mapped desktop duplication) needs these.
+foreach ($e in @('d3d12screencapturesrc', 'd3d12convert', 'd3d12download')) {
+  & "$Root\bin\gst-inspect-1.0.exe" $e *> $null
+  if ($LASTEXITCODE -ne 0) { Write-Warning "optional element missing from the bundle: $e (HDR compatibility falls back to window capture)" }
+}

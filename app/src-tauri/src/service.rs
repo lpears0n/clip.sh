@@ -49,6 +49,8 @@ pub struct Status {
     pub needs_screen: bool,
     /// While recording: the game's display, if it is running in HDR.
     pub hdr: Option<clip_core::HdrDisplay>,
+    /// While recording: HDR is tone-mapped into the clips.
+    pub hdr_tonemapped: bool,
 }
 
 enum Cmd {
@@ -141,6 +143,7 @@ async fn run(
                 backend: None,
                 needs_screen: false,
                 hdr: None,
+                hdr_tonemapped: false,
             };
             while let Some(cmd) = cmds.recv().await {
                 match cmd {
@@ -287,5 +290,6 @@ fn status(
         backend: Some(auto.backend()),
         needs_screen: auto.needs_screen(),
         hdr: auto.hdr(),
+        hdr_tonemapped: auto.hdr_tonemapped(),
     }
 }
