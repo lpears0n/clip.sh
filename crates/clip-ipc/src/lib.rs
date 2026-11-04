@@ -1,5 +1,5 @@
-//! The clip.sh control socket: one JSON request per line, one JSON response
-//! per line. The app listens at [`socket_path`]; `clipsh` and the app itself
+//! The Reruns control socket: one JSON request per line, one JSON response
+//! per line. The app listens at [`socket_path`]; `rerunsctl` and the app itself
 //! (to find an already-running instance) connect to it.
 
 use std::{
@@ -55,13 +55,13 @@ impl Response {
     }
 }
 
-/// Linux: `$XDG_RUNTIME_DIR/clipsh.sock` (per user, cleaned up at logout).
-/// Windows: the named pipe `\\.\pipe\clipsh-<user>`.
+/// Linux: `$XDG_RUNTIME_DIR/reruns.sock` (per user, cleaned up at logout).
+/// Windows: the named pipe `\\.\pipe\reruns-<user>`.
 pub fn socket_path() -> PathBuf {
     #[cfg(windows)]
     {
         let user = std::env::var("USERNAME").unwrap_or_else(|_| "user".into());
-        PathBuf::from(format!("\\\\.\\pipe\\clipsh-{user}"))
+        PathBuf::from(format!("\\\\.\\pipe\\reruns-{user}"))
     }
     #[cfg(not(windows))]
     {
@@ -69,9 +69,9 @@ pub fn socket_path() -> PathBuf {
             .map(PathBuf::from)
             .unwrap_or_else(|| {
                 let user = std::env::var("USER").unwrap_or_else(|_| "user".into());
-                std::env::temp_dir().join(format!("clipsh-{user}"))
+                std::env::temp_dir().join(format!("reruns-{user}"))
             });
-        dir.join("clipsh.sock")
+        dir.join("reruns.sock")
     }
 }
 

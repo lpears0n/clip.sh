@@ -1,12 +1,12 @@
 [package]
-name = "clip-sh"
+name = "reruns"
 description = "Instant-replay game clipping for Linux"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [lib]
-name = "clip_sh_lib"
+name = "reruns_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
@@ -25,7 +25,7 @@ tracing-subscriber.workspace = true
 tokio.workspace = true
 tauri-plugin-dialog = "2"
 trash = "5"
-clip-ipc = { version = "0.1.0", path = "../../crates/clip-ipc" }
+clip-ipc = { version = "1.0.0", path = "../../crates/clip-ipc" }
 tauri-plugin-window-state = "2"
 notify-debouncer-full = "0.5"
 tauri-plugin-updater = "2"

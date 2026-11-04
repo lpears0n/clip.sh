@@ -1,4 +1,4 @@
-# clip.sh on Windows
+# Reruns on Windows
 
 The Windows build captures the **game's window** with **Windows Graphics
 Capture** and keeps every frame on the GPU: `d3d11screencapturesrc` (WGC
@@ -43,7 +43,7 @@ compositor's copy is the only extra work the GPU does.
   click-through, never-focused window kept on top of the game for a few
   seconds, not a hook into the game (which anti-cheat flags). It is shown
   with `SW_SHOWNOACTIVATE` so a fullscreen game keeps focus, placed at the
-  game window's top-right, and skipped when clip.sh itself is in front.
+  game window's top-right, and skipped when Reruns itself is in front.
   While visible it makes Windows compose the game, so it stays brief.
   Untested so far: whether it appears over exclusive-fullscreen games.
 - **Fixed encode size.** A window can change size mid-game (resolution
@@ -57,7 +57,7 @@ compositor's copy is the only extra work the GPU does.
   keeps the play session (no second "Ready to record").
 - The capture source now runs at the recording frame rate. Left to
   itself it settled on 30 fps and every clip had each frame twice.
-- The app logs to `%LOCALAPPDATA%\sh.clip.app\logs\clip.sh.log` (there is
+- The app logs to `%LOCALAPPDATA%\gg.reruns.app\logs\Reruns.log` (there is
   no terminal to print to). A crash shows a message box with the reason and
   that path. `RUST_LOG=debug` and `GST_DEBUG=2` in the environment make the
   log more talkative; `GST_DEBUG` names any element that fails to load.
@@ -83,7 +83,7 @@ pnpm tauri dev
 
 `pnpm tauri build` produces an NSIS installer under
 `target\release\bundle\nsis\`. Run `pwsh scripts/collect-gstreamer.ps1`
-first: it copies GStreamer's libraries and the plugins clip.sh uses into
+first: it copies GStreamer's libraries and the plugins Reruns uses into
 `app/src-tauri/gst/`, and `tauri.windows.conf.json` bundles them next to
 the executable (libraries) and under `gst-plugins/` (plugins). At startup
 the app points GStreamer at that folder, so users install nothing else.
@@ -100,7 +100,7 @@ The release workflow does this automatically.
 | Hotkey | KGlobalAccel / GlobalShortcuts portal | `tauri-plugin-global-shortcut` (`RegisterHotKey`) |
 | Notifications, sound | D-Bus, freedesktop sounds | `tauri-plugin-notification`, `PlaySound` alias |
 | Autostart | XDG autostart entry | `HKCU\...\Run` value |
-| Control socket | Unix socket in `$XDG_RUNTIME_DIR` | named pipe `\\.\pipe\clipsh-<user>` |
+| Control socket | Unix socket in `$XDG_RUNTIME_DIR` | named pipe `\\.\pipe\reruns-<user>` |
 | Disk space | `statvfs` | `GetDiskFreeSpaceExW` |
 
 Everything else (ring buffer, save, export, library, thumbnails, watcher,

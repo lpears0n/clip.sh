@@ -109,7 +109,7 @@ impl Kwin {
 
         let (cmds_tx, cmds_rx) = mpsc::channel();
         let thread = std::thread::Builder::new()
-            .name("clipsh-kwin".into())
+            .name("reruns-kwin".into())
             .spawn(move || {
                 if let Err(e) = run(conn, queue, state, cmds_rx) {
                     tracing::error!("KWin connection ended: {e:#}");

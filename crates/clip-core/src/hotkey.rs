@@ -3,14 +3,14 @@
 //! 2. The GlobalShortcuts portal (GNOME, Hyprland, other portal backends):
 //!    the desktop confirms the bindings once and lets the user change them.
 //!
-//! Where neither exists, the user binds `clipsh save` (and friends) in their
+//! Where neither exists, the user binds `rerunsctl save` (and friends) in their
 //! desktop's keyboard settings instead. Windows registers its hotkeys in the
 //! app through the OS; only [`Action`] and [`Binding`] are shared with it.
 
 use serde::{Deserialize, Serialize};
 
 /// What a hotkey does. Each action is one entry in the desktop's shortcut
-/// settings and one line of `clipsh`.
+/// settings and one line of `rerunsctl`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Action {
@@ -164,9 +164,9 @@ mod linux {
     }
 
     async fn bind_portal(bindings: &[Binding]) -> Result<(Inner, mpsc::UnboundedReceiver<Action>)> {
-        let proxy = GlobalShortcuts::new()
-            .await
-            .context("no global shortcuts portal; bind `clipsh save` in your desktop settings")?;
+        let proxy = GlobalShortcuts::new().await.context(
+            "no global shortcuts portal; bind `rerunsctl save` in your desktop settings",
+        )?;
         let session = proxy.create_session(Default::default()).await?;
         let mut shortcuts = Vec::with_capacity(bindings.len());
         for b in bindings {

@@ -516,7 +516,7 @@ dependencies = [
 
 [[package]]
 name = "clip-core"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "ashpd",
@@ -542,46 +542,9 @@ dependencies = [
 
 [[package]]
 name = "clip-ipc"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "serde",
- "serde_json",
-]
-
-[[package]]
-name = "clip-sh"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clip-core",
- "clip-ipc",
- "dirs",
- "notify-debouncer-full",
- "rustix",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-global-shortcut",
- "tauri-plugin-notification",
- "tauri-plugin-opener",
- "tauri-plugin-updater",
- "tauri-plugin-window-state",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "trash",
- "windows 0.61.3",
- "winreg 0.55.0",
- "zbus",
-]
-
-[[package]]
-name = "clipsh"
-version = "0.1.0"
-dependencies = [
- "clip-ipc",
  "serde_json",
 ]
 
@@ -3518,6 +3481,43 @@ dependencies = [
  "wasm-bindgen-futures",
  "wasm-streams",
  "web-sys",
+]
+
+[[package]]
+name = "reruns"
+version = "1.0.0"
+dependencies = [
+ "anyhow",
+ "clip-core",
+ "clip-ipc",
+ "dirs",
+ "notify-debouncer-full",
+ "rustix",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-global-shortcut",
+ "tauri-plugin-notification",
+ "tauri-plugin-opener",
+ "tauri-plugin-updater",
+ "tauri-plugin-window-state",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "trash",
+ "windows 0.61.3",
+ "winreg 0.55.0",
+ "zbus",
+]
+
+[[package]]
+name = "rerunsctl"
+version = "1.0.0"
+dependencies = [
+ "clip-ipc",
+ "serde_json",
 ]
 
 [[package]]

@@ -15,10 +15,10 @@ mod imp {
     //!
     //!     cargo run -p clip-core --example kwin_windows            # list
     //!     cargo run -p clip-core --example kwin_windows -- <app_id substring>
-    //!     CLIPSH_SHOT=out.png cargo run -p clip-core --example kwin_windows -- <app_id>
+    //!     RERUNS_SHOT=out.png cargo run -p clip-core --example kwin_windows -- <app_id>
     //!
     //! Needs a .desktop file granting the restricted protocols; see
-    //! `packaging/clip-sh-dev.desktop`.
+    //! `packaging/reruns-dev.desktop`.
 
     use std::collections::HashMap;
 
@@ -206,11 +206,11 @@ mod imp {
         let serial = app.serial.unwrap();
         println!("pipewire object serial {serial}");
 
-        // CLIPSH_LAUNCH runs a custom pipeline ("{serial}" is substituted, must
-        // contain an element named "sink"); CLIPSH_SHOT=<file.png> saves one
+        // RERUNS_LAUNCH runs a custom pipeline ("{serial}" is substituted, must
+        // contain an element named "sink"); RERUNS_SHOT=<file.png> saves one
         // frame; otherwise frames are counted.
-        let custom = std::env::var("CLIPSH_LAUNCH").ok();
-        let launch = match std::env::var("CLIPSH_SHOT") {
+        let custom = std::env::var("RERUNS_LAUNCH").ok();
+        let launch = match std::env::var("RERUNS_SHOT") {
             _ if custom.is_some() => custom.unwrap().replace("{serial}", &serial.to_string()),
             Ok(out) => format!(
                 "pipewiresrc target-object={serial} num-buffers=1 ! videoconvert ! pngenc ! identity name=sink ! filesink location={out}"

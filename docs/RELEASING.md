@@ -8,15 +8,18 @@ before: unsigned installers, and apps that never look for updates.
 
 1. Bump the version in three places to the same number:
    `Cargo.toml` (`[workspace.package] version`), `app/package.json` and
-   `app/src-tauri/tauri.conf.json`.
-2. Commit, tag and push from your machine:
+   `app/src-tauri/tauri.conf.json`. The Release workflow refuses a tag
+   that doesn't match this version.
+2. Write the notes in `docs/release-notes/v<version>.md`; they become the
+   draft release's description.
+3. Commit, tag and push from your machine:
 
    ```bash
    git tag v0.2.0
    git push origin v0.2.0
    ```
 
-3. The Release workflow builds the Windows and Linux installers and puts
+4. The Release workflow builds the Windows and Linux installers and puts
    them in a **draft** release. Write the notes and publish it.
 
 Installed copies find a published release within six hours, or straight
@@ -33,10 +36,10 @@ never goes into the repository.
 1. On your machine, from `app/`, make the key pair and pick a password:
 
    ```bash
-   pnpm tauri signer generate -w ~/.tauri/clipsh.key
+   pnpm tauri signer generate -w ~/.tauri/rerunsctl.key
    ```
 
-   This writes `~/.tauri/clipsh.key` (private) and `~/.tauri/clipsh.key.pub`
+   This writes `~/.tauri/rerunsctl.key` (private) and `~/.tauri/rerunsctl.key.pub`
    (public). Back the private key up somewhere safe. **If it is lost,
    installed copies can never update again**, and everyone has to reinstall
    by hand.
@@ -45,9 +48,9 @@ never goes into the repository.
 
    | Kind | Name | Value |
    | --- | --- | --- |
-   | Secret | `TAURI_SIGNING_PRIVATE_KEY` | the contents of `clipsh.key` |
+   | Secret | `TAURI_SIGNING_PRIVATE_KEY` | the contents of `rerunsctl.key` |
    | Secret | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | its password |
-   | Variable | `UPDATER_PUBKEY` | the contents of `clipsh.key.pub` |
+   | Variable | `UPDATER_PUBKEY` | the contents of `rerunsctl.key.pub` |
 
 The next tagged release then also:
 
@@ -97,7 +100,7 @@ companies in the regions it supports. Microsoft verifies your identity.
    account name and profile name:
 
    ```
-   trusted-signing-cli -e https://eus.codesigning.azure.net -a <account> -c <profile> -d clip.sh %1
+   trusted-signing-cli -e https://eus.codesigning.azure.net -a <account> -c <profile> -d Reruns %1
    ```
 
 The workflow installs `trusted-signing-cli` when the command starts with

@@ -129,7 +129,7 @@ mod tests {
     /// `<tmp>/Game/{a, b_edit, c}.mp4`, 1000 bytes each, oldest to newest.
     fn library() -> PathBuf {
         let root = std::env::temp_dir().join(format!(
-            "clipsh-storage-{}-{:?}",
+            "reruns-storage-{}-{:?}",
             std::process::id(),
             std::thread::current().id()
         ));

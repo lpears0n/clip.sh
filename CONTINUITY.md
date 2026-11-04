@@ -1,4 +1,16 @@
-# clip.sh: continuity notes
+# Reruns (formerly clip.sh): continuity notes
+
+**Renamed to Reruns for v1.0.0.** Older entries below use the old names.
+Mapping: clip.sh → Reruns (display name); `sh.clip.app` → `gg.reruns.app`
+(identifier, Windows data/log folder); `clip-sh` → `reruns` (app
+executable, desktop file, icon, AUR package); `clipsh` → `rerunsctl`
+(CLI; it can't share the app's executable name); `~/.config|.cache|
+.local/share/clip.sh` → `…/reruns`; `~/Videos/clip.sh` → `~/Videos/Reruns`;
+`CLIPSH_*` env vars → `RERUNS_*`; socket `reruns.sock`, pipe
+`\\.\pipe\reruns-<user>`, KGlobalAccel component `reruns`. Internal crate
+names (`clip-core`, `clip-ipc`; the CLI crate is `rerunsctl`) and the
+GitHub repo name `lpears0n/clip.sh` are unchanged. Nothing migrates old
+settings or clips: there were no released users.
 
 Last updated: 2026-11-04. Current plans live in the repo: `docs/ROADMAP.md`
 (features, platforms), `docs/DESIGN.md` (design system, performance budgets),
@@ -231,13 +243,14 @@ Ad slots: AdSlot component, off unless `"ads": true` in settings.json (728×90 u
   checksum, so the job died before building. Both workflows now retry the
   install up to 3 times (checksum check kept). Linux runners also hung on
   `apt-get` twice on 2026-11-04 (GitHub mirror); a re-run fixed it.
-- Draft release `v0.1.0` is still unpublished; tag at `2626033` (the
-  PR #2 merge).
+- Old draft release `v0.1.0` (tag at `2626033`, built as clip.sh) is
+  stale; the owner deletes the draft and the tag.
 - Old branches are deleted; `main` is the only long-lived branch.
-- Name: the owner is considering renaming the app to **Reruns**
-  (domain reruns.gg, identifier `gg.reruns.app`, CLI `reruns`). Do the
-  rename in one PR with a LICENSE file (GPL-3.0) and the bundle
-  publisher field, before the first public release.
+- v1.0.0 prep (branch `rename-to-reruns`): rename to Reruns, LICENSE
+  (GPL-3.0), bundle publisher/copyright "Lucas Pearson", version 1.0.0,
+  release notes in `docs/release-notes/v1.0.0.md`. The Release workflow
+  now uses `docs/release-notes/<tag>.md` as the draft's description and
+  fails a tag that doesn't match the app version.
 - Signing: updater key is free (see `docs/RELEASING.md`). Windows
   Authenticode options: SignPath Foundation (free for OSS, needs the
   LICENSE file), Azure Trusted Signing (individuals: US/Canada only, paid
@@ -245,10 +258,11 @@ Ad slots: AdSlot component, off unless `"ads": true` in settings.json (728×90 u
   Store (free, but only signs MSIX).
 
 ## Next, in order
-1. Windows run on the owner's machine of what landed: capture restart +
+1. v1.0.0: owner adds the updater key secrets (`docs/RELEASING.md`), then
+   tags `v1.0.0` on `main`; the Release workflow makes the draft. Owner
+   reviews and publishes it. Then apply to SignPath for Windows signing.
+2. Windows run on the owner's machine of what landed: capture restart +
    fixed-size letterbox (#4 noted these as unverified), HDR compatibility.
-2. Updater + signing setup (one-time secrets, `docs/RELEASING.md`), then
-   tag a release from `main` and publish it.
 3. HDR window capture (#13) on a real HDR display; it is off by default
    and marked experimental until then.
 4. Roadmap phase 2 (editor) per `docs/ROADMAP.md`.

@@ -1,4 +1,4 @@
-//! User settings, stored as JSON in `$XDG_CONFIG_HOME/clip.sh/settings.json`.
+//! User settings, stored as JSON in `$XDG_CONFIG_HOME/reruns/settings.json`.
 
 use std::path::PathBuf;
 
@@ -16,7 +16,7 @@ pub struct Settings {
     pub launch_at_login: bool,
     /// When launched at login, stay in the tray instead of opening the window.
     pub start_in_tray: bool,
-    /// Closing the window keeps clip.sh running in the tray (otherwise quits).
+    /// Closing the window keeps Reruns running in the tray (otherwise quits).
     pub close_to_tray: bool,
     pub notify_on_save: bool,
     pub sound_on_save: bool,
@@ -63,7 +63,7 @@ pub struct Settings {
     pub audio_bitrate_kbps: u32,
 
     /// Capture backend: `None` = KWin window capture when available, else the
-    /// screen-cast portal. Applies on the next start of clip.sh.
+    /// screen-cast portal. Applies on the next start of Reruns.
     pub capture_backend: Option<Backend>,
 
     /// Global "save clip" hotkey, e.g. `F8` or `Ctrl+Shift+S`.
@@ -84,7 +84,7 @@ pub struct Settings {
     pub ads: bool,
 }
 
-/// A save sound: the one that ships with clip.sh, or a file the user
+/// A save sound: the one that ships with Reruns, or a file the user
 /// imported (a copy in the config folder, see `system::import_sound`).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "lowercase")]
@@ -144,7 +144,7 @@ impl Settings {
     fn path() -> PathBuf {
         dirs::config_dir()
             .unwrap_or_else(|| PathBuf::from("."))
-            .join("clip.sh/settings.json")
+            .join("reruns/settings.json")
     }
 
     /// Load settings, falling back to defaults if the file is missing or bad.

@@ -1,6 +1,6 @@
-# clip.sh design and performance guide
+# Reruns design and performance guide
 
-How clip.sh should look, feel and perform, and why. Written after a research
+How Reruns should look, feel and perform, and why. Written after a research
 pass over current UI craft guidance (Linear, Raycast, *Refactoring UI*, Emil
 Kowalski's animation work, Nielsen Norman Group), WebKitGTK and Tauri
 performance reports, and GStreamer zero-copy capture work. Sources are
@@ -29,7 +29,7 @@ a disaster; together they are what people mean by "vibecoded".
 | Generic empty thumbnails | Clapperboard icon centred in a dark box | A placeholder should look like the thing it stands in for: a dim 16:9 gradient with the game's colour, or a blurred cover. |
 | Mixed voice in copy | "Play something." / "Waiting for a game" / "Can't capture:" / sentence-case titles with periods in some places | Pick one voice: sentence case, no trailing periods on labels, periods on full sentences only. |
 | Uniform weight | Everything is 500 or 600 Inter | Hierarchy comes from size *and* weight *and* colour. Headings at 600 with tight tracking, body at 450–500, metadata at 400 in the muted colour. |
-| Wordmark in the header | `clip.sh` in the top-left, orange suffix | A fine mark, but the header has nothing else on the left, so it looks like a placeholder. Either make the header carry navigation or drop the header into the sidebar. |
+| Wordmark in the header | `Reruns` in the top-left, orange suffix | A fine mark, but the header has nothing else on the left, so it looks like a placeholder. Either make the header carry navigation or drop the header into the sidebar. |
 | Tailwind defaults showing through | `zinc-100`, `zinc-700`, `bg-white/10` hover | The palette should be ours end to end, with named roles, so a change to the base tint moves everything. |
 
 What is already right and should be kept: dark-first, a single accent,
@@ -194,7 +194,7 @@ well-documented weak spots, and both are things the current UI does.
    set unconditionally as an old AppImage workaround; removing them took
    theme-change frames from ~500 ms to ~27 ms and idle CPU from 83% to <1%.
    Tauri's own Linux graphics page says the same: never ship those
-   variables unconditionally. clip.sh does not set them. If NVIDIA users
+   variables unconditionally. Reruns does not set them. If NVIDIA users
    report blank windows, the first fix is `__NV_DISABLE_EXPLICIT_SYNC=1`
    (no cost), then the DMABUF variable, only for that user.
 4. **Scrolling over fixed blurred/shadowed layers is the worst case.** Our
@@ -379,7 +379,7 @@ the commit history); the audit table above describes the UI before them.
    `pipewiresrc` into `glupload → glcolorscale → glcolorconvert` (NVENC) or
    `vapostproc` (VA-API); the recorder gives it four seconds to deliver a
    first frame and otherwise rebuilds on the copy path. Settings → Recording
-   shows which path is live. `CLIPSH_ZERO_COPY=0 cargo run --example record`
+   shows which path is live. `RERUNS_ZERO_COPY=0 cargo run --example record`
    forces the copy path for an A/B frame-rate comparison. This could not be
    exercised in the development container (no PipeWire, no GPU), so the first
    run on real hardware is the verification step. Default is off on Linux:

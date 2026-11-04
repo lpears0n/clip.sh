@@ -1,4 +1,4 @@
-//! HDR displays. clip.sh records SDR video; when the game's display runs in
+//! HDR displays. Reruns records SDR video; when the game's display runs in
 //! HDR, what the capture hands over is clipped to SDR, so bright highlights
 //! blow out. Knowing that (and the display's levels) is the first step to
 //! tone mapping it properly. See `docs/HDR.md`.

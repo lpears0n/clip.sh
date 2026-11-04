@@ -15,8 +15,8 @@ mod imp {
     //!
     //!     cargo run -p clip-core --example replay -- [replay_seconds] [--mic]
     //!
-    //! Clips go to ~/Videos/clip.sh/Desktop/. Type `q` + Enter to quit.
-    //! Set CLIPSH_RESTORE_TOKEN to the printed token to skip the picker next time.
+    //! Clips go to ~/Videos/Reruns/Desktop/. Type `q` + Enter to quit.
+    //! Set RERUNS_RESTORE_TOKEN to the printed token to skip the picker next time.
 
     use anyhow::Result;
     use clip_core::{
@@ -43,14 +43,14 @@ mod imp {
         if args.iter().any(|a| a == "--mic") {
             cfg.audio.push(AudioSource::Mic(None));
         }
-        cfg.encoder = match std::env::var("CLIPSH_ENCODER").ok().as_deref() {
+        cfg.encoder = match std::env::var("RERUNS_ENCODER").ok().as_deref() {
             Some("nvenc") => Some(Encoder::Nvenc),
             Some("vaapi") => Some(Encoder::Vaapi),
             Some("x264") => Some(Encoder::X264),
             _ => None,
         };
 
-        let token = std::env::var("CLIPSH_RESTORE_TOKEN").ok();
+        let token = std::env::var("RERUNS_RESTORE_TOKEN").ok();
         let source = ScreenSource::open(token.as_deref()).await?;
         let recorder = Recorder::start(&cfg, CaptureSource::Portal(source)).await?;
         if let Some(t) = recorder.restore_token() {

@@ -15,7 +15,7 @@ mod imp {
     //!
     //!     cargo run -p clip-core --example record -- [seconds] [out.mp4]
     //!
-    //! Set CLIPSH_RESTORE_TOKEN to the printed token to skip the picker next time.
+    //! Set RERUNS_RESTORE_TOKEN to the printed token to skip the picker next time.
 
     use std::time::Duration;
 
@@ -37,7 +37,7 @@ mod imp {
         let seconds: u64 = args.next().map(|s| s.parse()).transpose()?.unwrap_or(10);
         let out = args.next().unwrap_or_else(|| "record.mp4".into());
 
-        let encoder = match std::env::var("CLIPSH_ENCODER").ok().as_deref() {
+        let encoder = match std::env::var("RERUNS_ENCODER").ok().as_deref() {
             Some("nvenc") => Encoder::Nvenc,
             Some("vaapi") => Encoder::Vaapi,
             Some("x264") => Encoder::X264,
@@ -45,7 +45,7 @@ mod imp {
         };
         println!("encoder: {encoder:?}");
 
-        let token = std::env::var("CLIPSH_RESTORE_TOKEN").ok();
+        let token = std::env::var("RERUNS_RESTORE_TOKEN").ok();
         let source = ScreenSource::open(token.as_deref()).await?;
         println!(
             "pipewire node {} size {:?}",
@@ -58,8 +58,8 @@ mod imp {
 
         let cfg = VideoConfig::default();
         let pipeline = gst::Pipeline::new();
-        // CLIPSH_ZERO_COPY=0 forces the system-memory path for comparison.
-        let path = if std::env::var("CLIPSH_ZERO_COPY").is_ok_and(|v| v == "0")
+        // RERUNS_ZERO_COPY=0 forces the system-memory path for comparison.
+        let path = if std::env::var("RERUNS_ZERO_COPY").is_ok_and(|v| v == "0")
             || encoder.gpu_memory().is_none()
         {
             CapturePath::Copy

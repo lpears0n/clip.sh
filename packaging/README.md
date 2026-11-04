@@ -1,8 +1,8 @@
 # Packaging
 
 - `aur/PKGBUILD` — Arch package built from a release tag. Bump `pkgver`, run
-  `updpkgsums`, test with `makepkg -si`, then push to the AUR as `clip-sh`.
-- `clip-sh.desktop` — the launcher entry the PKGBUILD installs; Tauri's own
+  `updpkgsums`, test with `makepkg -si`, then push to the AUR as `reruns`.
+- `reruns.desktop` — the launcher entry the PKGBUILD installs; Tauri's own
   bundlers (AppImage / deb / rpm, built by `.github/workflows/release.yml`)
   generate their own from `tauri.conf.json`.
 

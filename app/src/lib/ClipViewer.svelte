@@ -274,7 +274,7 @@
     [50, '50 MB · Nitro Basic'],
     [500, '500 MB · Nitro'],
   ]
-  const SIZE_KEY = 'clipsh.export-size'
+  const SIZE_KEY = 'reruns.export-size'
   let sizeMb = $state(readSize())
   let plan = $state<ExportPlan | null>(null)
   let planError = $state<string | null>(null)

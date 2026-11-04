@@ -74,7 +74,7 @@ const NOT_GAMES: &[&str] = &[
     "obs64",
     "obs32",
     "medal",
-    "clip-sh",
+    "reruns",
     "vlc",
     "mpv",
     "wmplayer",

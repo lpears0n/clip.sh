@@ -2,9 +2,9 @@
 //! because the Windows build is a windowed executable with no terminal: a
 //! panic there would otherwise close the app without a word.
 //!
-//! The file is `<local data>/sh.clip.app/logs/clip.sh.log` on Windows
-//! (`%LOCALAPPDATA%\sh.clip.app\logs`) and `<local data>/clip.sh/logs` on
-//! Linux (`~/.local/share/clip.sh/logs`), rotated once past a few MB.
+//! The file is `<local data>/gg.reruns.app/logs/reruns.log` on Windows
+//! (`%LOCALAPPDATA%\gg.reruns.app\logs`) and `<local data>/reruns/logs` on
+//! Linux (`~/.local/share/reruns/logs`), rotated once past a few MB.
 
 use std::{
     fs::{File, OpenOptions},
@@ -18,14 +18,14 @@ const MAX_BYTES: u64 = 5 * 1024 * 1024;
 
 pub fn log_path() -> PathBuf {
     let app_dir = if cfg!(windows) {
-        "sh.clip.app"
+        "gg.reruns.app"
     } else {
-        "clip.sh"
+        "reruns"
     };
     dirs::data_local_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join(app_dir)
-        .join("logs/clip.sh.log")
+        .join("logs/reruns.log")
 }
 
 /// Install the subscriber and a panic hook that records the panic before
@@ -78,7 +78,7 @@ fn show_error(message: &str) {
         MessageBoxW(
             None,
             &HSTRING::from(text),
-            &HSTRING::from("clip.sh"),
+            &HSTRING::from("Reruns"),
             MB_OK | MB_ICONERROR,
         );
     }

@@ -1,5 +1,5 @@
 //! The clip library: `<clips_dir>/<game>/<timestamp>.mp4`, with thumbnails,
-//! sprite sheets and durations cached in `$XDG_CACHE_HOME/clip.sh/thumbs/`.
+//! sprite sheets and durations cached in `$XDG_CACHE_HOME/reruns/thumbs/`.
 //! Reading the library never decodes video; `generate` does that, from the
 //! thumbnail pool.
 
@@ -160,7 +160,7 @@ struct CachedInfo {
 pub fn cache_dir() -> PathBuf {
     dirs::cache_dir()
         .unwrap_or_else(|| PathBuf::from("/tmp"))
-        .join("clip.sh/thumbs")
+        .join("reruns/thumbs")
 }
 
 /// A clip file found on disk, without decoding it.
@@ -433,7 +433,7 @@ mod tests {
         assert_eq!(trim_markers(&[1.0, 4.5, 9.0, 12.0], 4.0, 10.0), [0.5, 5.0]);
         assert!(trim_markers(&[1.0], 2.0, 3.0).is_empty());
 
-        let dir = std::env::temp_dir().join(format!("clipsh-markers-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("reruns-markers-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let (src, out) = (dir.join("a.mp4"), dir.join("a_edit.mp4"));
         let m = ClipMeta {

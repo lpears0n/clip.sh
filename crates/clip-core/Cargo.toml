@@ -1,6 +1,6 @@
 [package]
 name = "clip-core"
-description = "Capture, encode and instant-replay buffer for clip.sh"
+description = "Capture, encode and instant-replay buffer for Reruns"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

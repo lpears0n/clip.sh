@@ -1,4 +1,4 @@
-//! The control socket (`clipsh save` etc.), and single-instance handling: a
+//! The control socket (`rerunsctl save` etc.), and single-instance handling: a
 //! second launch finds the socket, asks the running app to show itself, and
 //! exits.
 
@@ -8,7 +8,7 @@ use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader
 
 use crate::AppState;
 
-/// If clip.sh is already running, bring its window up and return true.
+/// If Reruns is already running, bring its window up and return true.
 pub fn hand_off_to_running_instance() -> bool {
     // An error means no socket, or a stale one from a crash: we're the only
     // instance.
@@ -48,7 +48,7 @@ pub fn serve(app: AppHandle) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Named pipe `\\.\pipe\clipsh-<user>`; one instance per connection, as
+/// Named pipe `\\.\pipe\reruns-<user>`; one instance per connection, as
 /// Windows pipes work.
 #[cfg(windows)]
 pub fn serve(app: AppHandle) -> anyhow::Result<()> {

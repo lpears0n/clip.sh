@@ -3,7 +3,7 @@
 
 import type { Clip, GameEntry } from './api'
 
-const KEY = 'clip.sh/library'
+const KEY = 'reruns/library'
 /** Don't let a huge library make startup slower than it saves. */
 const MAX_CLIPS = 2000
 

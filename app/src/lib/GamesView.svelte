@@ -135,7 +135,7 @@
   <div class="mx-auto flex h-full max-w-2xl flex-col justify-center">
     <h1 class="display-face text-display font-semibold">Play something</h1>
     <p class="mt-2 text-body text-muted">
-      Games you play show up here. clip.sh keeps the last {settings ? settings.replay_seconds : 30} seconds in memory while
+      Games you play show up here. Reruns keeps the last {settings ? settings.replay_seconds : 30} seconds in memory while
       you play, so a moment is never lost.
     </p>
 

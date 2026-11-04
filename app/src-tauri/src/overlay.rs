@@ -110,7 +110,7 @@ mod imp {
     /// Create the (hidden) overlay window. Call once, at startup.
     pub fn create(app: &AppHandle) -> tauri::Result<()> {
         let window = WebviewWindowBuilder::new(app, LABEL, WebviewUrl::App("overlay.html".into()))
-            .title("clip.sh overlay")
+            .title("Reruns overlay")
             .inner_size(WIDTH, HEIGHT)
             .resizable(false)
             .decorations(false)
@@ -127,7 +127,7 @@ mod imp {
     }
 
     /// Show `popup` over the game in the foreground. Nothing happens when
-    /// clip.sh itself is in front: the app shows its own toast then.
+    /// Reruns itself is in front: the app shows its own toast then.
     pub fn show(app: &AppHandle, popup: Popup) {
         let Some(window) = app.get_webview_window(LABEL) else {
             return;

@@ -35,7 +35,7 @@ function fixtures(scenario) {
     for (let k = 0; k < g.clip_count * mult; k++) {
       const t = now - (i * 7 + 1) * h
       clips.push({
-        path: `/home/u/Videos/clip.sh/${g.name}/clip-${i}.mp4`, game: g.name, name: `clip-${i}`, created_ms: t,
+        path: `/home/u/Videos/Reruns/${g.name}/clip-${i}.mp4`, game: g.name, name: `clip-${i}`, created_ms: t,
         size_bytes: 60e6 + i * 9e6, duration: 20 + (i % 5) * 11, audio_tracks: 2, is_edit: i % 6 === 0,
         steam_app_id: g.steam_app_id, thumbnail: null, sprite: null, sprite_frames: 10,
         title: i === 1 ? 'Malenia no-hit (finally)' : null, favorite: i % 4 === 1,
@@ -51,7 +51,7 @@ function fixtures(scenario) {
       ? { state: 'waiting', game: null, steam_app_id: null, session_start_ms: null, buffered_seconds: 0, replay_seconds: 30, encoder: null, capture_path: null, error: null, backend: 'portal', needs_screen: true, hdr: null, hdr_tonemapped: false }
       : { state: 'recording', game: 'ELDEN RING', steam_app_id: 1245620, session_start_ms: now - h, buffered_seconds: 30, replay_seconds: 30, encoder: 'nvenc', capture_path: 'zerocopy', error: null, backend: 'kwin', needs_screen: false, hdr: { sdr_white_nits: 240, peak_nits: 1000 }, hdr_tonemapped: false },
     get_settings: {
-      replay_seconds: 30, mic: true, clips_dir: '/home/u/Videos/clip.sh', hotkey: 'F8', screenshot_hotkey: 'F9', marker_hotkey: 'F7', capture_backend: null,
+      replay_seconds: 30, mic: true, clips_dir: '/home/u/Videos/Reruns', hotkey: 'F8', screenshot_hotkey: 'F9', marker_hotkey: 'F7', capture_backend: null,
       launch_at_login: false, start_in_tray: true, close_to_tray: true, notify_on_save: true, sound_on_save: true, sound_volume: 100, clip_sound: { kind: 'builtin' }, screenshot_sound: null, overlay: true, check_for_updates: true,
       fps: 60, bitrate_kbps: 20000, codec: 'h264', encoder: null, cursor: true, zero_copy: true, hdr_compatibility: false, hdr_window_capture: false, ignored_games: [], desktop_audio: true, desktop_device: 'out-headset',
       mic_device: null, audio_bitrate_kbps: 160, storage_limit_gb: 25, protect_edits: true, use_trash: true, ads: false,
@@ -113,7 +113,7 @@ function mockBridge(data) {
         return args.handler
       }
       if (cmd === 'plugin:dialog|open') return '/home/u/Music/airhorn.mp3'
-      if (cmd === 'import_sound') return { kind: 'custom', path: `/home/u/.config/clip.sh/sounds/${args.slot}-1.mp3`, name: 'airhorn.mp3' }
+      if (cmd === 'import_sound') return { kind: 'custom', path: `/home/u/.config/reruns/sounds/${args.slot}-1.mp3`, name: 'airhorn.mp3' }
       if (cmd === 'preview_sound') { (window.__previews ||= []).push(args); return null }
       if (cmd.startsWith('plugin:')) return 1
       if (cmd in data) return data[cmd]
@@ -318,7 +318,7 @@ async function runScenario(scenario, browser) {
   assert.equal(previews.at(-1).sound.name, 'airhorn.mp3', 'a picked sound is played once')
   await shot('settings-sounds')
   // Updates: checked on request; an update shows in Settings and the top bar.
-  await page.getByText('clip.sh 0.1.0').waitFor()
+  await page.getByText('Reruns 0.1.0').waitFor()
   await page.getByRole('button', { name: 'Check now' }).click()
   await page.getByText('Version 0.2.0 is available.').waitFor()
   assert.equal(await page.getByRole('button', { name: 'Update and restart' }).count(), 1, 'update button')

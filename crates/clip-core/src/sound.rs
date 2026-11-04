@@ -81,7 +81,7 @@ pub fn duration(path: &Path) -> Result<gst::ClockTime> {
         ) {
             Some(msg) => {
                 if let gst::MessageView::Error(e) = msg.view() {
-                    bail!("not a sound clip.sh can play ({})", e.error());
+                    bail!("not a sound Reruns can play ({})", e.error());
                 }
             }
             None => bail!("timed out reading the file"),
@@ -144,7 +144,7 @@ mod tests {
 
     fn tempdir(tag: &str) -> std::path::PathBuf {
         gst::init().unwrap();
-        let d = std::env::temp_dir().join(format!("clipsh-sound-{tag}-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("reruns-sound-{tag}-{}", std::process::id()));
         std::fs::create_dir_all(&d).unwrap();
         d
     }

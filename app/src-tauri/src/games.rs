@@ -32,7 +32,7 @@ pub fn now_ms() -> u64 {
 fn sessions_file() -> PathBuf {
     dirs::data_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("clip.sh/sessions.jsonl")
+        .join("reruns/sessions.jsonl")
 }
 
 /// Append a finished session to the log (one JSON object per line).

@@ -1,8 +1,8 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "clip.sh",
-  "version": "0.1.0",
-  "identifier": "sh.clip.app",
+  "productName": "Reruns",
+  "version": "1.0.0",
+  "identifier": "gg.reruns.app",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5173",
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "clip.sh",
+        "title": "Reruns",
         "width": 1280,
         "height": 800,
         "resizable": true,
@@ -34,6 +34,10 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "publisher": "Lucas Pearson",
+    "copyright": "Copyright © 2026 Lucas Pearson",
+    "license": "GPL-3.0-or-later",
+    "shortDescription": "Instant replay recorder for games",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

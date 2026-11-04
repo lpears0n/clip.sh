@@ -1,6 +1,12 @@
-# clip.sh
+# Reruns
 
-An instant replay recorder for Linux, kind of like Medal. It keeps the last 30 seconds (or however long you set) in memory while you play, and when you hit F8 it saves that to an MP4 named after the game. It also has a basic trimmer for cutting clips and mixing the game and mic audio.
+An instant replay recorder for games on Windows and Linux, kind of like Medal. It keeps the last 30 seconds (or however long you set) in memory while you play, and when you hit F8 it saves that to an MP4 named after the game. It also has a basic trimmer for cutting clips and mixing the game and mic audio.
+
+## Download
+
+Installers for Windows (`.exe`) and Linux (AppImage, `.deb`, `.rpm`) are on the
+[releases page](https://github.com/lpears0n/clip.sh/releases). The Windows
+installer bundles everything it needs.
 
 ## How to run it locally
 
@@ -21,7 +27,7 @@ pnpm tauri dev
 
 To build a release binary instead, use `pnpm tauri build`. `pnpm test:ui`
 drives every view in a headless Chromium with the Tauri bridge mocked and
-leaves screenshots under `app/tests/shots/`; it runs in CI too. There's also a small CLI, `clipsh save` (and `clipsh screenshot`, `clipsh mark`), that talks to the running app. Bind it to a key in your desktop settings if the in-app hotkeys don't work for you.
+leaves screenshots under `app/tests/shots/`; it runs in CI too. There's also a small CLI, `rerunsctl save` (and `rerunsctl screenshot`, `rerunsctl mark`), that talks to the running app. Bind it to a key in your desktop settings if the in-app hotkeys don't work for you.
 
 Releases, updates and Windows code signing: [docs/RELEASING.md](docs/RELEASING.md).
 
@@ -71,11 +77,11 @@ Releases, updates and Windows code signing: [docs/RELEASING.md](docs/RELEASING.m
 - **Settings → Appearance** picks the accent colour and card size, and turns
   off hover previews or motion.
 
-The whole thing is a Cargo workspace: `crates/clip-core` has the capture and encoding code with no UI, `crates/clip-ipc` and `crates/clip-cli` are the `clipsh` command, and `app/` is the Tauri app.
+The whole thing is a Cargo workspace: `crates/clip-core` has the capture and encoding code with no UI, `crates/clip-ipc` and `crates/clip-cli` are the `rerunsctl` command, and `app/` is the Tauri app.
 
 ## Current state / What's next
 
-It works, but it's a lot of hacky glue and I've only really tested it on my own machine, which is KDE Plasma 6 on Wayland with an NVIDIA card.
+It works, but I've mostly tested it on my own machines: Windows and KDE Plasma 6 on Wayland, both with an NVIDIA card.
 
 There's a design and performance guide in [docs/DESIGN.md](docs/DESIGN.md) and a roadmap with the research behind it in [docs/ROADMAP.md](docs/ROADMAP.md):
 what's planned for the library and editor, how a Windows port would work
@@ -88,8 +94,12 @@ Known problems:
 - **Only KDE gets prompt-free window capture.** On GNOME and Hyprland you get a one-time screen-share prompt instead. That part is only partly tested.
 - **The portal hotkey path isn't tested** on a real desktop yet.
 - **X11 isn't supported.** There's no capture backend for it.
-- **Windows compiles but is untested.** The capture backend (Windows Graphics Capture, D3D11 zero-copy into NVENC/AMF/QSV/Media Foundation) is written and cross-checked in CI; see [docs/WINDOWS.md](docs/WINDOWS.md) for building and what to expect on the first run.
-- **Not packaged yet.** The release workflow and an AUR `PKGBUILD` (under `packaging/`) are in place but no release has been tagged.
+- **Windows is tested on NVIDIA only.** Game detection, window capture and NVENC zero-copy recording work there; AMD AMF and Intel Quick Sync, and HDR window capture, haven't been run on real hardware. See [docs/WINDOWS.md](docs/WINDOWS.md).
+- **The Windows installer isn't code-signed yet**, so SmartScreen warns on first run.
 - **Storage limits are a soft cap.** Old clips get deleted after a save if you go over, and the Trash option is on by default so you can recover them.
 
 What I'd do next, if I had more time: zero-copy capture for high frame rates (the current path copies every frame through system memory), the `ext-image-copy-capture` protocol for window capture on wlroots desktops, X11 support, and a proper package.
+
+## License
+
+GPL-3.0-or-later. See [LICENSE](LICENSE).

@@ -50,8 +50,8 @@ mod imp {
         /// Register every binding and act on presses for the life of the
         /// app. Logs and gives up if the desktop offers no service.
         pub async fn start(&self, app: AppHandle, bindings: Vec<Binding>) {
-            // CLIPSH_HOTKEY_PORTAL=1 tests the portal path on KDE.
-            let skip_kde = std::env::var_os("CLIPSH_HOTKEY_PORTAL").is_some();
+            // RERUNS_HOTKEY_PORTAL=1 tests the portal path on KDE.
+            let skip_kde = std::env::var_os("RERUNS_HOTKEY_PORTAL").is_some();
             let (shortcut, mut presses) = match Hotkey::register(&bindings, skip_kde).await {
                 Ok(v) => v,
                 Err(e) => {
@@ -81,7 +81,7 @@ mod imp {
             match self.inner.lock().await.as_ref() {
                 Some(s) => s.set_keys(action, keys).await.map_err(|e| format!("{e:#}")),
                 None => Err(
-                    "your desktop has no global shortcut service; bind `clipsh save` in its keyboard settings"
+                    "your desktop has no global shortcut service; bind `rerunsctl save` in its keyboard settings"
                         .into(),
                 ),
             }
@@ -169,7 +169,7 @@ mod imp {
                 .parse()
                 .map_err(|e| format!("can't use {keys}: {e}"))?;
             if current.contains_key(&shortcut) {
-                return Err(format!("{keys} is already used by another clip.sh hotkey"));
+                return Err(format!("{keys} is already used by another Reruns hotkey"));
             }
             gs.register(shortcut)
                 .map_err(|e| format!("Windows refused {keys}: {e} (another app may own it)"))?;

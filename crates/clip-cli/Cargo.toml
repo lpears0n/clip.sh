@@ -1,10 +1,10 @@
 [package]
-name = "clipsh"
-description = "Command-line control for the clip.sh recorder"
+name = "rerunsctl"
+description = "Command-line control for the Reruns recorder"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
-clip-ipc = { version = "0.1.0", path = "../clip-ipc" }
+clip-ipc = { version = "1.0.0", path = "../clip-ipc" }
 serde_json.workspace = true

@@ -1,6 +1,6 @@
-# clip.sh roadmap
+# Reruns roadmap
 
-Where clip.sh goes from "works on my KDE box" to a clipping app people
+Where Reruns goes from "works on my KDE box" to a clipping app people
 choose over ShadowPlay, Medal and Steam Game Recording: on Linux first, then
 Windows. This is a working document; strike things out rather than deleting
 them so the reasoning stays.
@@ -9,7 +9,7 @@ Research notes behind the choices are in [Sources](#sources) at the end.
 
 ## 1. What we are competing with
 
-| | ShadowPlay / NVIDIA App | Medal | Steam Game Recording | clip.sh today |
+| | ShadowPlay / NVIDIA App | Medal | Steam Game Recording | Reruns today |
 |---|---|---|---|---|
 | Platforms | Windows, NVIDIA only | Windows, mobile | Windows, Linux, Deck | Linux (Wayland) |
 | Instant replay | yes | yes | yes (background mode) | yes |
@@ -23,7 +23,7 @@ Research notes behind the choices are in [Sources](#sources) at the end.
 | Prompt-free window capture on Wayland | n/a | n/a | overlay-based | KDE only |
 
 The gap that matters: Steam's recorder is free, cross-platform and already
-on Linux. clip.sh wins by being lighter, desktop-wide (not just Steam games),
+on Linux. Reruns wins by being lighter, desktop-wide (not just Steam games),
 GPU-encoded at native refresh rates, and by having the best editor and
 library of the three. Medal's social layer is a different business; we can
 match its *local* feature set without a backend.
@@ -111,7 +111,7 @@ ship on its own.
   alongside the thumbnail (`clip_core::media::inspect` already decodes one
   frame; take ten). Hover position maps to a sprite frame; cheaper than the
   video preview and works for clips the webview cannot decode.
-- ~~**Screenshots.**~~ Done. A second hotkey (`F9`, or `clipsh screenshot`)
+- ~~**Screenshots.**~~ Done. A second hotkey (`F9`, or `rerunsctl screenshot`)
   decodes the newest GOP from the ring buffer and writes its last frame as a
   PNG next to the game's clips. Nothing is tapped while recording, so the
   capture path pays nothing for it. The hotkey layer now carries one binding
@@ -138,7 +138,7 @@ ship on its own.
 - **Audio**: per-track mute buttons on the timeline, waveform strip under
   the trim track (`level` element at inspect time, cached next to the
   thumbnail).
-- ~~**Markers.**~~ Done. `F7` (or `clipsh mark`) records the moment on
+- ~~**Markers.**~~ Done. `F7` (or `rerunsctl mark`) records the moment on
   the recording's clock; a save keeps the marks inside the clip, relative
   to its start, in the sidecar, and an edit carries the ones inside its
   trim. The viewer shows them as ticks on the line, `[` / `]` jump between
@@ -164,7 +164,7 @@ ship on its own.
   own process; "Not a game" (× in the top bar) ignores an app for good,
   undone under Settings → Recording.
 - **HDR** (see `docs/HDR.md`): detection is done; next is tone-mapped
-  SDR from HDR games through clip.sh's own FP16 window capture, then
+  SDR from HDR games through Reruns's own FP16 window capture, then
   optional HDR10 recording.
 - **Audio per application** through PipeWire node targeting (record the
   game, not Discord), with Discord as its own optional track.
@@ -180,7 +180,7 @@ ship on its own.
   into Discord/Slack/Matrix.
 - **"Share to…"** sheet using the desktop's share portal when available.
 - **Optional uploads** to a user-chosen destination (S3-compatible, Nextcloud
-  WebDAV, a self-hosted clip.sh server later). No clip.sh cloud; users bring
+  WebDAV, a self-hosted Reruns server later). No Reruns cloud; users bring
   their own.
 - **Game event detection** (Medal-style) is deliberately last: it needs
   per-game log parsing or vision models, and markers + hotkeys cover 80%.
@@ -224,7 +224,7 @@ heuristic as today's Wine `.exe` path.
 
 **Hotkeys.** `global-hotkey` (what `tauri-plugin-global-shortcut` wraps)
 uses `RegisterHotKey`, which fires over borderless-fullscreen games and most
-exclusive-fullscreen ones; keep `clipsh save` + the IPC socket (named pipe
+exclusive-fullscreen ones; keep `rerunsctl save` + the IPC socket (named pipe
 on Windows) as the fallback.
 
 **Status (November 2026):** steps 1 and most of 2 below are done; see
@@ -294,7 +294,7 @@ visibility.
 | Channel | Status | Notes |
 |---|---|---|
 | AppImage / deb / rpm | release workflow | Built on Ubuntu 22.04 for glibc reach |
-| AUR (`clip-sh`) | PKGBUILD ready | Publish after the first tagged release |
+| AUR (`reruns`) | PKGBUILD ready | Publish after the first tagged release |
 | Flathub | later | Needs `--socket=pipewire`, `--talk-name=org.kde.KWin`; wait for the portal path to be default |
 | Windows NSIS / MSI | after port | Bundle GStreamer runtime; code signing |
 | winget / Scoop | after port | Manifests are trivial once the installer exists |

@@ -663,7 +663,7 @@ fn spawn_bus_watch(
 ) -> Result<JoinHandle<()>> {
     let bus = pipeline.bus().context("pipeline has no bus")?;
     Ok(std::thread::Builder::new()
-        .name("clipsh-bus".into())
+        .name("reruns-bus".into())
         .spawn(move || {
             while !stop.load(Ordering::Relaxed) {
                 let Some(msg) = bus.timed_pop(gst::ClockTime::from_mseconds(200)) else {

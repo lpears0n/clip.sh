@@ -161,7 +161,7 @@ mod tests {
 
     fn config(plugins: serde_json::Value) -> tauri::Config {
         let mut c: tauri::Config = serde_json::from_value(serde_json::json!({
-            "identifier": "sh.clip.test",
+            "identifier": "gg.reruns.test",
         }))
         .unwrap();
         c.plugins = serde_json::from_value(plugins).unwrap();
