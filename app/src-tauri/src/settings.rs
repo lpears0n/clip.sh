@@ -46,6 +46,9 @@ pub struct Settings {
     /// Windows: tone-map HDR games through Desktop Duplication (captures
     /// the game window's area of the screen) when the display is in HDR.
     pub hdr_compatibility: bool,
+    /// Windows, with HDR compatibility: capture the game window itself in
+    /// HDR and tone-map it (experimental); falls back to the screen area.
+    pub hdr_window_capture: bool,
     /// Apps marked "not a game"; never recorded.
     pub ignored_games: Vec<IgnoredGame>,
 
@@ -117,6 +120,7 @@ impl Default for Settings {
             cursor: true,
             zero_copy: cfg!(windows),
             hdr_compatibility: false,
+            hdr_window_capture: false,
             ignored_games: Vec::new(),
             desktop_audio: true,
             desktop_device: None,
@@ -181,6 +185,7 @@ impl Settings {
             cursor: self.cursor,
             zero_copy: self.zero_copy,
             hdr_compat: self.hdr_compatibility,
+            hdr_window: self.hdr_window_capture,
             ignored: self.ignored_games.clone(),
         }
     }

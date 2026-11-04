@@ -517,6 +517,18 @@
                 onchange={(hdr_compatibility) => update({ hdr_compatibility })}
               />
             </Row>
+            {#if settings.hdr_compatibility}
+              <Row
+                title="Capture the window in HDR"
+                description="Experimental. Records the game’s own window in HDR and tone-maps it on the GPU, so nothing on top of the game gets in. If it doesn’t work on your PC, clip.sh goes back to the screen area by itself."
+              >
+                <Toggle
+                  label="Capture the window in HDR"
+                  checked={settings.hdr_window_capture}
+                  onchange={(hdr_window_capture) => update({ hdr_window_capture })}
+                />
+              </Row>
+            {/if}
           {/if}
           {#if status?.hdr}
             <Row

@@ -63,6 +63,8 @@ Write-Host "all $($required.Count) required elements load from the bundle"
 
 # Optional features: the app falls back without them, so warn rather than
 # fail. HDR compatibility (tone-mapped desktop duplication) needs these.
+# HDR window capture loads GStreamer's D3D11 library itself.
+if (-not (Test-Path "$dest\bin\gstd3d11-1.0-0.dll")) { Write-Warning 'gstd3d11-1.0-0.dll missing from the bundle (HDR window capture falls back)' }
 foreach ($e in @('d3d12screencapturesrc', 'd3d12convert', 'd3d12download')) {
   & "$Root\bin\gst-inspect-1.0.exe" $e *> $null
   if ($LASTEXITCODE -ne 0) { Write-Warning "optional element missing from the bundle: $e (HDR compatibility falls back to window capture)" }

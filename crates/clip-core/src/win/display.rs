@@ -88,6 +88,35 @@ pub fn hdr_display(monitor: isize) -> Option<crate::HdrDisplay> {
     None
 }
 
+/// The LUID of the GPU driving `monitor` (an `HMONITOR`), as GStreamer's
+/// D3D11 elements take it.
+pub fn adapter_luid(monitor: isize) -> Option<i64> {
+    use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory1, IDXGIFactory1};
+
+    // SAFETY: COM calls on interfaces DXGI hands out.
+    unsafe {
+        let factory: IDXGIFactory1 = CreateDXGIFactory1().ok()?;
+        for a in 0.. {
+            let Ok(adapter) = factory.EnumAdapters1(a) else {
+                break;
+            };
+            for o in 0.. {
+                let Ok(output) = adapter.EnumOutputs(o) else {
+                    break;
+                };
+                if output
+                    .GetDesc()
+                    .is_ok_and(|d| d.Monitor.0 as isize == monitor)
+                {
+                    let luid = adapter.GetDesc1().ok()?.AdapterLuid;
+                    return Some(((luid.HighPart as i64) << 32) | luid.LowPart as i64);
+                }
+            }
+        }
+    }
+    None
+}
+
 /// Windows' "SDR content brightness" for the display whose GDI name is
 /// `device` (`\\.\DISPLAY1`), in nits.
 fn sdr_white_nits(device: &[u16; 32]) -> Option<f32> {

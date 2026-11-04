@@ -49,6 +49,8 @@ struct Active {
     hdr: Option<crate::HdrDisplay>,
     /// Captured with HDR tone mapping (HDR compatibility).
     tonemapped: bool,
+    /// Through HDR window capture (experimental) rather than the screen.
+    hdr_window: bool,
     recorder: Recorder,
 }
 
@@ -62,6 +64,9 @@ pub struct AutoRecorder {
     /// The game whose recording is being restarted (after a failure or a
     /// new window): starting it again continues its play session.
     resume: Option<Game>,
+    /// HDR window capture failed while recording; the screen-area HDR
+    /// capture is used instead until the app restarts.
+    hdr_window_broken: bool,
 }
 
 impl AutoRecorder {
@@ -109,6 +114,7 @@ impl AutoRecorder {
                 active: None,
                 restarts: RestartPolicy::default(),
                 resume: None,
+                hdr_window_broken: false,
             },
             rx,
         ))
@@ -147,6 +153,12 @@ impl AutoRecorder {
                 // when it keeps failing (each attempt opens an encoder
                 // session, and drivers allow only a few).
                 let healthy_for = a.started.elapsed();
+                if a.hdr_window && !self.hdr_window_broken {
+                    tracing::warn!(
+                        "HDR window capture failed; using the screen-area HDR capture from now on"
+                    );
+                    self.hdr_window_broken = true;
+                }
                 let _ = self.stop().await;
                 let delay = self.note_failure(healthy_for, now.game.clone());
                 tracing::warn!(
@@ -220,27 +232,57 @@ impl AutoRecorder {
             window: running.hwnd,
             cursor: cfg.cursor,
             hdr_monitor: None,
+            hdr_window: None,
         };
         let mut tonemapped = false;
+        let mut hdr_window = false;
         let recorder = if let (true, Some(h)) = (cfg.hdr_compat, hdr) {
             tracing::info!(
                 sdr_white_nits = h.sdr_white_nits,
                 peak_nits = h.peak_nits,
                 "the game's display is in HDR; capturing with tone mapping (HDR compatibility)"
             );
+            // The window itself in HDR first (experimental), then the
+            // window's area of the screen, then plain window capture.
+            let mut started = None;
+            if cfg.hdr_window && !self.hdr_window_broken {
+                let target = Target {
+                    hdr_window: Some(crate::win::HdrWindow {
+                        display: h,
+                        adapter_luid: crate::win::display::adapter_luid(running.monitor),
+                    }),
+                    ..window
+                };
+                match Recorder::start(&cfg, CaptureSource::Screen(target)).await {
+                    Ok(r) => {
+                        hdr_window = true;
+                        started = Some(r);
+                    }
+                    Err(e) => {
+                        tracing::warn!("HDR window capture failed, using the screen area: {e:#}");
+                        self.hdr_window_broken = true;
+                    }
+                }
+            }
             let region = Target {
                 hdr_monitor: Some(running.monitor),
                 ..window
             };
-            match Recorder::start(&cfg, CaptureSource::Screen(region)).await {
-                Ok(r) => {
+            match started {
+                Some(r) => {
                     tonemapped = true;
                     r
                 }
-                Err(e) => {
-                    tracing::warn!("HDR capture failed, using window capture: {e:#}");
-                    Self::start_window(&cfg, window, &running.game).await?
-                }
+                None => match Recorder::start(&cfg, CaptureSource::Screen(region)).await {
+                    Ok(r) => {
+                        tonemapped = true;
+                        r
+                    }
+                    Err(e) => {
+                        tracing::warn!("HDR capture failed, using window capture: {e:#}");
+                        Self::start_window(&cfg, window, &running.game).await?
+                    }
+                },
             }
         } else {
             if let Some(h) = hdr {
@@ -257,6 +299,7 @@ impl AutoRecorder {
             game = %running.game.name,
             hwnd = running.hwnd,
             tonemapped,
+            hdr_window,
             "recording"
         );
         self.active = Some(Active {
@@ -265,6 +308,7 @@ impl AutoRecorder {
             started: Instant::now(),
             hdr,
             tonemapped,
+            hdr_window,
             recorder,
         });
         Ok(Change::Started(running.game))

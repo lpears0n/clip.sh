@@ -113,6 +113,8 @@ export interface Settings {
   zero_copy: boolean
   /** Windows: tone-map HDR games (captures the game's area of the screen). */
   hdr_compatibility: boolean
+  /** Windows, with HDR compatibility: capture the window itself in HDR (experimental). */
+  hdr_window_capture: boolean
   /** Apps marked "not a game"; never recorded. */
   ignored_games: { name: string; exe?: string }[]
   desktop_audio: boolean

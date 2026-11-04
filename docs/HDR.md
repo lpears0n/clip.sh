@@ -45,19 +45,57 @@ drawn on top of the game in that area can appear in clips. If that
 capture can't start, recording falls back to window capture (SDR,
 highlights clipped). Not yet run on an HDR machine.
 
+## HDR window capture (experimental)
+
+Under HDR compatibility, a second toggle: **Capture the window in HDR**,
+off by default. It is step 2 of the plan below, built. When it is on and
+the display is in HDR, recording tries it first, then the screen-area
+capture above, then plain window capture.
+
+- `win/hdr_window.rs` runs its own Windows Graphics Capture session on
+  the game window with an `R16G16B16A16Float` frame pool (scRGB).
+- Each frame goes through one D3D11 pass (`tonemap::SHADER`):
+  - scale so the display's SDR white is 1.0;
+  - leave everything below 75% of SDR white as it is;
+  - roll the rest off with an extended-Reinhard curve that meets the
+    knee smoothly and reaches 1.0 exactly at the display's peak;
+  - apply it to the brightest channel, so hues hold;
+  - encode with the sRGB curve.
+- The pass also crops to the client area (no title bar) and letterboxes
+  into the fixed encode size.
+- It draws straight into BGRA textures from GStreamer's own D3D11 buffer
+  pool, on a GStreamer D3D11 device that the whole pipeline shares
+  through its context. `d3d11convert` and the hardware encoder take the
+  frames without a copy.
+- `tonemap.rs` holds the same curve on the CPU, with tests: below-knee
+  identity, peak → 1.0, a smooth knee, rising throughout, hue kept, and
+  the constant-buffer layout.
+
+Safety:
+
+- GStreamer's D3D11 helper library is loaded at run time, so a missing
+  function only disables this capture; it can't break the build or the
+  app.
+- If the capture can't start, or fails while recording, clip.sh uses
+  the screen-area capture for the rest of the session.
+- Not yet run on an HDR machine. The shader is compiled by Windows when
+  the capture starts (`D3DCompile`), so a shader error also just falls
+  back.
+
 ## Plan
 
 1. **Detect and report** (done). Gives the owner's machine a way to say
    whether it is affected, and gives step 2 its parameters.
-2. **Tone-mapped SDR from HDR games, window capture kept.** clip.sh's own
+2. **Tone-mapped SDR from HDR games, window capture kept** (built,
+   experimental; see above). clip.sh's own
    WGC window capture (Rust, `windows` crate) requesting
    `R16G16B16A16Float` frames (scRGB, linear, BT.709 primaries, 1.0 =
    80 nits), a D3D11 pixel shader that scales by the SDR white level,
    tone-maps highlights (Reinhard or a filmic curve with the display's
    peak as the knee), converts to sRGB and writes BGRA, then hands the
-   texture to GStreamer as D3D11 memory (`gst_d3d11_device_new_wrapped`,
-   `gst_d3d11_allocator_alloc_wrapped`) so the existing zero-copy chain
-   into NVENC/AMF/QSV is unchanged. Only used when the display is in
+   texture to GStreamer as D3D11 memory (frames from GStreamer's own
+   D3D11 buffer pool, rendered into in place) so the existing zero-copy
+   chain into NVENC/AMF/QSV is unchanged. Only used when the display is in
    HDR; SDR displays keep `d3d11screencapturesrc`. This is what Medal
    does, and the result plays correctly everywhere (Discord, phones).
 3. **Optional HDR10 recording.** Same FP16 capture; the shader writes

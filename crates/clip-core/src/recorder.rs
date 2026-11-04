@@ -49,6 +49,10 @@ pub struct RecorderConfig {
     /// games look right in clips. Off: window capture, HDR highlights clip.
     #[serde(default)]
     pub hdr_compat: bool,
+    /// Windows, with `hdr_compat`: try capturing the game window itself in
+    /// HDR first (experimental), before the screen-area capture.
+    #[serde(default)]
+    pub hdr_window: bool,
     /// Apps the user said aren't games; never recorded.
     #[serde(default)]
     pub ignored: Vec<crate::game::IgnoredGame>,
@@ -164,6 +168,7 @@ impl Default for RecorderConfig {
             cursor: true,
             zero_copy: zero_copy_default(),
             hdr_compat: false,
+            hdr_window: false,
             ignored: Vec::new(),
         }
     }
@@ -202,13 +207,18 @@ impl CaptureSource {
                 CaptureTarget::Pipewire(PipewireTarget::Serial(s.pipewire_serial()))
             }
             #[cfg(windows)]
-            CaptureSource::Screen(t) => match t.hdr_monitor {
-                Some(monitor) => CaptureTarget::HdrRegion {
+            CaptureSource::Screen(t) => match (t.hdr_window, t.hdr_monitor) {
+                (Some(hdr), _) => CaptureTarget::HdrWindow {
+                    hwnd: t.window,
+                    cursor: t.cursor,
+                    hdr,
+                },
+                (None, Some(monitor)) => CaptureTarget::HdrRegion {
                     hwnd: t.window,
                     monitor,
                     cursor: t.cursor,
                 },
-                None => CaptureTarget::Window {
+                (None, None) => CaptureTarget::Window {
                     hwnd: t.window,
                     cursor: t.cursor,
                 },
