@@ -38,8 +38,8 @@
   class="flex flex-none flex-col border-r border-line bg-panel transition-[width] duration-normal {collapsed ? 'w-16' : 'w-(--spacing-sidebar)'}"
   aria-label="Navigation"
 >
-  <div class="flex h-14 flex-none items-center {collapsed ? 'justify-center' : 'px-5'}">
-    <span class="display-face text-title font-bold">
+  <div class="flex h-14 flex-none items-center {collapsed ? 'justify-center' : 'px-5'}" data-tauri-drag-region>
+    <span class="display-face text-title font-bold" data-tauri-drag-region>
       {#if collapsed}r<span class="text-accent">.</span>{:else}reruns<span class="text-accent">.gg</span>{/if}
     </span>
   </div>

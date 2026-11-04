@@ -3,7 +3,7 @@
 import { convertFileSrc, invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 
-export type RecorderState = 'unavailable' | 'waiting' | 'recording'
+export type RecorderState = 'unavailable' | 'waiting' | 'recording' | 'retrying'
 
 /** Who provides the global hotkey: KDE, the portal, or the OS itself (Windows). */
 export type HotkeyBackend = 'kglobalaccel' | 'portal' | 'native'

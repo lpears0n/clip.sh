@@ -93,6 +93,19 @@ fn markers_in(
 pub struct RestartPolicy {
     failures: u32,
     retry_at: Option<std::time::Instant>,
+    /// Why the last attempt failed, for the status shown to the user.
+    reason: Option<String>,
+}
+
+/// A game whose recording failed and is waiting to be restarted: shown in
+/// place of "waiting for a game", which would hide that capture is broken.
+#[derive(Debug, Clone)]
+pub struct Retrying {
+    pub game: crate::game::Game,
+    /// The last failure, as logged.
+    pub reason: String,
+    /// How long until the next attempt.
+    pub retry_in: std::time::Duration,
 }
 
 /// A recording that ran this long before failing was healthy: its failure
@@ -110,6 +123,23 @@ impl RestartPolicy {
         let delay = restart_backoff(self.failures);
         self.retry_at = Some(std::time::Instant::now() + delay);
         delay
+    }
+
+    /// Remember why the last attempt failed.
+    pub fn set_reason(&mut self, reason: impl Into<String>) {
+        self.reason = Some(reason.into());
+    }
+
+    /// Why the last attempt failed, while failures are being counted.
+    pub fn reason(&self) -> Option<&str> {
+        self.reason.as_deref()
+    }
+
+    /// Time left before the next attempt is due.
+    pub fn retry_in(&self) -> std::time::Duration {
+        self.retry_at
+            .map(|t| t.saturating_duration_since(std::time::Instant::now()))
+            .unwrap_or_default()
     }
 
     /// Whether an attempt may be made now.
@@ -701,6 +731,26 @@ mod tests {
 
     fn s(secs: f64) -> gst::ClockTime {
         gst::ClockTime::from_nseconds((secs * 1e9) as u64)
+    }
+
+    #[test]
+    fn restart_policy_remembers_why_and_when() {
+        use std::time::Duration;
+        let mut p = RestartPolicy::default();
+        assert_eq!(p.reason(), None);
+        p.failed(Duration::from_secs(3));
+        p.set_reason("Failed to open session");
+        p.failed(Duration::ZERO);
+        assert_eq!(p.reason(), Some("Failed to open session"));
+        // The second failure in a row waits 5 s.
+        let left = p.retry_in();
+        assert!(
+            left > Duration::from_secs(4) && left <= Duration::from_secs(5),
+            "{left:?}"
+        );
+        p.reset();
+        assert_eq!(p.reason(), None);
+        assert_eq!(p.retry_in(), Duration::ZERO);
     }
 
     #[test]

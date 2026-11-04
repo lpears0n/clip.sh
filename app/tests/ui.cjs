@@ -47,6 +47,9 @@ function fixtures(scenario) {
   }
   const empty = scenario === 'empty'
   return {
+    // 'full' runs as on Windows: no system frame, the header carries the
+    // window controls. The others keep the frame, as on Linux.
+    __decorated: scenario !== 'full',
     get_status: empty
       ? { state: 'waiting', game: null, steam_app_id: null, session_start_ms: null, buffered_seconds: 0, replay_seconds: 30, encoder: null, capture_path: null, error: null, backend: 'portal', needs_screen: true, hdr: null, hdr_tonemapped: false }
       : { state: 'recording', game: 'ELDEN RING', steam_app_id: 1245620, session_start_ms: now - h, buffered_seconds: 30, replay_seconds: 30, encoder: 'nvenc', capture_path: 'zerocopy', error: null, backend: 'kwin', needs_screen: false, hdr: { sdr_white_nits: 240, peak_nits: 1000 }, hdr_tonemapped: false },
@@ -112,6 +115,8 @@ function mockBridge(data) {
         (window.__listeners ||= {})[args.event] = args.handler
         return args.handler
       }
+      if (cmd === 'plugin:window|is_decorated') return data.__decorated
+      if (cmd === 'plugin:window|is_maximized') return false
       if (cmd === 'plugin:dialog|open') return '/home/u/Music/airhorn.mp3'
       if (cmd === 'import_sound') return { kind: 'custom', path: `/home/u/.config/reruns/sounds/${args.slot}-1.mp3`, name: 'airhorn.mp3' }
       if (cmd === 'preview_sound') { (window.__previews ||= []).push(args); return null }
@@ -153,6 +158,8 @@ async function runScenario(scenario, browser) {
   const cards = () => page.locator('.clip-grid > *').count()
 
   await shot('games')
+  // The window controls show only where the system frame is off.
+  assert.equal(await page.getByRole('button', { name: 'Close', exact: true }).count(), scenario === 'full' ? 1 : 0)
   if (scenario === 'empty') {
     await page.getByRole('button', { name: 'Choose screen' }).waitFor()
     await page.close()
@@ -301,6 +308,14 @@ async function runScenario(scenario, browser) {
   await page.waitForTimeout(250) // let the switch finish moving before the shot
   assert.equal(await page.getByRole('switch', { name: 'Capture the window in HDR' }).getAttribute('aria-checked'), 'true', 'HDR window capture on')
   await shot('settings-recording-windows')
+  // Capture failing mid-game: the header says so instead of "waiting".
+  await page.evaluate(
+    (s) => window[`_${window.__listeners['status-changed']}`]({ event: 'status-changed', id: 1, payload: s }),
+    { state: 'retrying', game: 'Overwatch', steam_app_id: null, session_start_ms: Date.now(), buffered_seconds: 0, replay_seconds: 30, encoder: 'nvd3d11h264enc', capture_path: null, error: 'Could not encode stream: Failed to open session', backend: 'windows', needs_screen: false, hdr: null, hdr_tonemapped: false },
+  )
+  await page.getByText('· retrying').waitFor()
+  assert.equal(await page.getByText('Waiting for a game').count(), 0, 'no "waiting" while a game is failing')
+  await shot('status-retrying')
   await page.getByRole('button', { name: 'Audio' }).click()
   await page.waitForTimeout(150)
   assert.equal(await page.getByLabel('Output device').inputValue(), 'out-headset', 'chosen output is selected')

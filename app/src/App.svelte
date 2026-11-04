@@ -36,6 +36,7 @@
   import StateMessage from './lib/StateMessage.svelte'
   import StatusBar from './lib/StatusBar.svelte'
   import Toast, { type ToastData } from './lib/Toast.svelte'
+  import WindowControls from './lib/WindowControls.svelte'
 
   type View = 'games' | 'game' | 'clips' | 'settings'
   const VIDEO = /\.(mp4|mkv|mov|webm)$/i
@@ -55,6 +56,23 @@
   let newRelease = $state<UpdateInfo | null>(null)
   let usage = $state<Usage | null>(null)
   let caps = $state<Capabilities | null>(null)
+  let innerWidth = $state(1280)
+
+  // The sidebar folds to icons by itself where room matters more than
+  // labels: a narrow window, Settings (which has its own section list) and
+  // the clip viewer. There the toggle opens it for the moment (`peek`);
+  // everywhere else it follows the saved choice (Ctrl+B).
+  const autoCollapse = $derived(innerWidth < 1100 || view === 'settings' || viewing !== null)
+  let peek = $state(false)
+  $effect(() => {
+    void autoCollapse
+    peek = false
+  })
+  const sidebarCollapsed = $derived(autoCollapse ? !peek : prefs.sidebarCollapsed)
+  function toggleSidebar() {
+    if (autoCollapse) peek = !peek
+    else setPrefs({ sidebarCollapsed: !prefs.sidebarCollapsed })
+  }
   // Raw: replaced wholesale on every refresh; a deep proxy over thousands of
   // clips is slow and unnecessary.
   let allClips = $state.raw<Clip[]>([])
@@ -282,7 +300,7 @@
     const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement
     if ((e.ctrlKey || e.metaKey) && e.key === 'b') {
       e.preventDefault()
-      setPrefs({ sidebarCollapsed: !prefs.sidebarCollapsed })
+      toggleSidebar()
     } else if (!typing && !viewing && !e.ctrlKey && !e.altKey && !e.metaKey) {
       if (e.key === '1') go('games')
       else if (e.key === '2') go('clips')
@@ -369,29 +387,31 @@
   })
 </script>
 
-<svelte:window {onkeydown} />
+<svelte:window {onkeydown} bind:innerWidth />
 
 <div class="flex h-full">
-  <Sidebar active={nav} collapsed={prefs.sidebarCollapsed} {usage} onnavigate={go} onstorage={() => openSettings('Storage')} />
+  <Sidebar active={nav} collapsed={sidebarCollapsed} {usage} onnavigate={go} onstorage={() => openSettings('Storage')} />
 
   <div class="flex min-w-0 flex-1 flex-col">
-    <header class="flex h-14 flex-none items-center gap-3 border-b border-line bg-panel pr-4 pl-3">
+    <!-- On Windows this is the title bar too: drag it, double-click to maximize. -->
+    <header class="flex h-14 flex-none items-center gap-3 border-b border-line bg-panel pr-4 pl-3" data-tauri-drag-region>
       <button
         class="btn-icon text-muted"
-        onclick={() => setPrefs({ sidebarCollapsed: !prefs.sidebarCollapsed })}
-        aria-label={prefs.sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        onclick={toggleSidebar}
+        aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         title="Toggle sidebar (Ctrl+B)"
       >
         <PanelLeft size={18} />
       </button>
-      <h1 class="display-face truncate text-title font-semibold">{title}</h1>
-      <div class="min-w-0 flex-1"></div>
+      <h1 class="display-face truncate text-title font-semibold" data-tauri-drag-region>{title}</h1>
+      <div class="h-full min-w-0 flex-1" data-tauri-drag-region></div>
       {#if newRelease}
         <button class="btn h-8 flex-none px-3 text-secondary" onclick={() => openSettings('General')} title="See the update in Settings">
           Update {newRelease.version}
         </button>
       {/if}
       <StatusBar {status} {now} {flash} {saving} {hotkey} onsave={save} onopen={pickVideo} onchoosescreen={chooseScreen} onignore={ignoreGame} />
+      <WindowControls />
     </header>
 
     <main class="flex min-h-0 flex-1 flex-col bg-canvas">

@@ -67,6 +67,11 @@ pub struct AutoRecorder {
     /// HDR window capture failed while recording; the screen-area HDR
     /// capture is used instead until the app restarts.
     hdr_window_broken: bool,
+    /// Encoders that passed the probe but kept failing while recording
+    /// (NVENC refusing a session, say); skipped until the app restarts.
+    broken_encoders: Vec<Encoder>,
+    /// Failures in a row that the encoder itself was blamed for.
+    encoder_failures: u32,
 }
 
 impl AutoRecorder {
@@ -115,6 +120,8 @@ impl AutoRecorder {
                 restarts: RestartPolicy::default(),
                 resume: None,
                 hdr_window_broken: false,
+                broken_encoders: Vec::new(),
+                encoder_failures: 0,
             },
             rx,
         ))
@@ -153,14 +160,20 @@ impl AutoRecorder {
                 // when it keeps failing (each attempt opens an encoder
                 // session, and drivers allow only a few).
                 let healthy_for = a.started.elapsed();
-                if a.hdr_window && !self.hdr_window_broken {
+                let encoder = a.recorder.status().encoder;
+                let hdr_window = a.hdr_window;
+                if healthy_for >= crate::recorder::HEALTHY_AFTER {
+                    self.encoder_failures = 0;
+                }
+                self.blame_encoder(encoder, &failure);
+                if hdr_window && !self.hdr_window_broken {
                     tracing::warn!(
                         "HDR window capture failed; using the screen-area HDR capture from now on"
                     );
                     self.hdr_window_broken = true;
                 }
                 let _ = self.stop().await;
-                let delay = self.note_failure(healthy_for, now.game.clone());
+                let delay = self.note_failure(healthy_for, now.game.clone(), failure.clone());
                 tracing::warn!(
                     game = %now.game.name,
                     consecutive = self.restarts.failures(),
@@ -210,7 +223,7 @@ impl AutoRecorder {
                 Ok(Some(change))
             }
             Err(e) => {
-                self.note_failure(Duration::ZERO, next.game);
+                self.note_failure(Duration::ZERO, next.game, format!("{e:#}"));
                 Err(e)
             }
         }
@@ -219,9 +232,34 @@ impl AutoRecorder {
     /// Count a failed recording or start and schedule the next attempt.
     /// `healthy_for`: how long the recording ran before failing; one that
     /// ran a good while resets the count.
-    fn note_failure(&mut self, healthy_for: Duration, game: Game) -> Duration {
+    fn note_failure(&mut self, healthy_for: Duration, game: Game, reason: String) -> Duration {
         self.resume = Some(game);
+        self.restarts.set_reason(reason);
         self.restarts.failed(healthy_for)
+    }
+
+    /// Count failures the encoder itself is named in. Twice in a row and it
+    /// is set aside for the next encoder that passes the probe: a driver
+    /// that refuses sessions mid-game would otherwise retry forever with
+    /// nothing recorded.
+    fn blame_encoder(&mut self, encoder: Encoder, failure: &str) {
+        let codec = self.cfg.video.codec;
+        if !encoder.is_blamed_in(codec, failure) {
+            self.encoder_failures = 0;
+            return;
+        }
+        self.encoder_failures += 1;
+        if self.encoder_failures < 2 {
+            return;
+        }
+        tracing::warn!(
+            ?encoder,
+            "the encoder keeps failing while recording; switching to the next one that works \
+             (another app may be using it, or the driver refuses more sessions)"
+        );
+        self.broken_encoders.push(encoder);
+        self.probed.remove(&codec);
+        self.encoder_failures = 0;
     }
 
     async fn start(&mut self, running: RunningGame) -> Result<Change> {
@@ -338,13 +376,15 @@ impl AutoRecorder {
         let codec = self.cfg.video.codec;
         if let Some(e) = self.cfg.encoder
             && e.element(codec).is_some()
+            && !self.broken_encoders.contains(&e)
         {
             return Ok(e);
         }
         if let Some(e) = self.probed.get(&codec) {
             return Ok(*e);
         }
-        let e = tokio::task::spawn_blocking(move || Encoder::probe(codec))
+        let skip = self.broken_encoders.clone();
+        let e = tokio::task::spawn_blocking(move || Encoder::probe_excluding(codec, &skip))
             .await?
             .with_context(|| format!("no working {codec:?} encoder found"))?;
         self.probed.insert(codec, e);
@@ -358,7 +398,9 @@ impl AutoRecorder {
     pub fn encoder(&self) -> Option<Encoder> {
         self.cfg
             .encoder
-            .filter(|e| e.element(self.cfg.video.codec).is_some())
+            .filter(|e| {
+                e.element(self.cfg.video.codec).is_some() && !self.broken_encoders.contains(e)
+            })
             .or_else(|| self.probed.get(&self.cfg.video.codec).copied())
     }
 
@@ -403,6 +445,19 @@ impl AutoRecorder {
 
     pub fn status(&self) -> Option<Status> {
         self.active.as_ref().map(|a| a.recorder.status())
+    }
+
+    /// The game whose capture failed and is waiting to be restarted.
+    pub fn retrying(&self) -> Option<crate::recorder::Retrying> {
+        if self.active.is_some() {
+            return None;
+        }
+        let game = self.resume.as_ref()?;
+        Some(crate::recorder::Retrying {
+            game: game.clone(),
+            reason: self.restarts.reason()?.to_owned(),
+            retry_in: self.restarts.retry_in(),
+        })
     }
 
     pub async fn save(&self, root: &Path, seconds: Option<u32>) -> Result<SavedClip> {

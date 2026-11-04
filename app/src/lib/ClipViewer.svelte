@@ -6,7 +6,7 @@
   import { ArrowLeft, CircleHelp, Maximize, Minimize, Pause, Pencil, Play, Plus, Repeat, Star, Volume2, VolumeX, X } from '@lucide/svelte'
   import { getCurrentWindow } from '@tauri-apps/api/window'
   import { api, type Clip, type ClipPatch, type ExportPlan, videoUrl } from './api'
-  import { clock, dayLabel, size, timecode, trackName } from './format'
+  import { size, timecode, trackName, when } from './format'
   import { playbackStats } from './playbackStats'
   import Timeline from './Timeline.svelte'
 
@@ -38,7 +38,7 @@
   const subtitle = $derived(
     [
       clip.title ? clip.game : null,
-      `${dayLabel(clip.created_ms)}, ${clock(clip.created_ms)}`,
+      when(clip.created_ms),
       size(clip.size_bytes),
       clip.is_edit ? 'edited' : null,
     ]
@@ -520,7 +520,7 @@
             {#if paused}<Play size={20} fill="currentColor" strokeWidth={0} />{:else}<Pause size={20} fill="currentColor" strokeWidth={0} />{/if}
           </button>
           <span class="ml-1 text-secondary tabular-nums">
-            {timecode(time)}<span class="text-white/55"> / {timecode(duration)}</span>
+            {timecode(time)}<span class="text-white/55">{' / '}{timecode(duration)}</span>
           </span>
           <div class="flex-1"></div>
           <button class="glyph w-auto px-2 text-secondary font-semibold tabular-nums" onclick={cycleSpeed} title="Playback speed (< >)" aria-label="Playback speed {speed}x">

@@ -66,6 +66,15 @@
     </button>
   {:else if status?.needs_screen}
     <button class="btn h-8 border-accent/60 text-accent" onclick={onchoosescreen}>Choose a screen to record</button>
+  {:else if status?.state === 'retrying'}
+    <!-- Capture broke mid-game; the recorder retries by itself, backing off.
+         Say so, rather than "waiting for a game" while one is running. -->
+    <div class="flex min-w-0 items-center gap-2.5" title={status.error ?? ''}>
+      <span class="size-2 flex-none animate-pulse rounded-full bg-danger/70"></span>
+      <span class="max-w-md truncate text-secondary text-fg-2">
+        Can't record <span class="display-face font-semibold text-fg">{status.game}</span> · retrying
+      </span>
+    </div>
   {:else if status?.state === 'unavailable'}
     <span class="max-w-md truncate text-secondary text-danger" title={status.error ?? ''}>
       Can't capture: {status.error}
