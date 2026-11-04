@@ -146,6 +146,10 @@ ship on its own.
   (Hyprland, Sway, niri) now that compositors ship it.
 - **X11** via `ximagesrc` as a fallback backend with `xdotool`-style active
   window tracking.
+- ~~**Capture recovery on Linux.**~~ Done: a health tick restarts a
+  failed recording with the same back-off as Windows (shared
+  `RestartPolicy`), and the encode size is locked at the first frame so
+  window resizes are scaled instead of renegotiated.
 - **HDR** (see `docs/HDR.md`): detection is done; next is tone-mapped
   SDR from HDR games through clip.sh's own FP16 window capture, then
   optional HDR10 recording.

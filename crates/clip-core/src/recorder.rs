@@ -55,6 +55,48 @@ fn zero_copy_default() -> bool {
     cfg!(windows)
 }
 
+/// When to restart a recording that failed, shared by every platform's
+/// auto-recorder: the first retry at once, then backing off, with the
+/// count reset by a recording that ran a good while.
+#[derive(Debug, Default)]
+pub struct RestartPolicy {
+    failures: u32,
+    retry_at: Option<std::time::Instant>,
+}
+
+/// A recording that ran this long before failing was healthy: its failure
+/// starts the back-off afresh.
+pub const HEALTHY_AFTER: std::time::Duration = std::time::Duration::from_secs(60);
+
+impl RestartPolicy {
+    /// Count a failure (of a recording that ran `healthy_for`, or of a
+    /// start: zero) and return how long to wait before the next attempt.
+    pub fn failed(&mut self, healthy_for: std::time::Duration) -> std::time::Duration {
+        if healthy_for >= HEALTHY_AFTER {
+            self.failures = 0;
+        }
+        self.failures += 1;
+        let delay = restart_backoff(self.failures);
+        self.retry_at = Some(std::time::Instant::now() + delay);
+        delay
+    }
+
+    /// Whether an attempt may be made now.
+    pub fn due(&self) -> bool {
+        self.retry_at.is_none_or(|t| std::time::Instant::now() >= t)
+    }
+
+    /// Failures in a row so far.
+    pub fn failures(&self) -> u32 {
+        self.failures
+    }
+
+    /// Forget the failures (the game closed).
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
+}
+
 /// How long to wait before restart attempt `failures` (1-based) of a
 /// recording that keeps failing: the first at once (the next scan), then
 /// 5 s, 15 s, 30 s, and a minute from then on.
@@ -592,6 +634,25 @@ mod tests {
 
     fn s(secs: f64) -> gst::ClockTime {
         gst::ClockTime::from_nseconds((secs * 1e9) as u64)
+    }
+
+    #[test]
+    fn restart_policy_backs_off_and_resets_after_a_healthy_run() {
+        use std::time::Duration;
+        let mut p = RestartPolicy::default();
+        assert!(p.due());
+        assert_eq!(p.failed(Duration::ZERO), Duration::ZERO);
+        assert!(p.due(), "first retry at once");
+        assert_eq!(p.failed(Duration::from_secs(3)), Duration::from_secs(5));
+        assert!(!p.due(), "then it waits");
+        assert_eq!(p.failed(Duration::ZERO), Duration::from_secs(15));
+        assert_eq!(p.failures(), 3);
+        // A recording that ran a minute starts over.
+        assert_eq!(p.failed(HEALTHY_AFTER), Duration::ZERO);
+        assert_eq!(p.failures(), 1);
+        p.reset();
+        assert!(p.due());
+        assert_eq!(p.failures(), 0);
     }
 
     #[test]

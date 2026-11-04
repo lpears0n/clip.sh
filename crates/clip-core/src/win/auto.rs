@@ -16,7 +16,7 @@ pub use crate::backend::Backend;
 use crate::{
     encoder::{Codec, Encoder},
     game::Game,
-    recorder::{CaptureSource, Recorder, RecorderConfig, Status},
+    recorder::{CaptureSource, Recorder, RecorderConfig, RestartPolicy, Status},
     save::{clip_path, screenshot_path},
     win::{Target, game::RunningGame},
 };
@@ -24,10 +24,6 @@ use crate::{
 /// How often windows are walked looking for games (and the recording's
 /// health checked).
 const SCAN_INTERVAL: Duration = Duration::from_secs(2);
-
-/// A recording that ran this long before failing was healthy: its failure
-/// starts the back-off afresh.
-const HEALTHY: Duration = Duration::from_secs(60);
 
 /// Input for [`AutoRecorder::handle`].
 #[derive(Debug, Clone)]
@@ -61,10 +57,8 @@ pub struct AutoRecorder {
     probed: HashMap<Codec, Encoder>,
     running: Vec<RunningGame>,
     active: Option<Active>,
-    /// No new start attempt before this, after one failed.
-    retry_at: Option<Instant>,
-    /// Failed recordings or starts in a row.
-    failures: u32,
+    /// When a failed recording may be restarted.
+    restarts: RestartPolicy,
     /// The game whose recording is being restarted (after a failure or a
     /// new window): starting it again continues its play session.
     resume: Option<Game>,
@@ -113,8 +107,7 @@ impl AutoRecorder {
                 probed: HashMap::new(),
                 running: vec![],
                 active: None,
-                retry_at: None,
-                failures: 0,
+                restarts: RestartPolicy::default(),
                 resume: None,
             },
             rx,
@@ -139,7 +132,7 @@ impl AutoRecorder {
         self.running = games;
         if let Some(a) = &self.active {
             let Some(now) = self.running.iter().find(|g| g.game == a.game).cloned() else {
-                self.failures = 0;
+                self.restarts.reset();
                 return self.stop().await.map(|g| g.map(Change::Stopped));
             };
             if now.hwnd == a.hwnd {
@@ -155,7 +148,7 @@ impl AutoRecorder {
                 let delay = self.note_failure(healthy_for, now.game.clone());
                 tracing::warn!(
                     game = %now.game.name,
-                    consecutive = self.failures,
+                    consecutive = self.restarts.failures(),
                     retry_in = ?delay,
                     "capture failed, restarting it: {failure}"
                 );
@@ -174,11 +167,10 @@ impl AutoRecorder {
         if let Some(g) = &self.resume
             && !self.running.iter().any(|r| &r.game == g)
         {
-            self.failures = 0;
-            self.retry_at = None;
+            self.restarts.reset();
             return Ok(self.resume.take().map(Change::Stopped));
         }
-        if self.retry_at.is_some_and(|t| Instant::now() < t) {
+        if !self.restarts.due() {
             return Ok(None);
         }
         // The game being restarted first, else whatever is in front.
@@ -213,14 +205,8 @@ impl AutoRecorder {
     /// `healthy_for`: how long the recording ran before failing; one that
     /// ran a good while resets the count.
     fn note_failure(&mut self, healthy_for: Duration, game: Game) -> Duration {
-        if healthy_for >= HEALTHY {
-            self.failures = 0;
-        }
-        self.failures += 1;
-        let delay = crate::recorder::restart_backoff(self.failures);
-        self.retry_at = Some(Instant::now() + delay);
         self.resume = Some(game);
-        delay
+        self.restarts.failed(healthy_for)
     }
 
     async fn start(&mut self, running: RunningGame) -> Result<Change> {

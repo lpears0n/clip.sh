@@ -115,11 +115,12 @@ pub fn add_video_branch(
         .build()?;
     let parse = cfg.codec.make_parser()?;
 
-    // The size the encoder sees, fixed for the whole recording when known
-    // (Windows). Frames of any other size are scaled to it, letterboxed, so
-    // a game window resizing or switching modes never makes the encoder
-    // renegotiate: that renegotiation failed ("not-negotiated") and killed
-    // the capture on the owner's machine. `None` follows the source (Linux).
+    // The size the encoder sees, fixed for the whole recording. Frames of
+    // any other size are scaled to it, letterboxed, so a game window
+    // resizing or switching modes never makes the encoder renegotiate:
+    // that renegotiation failed ("not-negotiated") and killed the capture
+    // on the owner's machine. Windows knows the window's size up front;
+    // elsewhere (`None`) it is locked to the first frame's size.
     #[cfg(windows)]
     let fixed = fixed_output_size(target);
     #[cfg(not(windows))]
@@ -158,9 +159,11 @@ pub fn add_video_branch(
                 s.set("framerate", gst::Fraction::new(cfg.fps as i32, 1));
             }))?;
             chain.extend([crop, rate, rate_caps, queue]);
-            if let Some((w, h)) = fixed {
-                chain.extend(fixed_size_scaler(w, h)?);
+            let [scale, size] = fixed_size_scaler(fixed)?;
+            if fixed.is_none() {
+                lock_size_at_first_caps(&src, &size, None)?;
             }
+            chain.extend([scale, size]);
             chain.extend(encoder.upload_chain()?);
         }
         CapturePath::ZeroCopy => {
@@ -181,27 +184,11 @@ pub fn add_video_branch(
                 }
             }
             chain.extend(convert);
-            // The GPU converter also scales. With a fixed size it scales
-            // everything to that; otherwise it follows the source, asking
-            // for an even size so 4:2:0 encoders accept odd window streams.
-            let size = capsfilter(raw_caps(Some(memory), |s| {
-                if let Some((w, h)) = fixed {
-                    s.set("width", w);
-                    s.set("height", h);
-                    s.set("pixel-aspect-ratio", gst::Fraction::new(1, 1));
-                }
-            }))?;
+            // The GPU converter also scales: everything goes out at the fixed
+            // (or first) size, even for 4:2:0 encoders.
+            let size = capsfilter(size_caps(Some(memory), fixed))?;
             if fixed.is_none() {
-                let size = size.clone();
-                on_caps(&src, move |w, h| {
-                    size.set_property(
-                        "caps",
-                        raw_caps(Some(memory), |s| {
-                            s.set("width", w & !1);
-                            s.set("height", h & !1);
-                        }),
-                    );
-                })?;
+                lock_size_at_first_caps(&src, &size, Some(memory))?;
             }
             chain.push(size);
         }
@@ -214,18 +201,45 @@ pub fn add_video_branch(
     Ok(parse)
 }
 
-/// System-memory frames of any size out at `width`×`height`, letterboxed
-/// (passthrough while they already are that size).
-fn fixed_size_scaler(width: i32, height: i32) -> Result<[gst::Element; 2]> {
+/// System-memory frames of any size out at one size, letterboxed
+/// (passthrough while they already are that size). `None`: no size yet;
+/// [`lock_size_at_first_caps`] sets it.
+fn fixed_size_scaler(size: Option<(i32, i32)>) -> Result<[gst::Element; 2]> {
     let scale = gst::ElementFactory::make("videoscale")
         .property("add-borders", true)
         .build()?;
-    let size = capsfilter(raw_caps(None, |s| {
-        s.set("width", width);
-        s.set("height", height);
-        s.set("pixel-aspect-ratio", gst::Fraction::new(1, 1));
-    }))?;
-    Ok([scale, size])
+    Ok([scale, capsfilter(size_caps(None, size))?])
+}
+
+/// `video/x-raw` (with `memory`) at `size`, square pixels; any size if
+/// `None`.
+fn size_caps(memory: Option<&str>, size: Option<(i32, i32)>) -> gst::Caps {
+    raw_caps(memory, |s| {
+        if let Some((w, h)) = size {
+            s.set("width", w);
+            s.set("height", h);
+            s.set("pixel-aspect-ratio", gst::Fraction::new(1, 1));
+        }
+    })
+}
+
+/// Fix `size` (a capsfilter after a scaler) to the source's first frame
+/// size, rounded down to even; later size changes are scaled to it.
+fn lock_size_at_first_caps(
+    src: &gst::Element,
+    size: &gst::Element,
+    memory: Option<&'static str>,
+) -> Result<()> {
+    let size = size.clone();
+    let locked = std::sync::atomic::AtomicBool::new(false);
+    on_caps(src, move |w, h| {
+        if locked.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            return;
+        }
+        let (w, h) = (w & !1, h & !1);
+        tracing::info!(width = w, height = h, "encoding at a fixed size");
+        size.set_property("caps", size_caps(memory, Some((w, h))));
+    })
 }
 
 /// The frame queue in front of the encoder: a few frames, dropping the
@@ -597,7 +611,7 @@ mod tests {
         crate::init().unwrap();
         let pipeline = gst::Pipeline::new();
         let src = gst_app::AppSrc::builder().format(gst::Format::Time).build();
-        let [scale, size] = fixed_size_scaler(320, 180).unwrap();
+        let [scale, size] = fixed_size_scaler(Some((320, 180))).unwrap();
         let convert = gst::ElementFactory::make("videoconvert").build().unwrap();
         let enc = gst::ElementFactory::make("x264enc")
             .property_from_str("tune", "zerolatency")
@@ -659,6 +673,80 @@ mod tests {
         assert!(errors.is_none(), "{errors:?}");
         assert_eq!(out, 40, "every frame encoded");
         assert_eq!(sizes, [(320, 180)].into(), "one size reached the encoder");
+    }
+
+    /// Linux: the size is locked to the first frame's (rounded to even),
+    /// and later sizes are scaled to it.
+    #[test]
+    fn size_is_locked_at_the_first_frame() {
+        use gstreamer_app as gst_app;
+        crate::init().unwrap();
+        let pipeline = gst::Pipeline::new();
+        let src = gst_app::AppSrc::builder().format(gst::Format::Time).build();
+        let [scale, size] = fixed_size_scaler(None).unwrap();
+        lock_size_at_first_caps(src.upcast_ref(), &size, None).unwrap();
+        let convert = gst::ElementFactory::make("videoconvert").build().unwrap();
+        let enc = gst::ElementFactory::make("x264enc")
+            .property_from_str("tune", "zerolatency")
+            .build()
+            .unwrap();
+        let sink = gst_app::AppSink::builder().sync(false).build();
+        let chain = [
+            src.upcast_ref(),
+            &scale,
+            &size,
+            &convert,
+            &enc,
+            sink.upcast_ref(),
+        ];
+        pipeline.add_many(chain).unwrap();
+        gst::Element::link_many(chain).unwrap();
+        pipeline.set_state(gst::State::Playing).unwrap();
+
+        let frame = gst::ClockTime::from_nseconds(1_000_000_000 / 30);
+        let mut n = 0u64;
+        // An odd first size: locked to 322x180.
+        for (w, h) in [(323u32, 181u32), (640, 360), (200, 300)] {
+            src.set_caps(Some(
+                &gst::Caps::builder("video/x-raw")
+                    .field("format", "I420")
+                    .field("width", w as i32)
+                    .field("height", h as i32)
+                    .field("framerate", gst::Fraction::new(30, 1))
+                    .build(),
+            ));
+            for _ in 0..10 {
+                let len = gst_video::VideoInfo::builder(gst_video::VideoFormat::I420, w, h)
+                    .build()
+                    .unwrap()
+                    .size();
+                let mut b = gst::Buffer::from_slice(vec![16u8; len]);
+                let bm = b.get_mut().unwrap();
+                bm.set_pts(frame * n);
+                bm.set_duration(frame);
+                src.push_buffer(b).unwrap();
+                n += 1;
+            }
+        }
+        src.end_of_stream().unwrap();
+        let mut sizes = std::collections::HashSet::new();
+        let mut out = 0;
+        while let Some(s) = sink.try_pull_sample(gst::ClockTime::from_seconds(5)) {
+            let st = s.caps().unwrap().structure(0).unwrap().to_owned();
+            sizes.insert((
+                st.get::<i32>("width").unwrap(),
+                st.get::<i32>("height").unwrap(),
+            ));
+            out += 1;
+        }
+        let errors = pipeline
+            .bus()
+            .unwrap()
+            .pop_filtered(&[gst::MessageType::Error]);
+        pipeline.set_state(gst::State::Null).unwrap();
+        assert!(errors.is_none(), "{errors:?}");
+        assert_eq!(out, 30, "every frame encoded");
+        assert_eq!(sizes, [(322, 180)].into(), "locked to the first size, even");
     }
 
     #[test]

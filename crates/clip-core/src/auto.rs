@@ -11,7 +11,7 @@
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use anyhow::{Context, Result, bail};
@@ -22,11 +22,12 @@ use crate::{
     game::{self, Game},
     kwin::{Kwin, WindowEvent, WindowInfo},
     portal::ScreenSource,
-    recorder::{CaptureSource, Recorder, RecorderConfig, Status},
+    recorder::{CaptureSource, Recorder, RecorderConfig, RestartPolicy, Status},
     save::{clip_path, screenshot_path},
 };
 
-/// How often the portal backend scans for running games.
+/// How often the portal backend scans for running games, and how often the
+/// recording's health is checked.
 const SCAN_INTERVAL: Duration = Duration::from_secs(2);
 
 pub use crate::backend::Backend;
@@ -38,6 +39,8 @@ pub enum Event {
     Window(WindowEvent),
     /// Portal backend: the set of running games changed.
     Games(Vec<Game>),
+    /// Periodic: check that the recording is alive, restart it if due.
+    Tick,
 }
 
 /// What [`AutoRecorder::handle`] did in response to an event.
@@ -52,6 +55,14 @@ struct Active {
     window: Option<String>,
     game: Game,
     recorder: Recorder,
+    started: Instant,
+}
+
+/// A recording that failed and is waiting to be restarted: its game, and
+/// (KWin) the window it was recording.
+struct Resume {
+    game: Game,
+    window: Option<String>,
 }
 
 enum State {
@@ -75,6 +86,9 @@ pub struct AutoRecorder {
     /// Best working encoder per codec, probed on first use.
     probed: HashMap<Codec, Encoder>,
     active: Option<Active>,
+    /// A failed recording to restart, keeping its play session.
+    resume: Option<Resume>,
+    restarts: RestartPolicy,
 }
 
 impl AutoRecorder {
@@ -87,6 +101,19 @@ impl AutoRecorder {
         token_path: PathBuf,
     ) -> Result<(Self, mpsc::UnboundedReceiver<Event>)> {
         let (tx, rx) = mpsc::unbounded_channel();
+        {
+            let tx = tx.clone();
+            tokio::spawn(async move {
+                let mut tick = tokio::time::interval(SCAN_INTERVAL);
+                tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                loop {
+                    tick.tick().await;
+                    if tx.send(Event::Tick).is_err() {
+                        break;
+                    }
+                }
+            });
+        }
         let state = match prefer {
             Some(Backend::Portal) => portal_state(tx, token_path),
             Some(Backend::Kwin) => kwin_state(tx)?,
@@ -105,6 +132,8 @@ impl AutoRecorder {
             cfg,
             probed: HashMap::new(),
             active: None,
+            resume: None,
+            restarts: RestartPolicy::default(),
         };
         tracing::info!(backend = ?me.backend(), "watching for games");
         Ok((me, rx))
@@ -155,6 +184,65 @@ impl AutoRecorder {
         match event {
             Event::Window(ev) => self.handle_window(ev).await,
             Event::Games(games) => self.handle_games(games).await,
+            Event::Tick => self.tick().await,
+        }
+    }
+
+    /// Restart a recording whose pipeline failed (left alone, every clip
+    /// would replay the moments before the failure), backing off when it
+    /// keeps failing. The play session carries on across restarts.
+    async fn tick(&mut self) -> Result<Option<Change>> {
+        if let Some(a) = &self.active {
+            let Some(failure) = a.recorder.failure() else {
+                return Ok(None);
+            };
+            let healthy_for = a.started.elapsed();
+            let resume = Resume {
+                game: a.game.clone(),
+                window: a.window.clone(),
+            };
+            let _ = self.stop().await;
+            let delay = self.restarts.failed(healthy_for);
+            tracing::warn!(
+                game = %resume.game.name,
+                consecutive = self.restarts.failures(),
+                retry_in = ?delay,
+                "capture failed, restarting it: {failure}"
+            );
+            self.resume = Some(resume);
+            return Ok(None);
+        }
+        let Some(r) = &self.resume else {
+            return Ok(None);
+        };
+        if !self.restarts.due() {
+            return Ok(None);
+        }
+        let game = r.game.clone();
+        let still_there = match (&self.state, &r.window) {
+            (State::Kwin { windows, .. }, Some(uuid)) => windows.contains_key(uuid),
+            (State::Portal { running, .. }, _) => running.contains(&game),
+            _ => false,
+        };
+        if !still_there {
+            self.resume = None;
+            self.restarts.reset();
+            return Ok(Some(Change::Stopped(game)));
+        }
+        let started = match r.window.clone() {
+            Some(uuid) => self.start_window(&uuid).await,
+            None => self.start_portal(game.clone()).await,
+        };
+        match started {
+            // Same session: no new "Started".
+            Ok(_) => {
+                self.resume = None;
+                Ok(None)
+            }
+            Err(e) => {
+                self.restarts.failed(Duration::ZERO);
+                Err(e)
+            }
         }
     }
 
@@ -167,6 +255,16 @@ impl AutoRecorder {
             return Ok(None);
         };
         *running = games.clone();
+        if let Some(r) = &self.resume {
+            if games.contains(&r.game) {
+                // Its restart is the tick's business.
+                return Ok(None);
+            }
+            let game = r.game.clone();
+            self.resume = None;
+            self.restarts.reset();
+            return Ok(Some(Change::Stopped(game)));
+        }
         let have_token = read_token(token_path).is_some();
         if let Some(a) = &self.active
             && !games.contains(&a.game)
@@ -208,6 +306,7 @@ impl AutoRecorder {
             window: None,
             game: game.clone(),
             recorder,
+            started: Instant::now(),
         });
         Ok(Change::Started(game))
     }
@@ -220,7 +319,8 @@ impl AutoRecorder {
             WindowEvent::Added(w) | WindowEvent::Changed(w) => {
                 let uuid = w.uuid.clone();
                 windows.insert(uuid.clone(), w);
-                if self.active.is_none() && self.game_for(&uuid).is_some() {
+                if self.active.is_none() && self.resume.is_none() && self.game_for(&uuid).is_some()
+                {
                     return self.start_window(&uuid).await.map(Some);
                 }
                 Ok(None)
@@ -228,6 +328,15 @@ impl AutoRecorder {
             WindowEvent::Removed(uuid) => {
                 windows.remove(&uuid);
                 games.remove(&uuid);
+                if self
+                    .resume
+                    .as_ref()
+                    .is_some_and(|r| r.window.as_deref() == Some(&uuid))
+                {
+                    // The game closed while its recording waited to restart.
+                    self.restarts.reset();
+                    return Ok(self.resume.take().map(|r| Change::Stopped(r.game)));
+                }
                 if self
                     .active
                     .as_ref()
@@ -285,6 +394,7 @@ impl AutoRecorder {
             window: Some(uuid.to_owned()),
             game: game.clone(),
             recorder,
+            started: Instant::now(),
         });
         Ok(Change::Started(game))
     }
