@@ -1,6 +1,8 @@
 <!--
-  Seek bar. In trim mode it becomes a trim track: drag the handles to set
-  in/out; click or drag elsewhere to seek.
+  The progress line over the video: a thin rail, the played part in the
+  accent, a dot at the playhead. Trimming happens on the same line: the
+  kept range is brighter and two small markers set in and out. Click or
+  drag anywhere else to seek.
 -->
 <script lang="ts">
   let {
@@ -21,9 +23,10 @@
 
   const MIN = 0.1
   let track: HTMLDivElement
-  let drag: 'start' | 'end' | 'seek' | null = null
+  let drag = $state<'start' | 'end' | 'seek' | null>(null)
 
-  const pct = (t: number) => `${(duration > 0 ? Math.min(1, Math.max(0, t / duration)) : 0) * 100}%`
+  const frac = (t: number) => (duration > 0 ? Math.min(1, Math.max(0, t / duration)) : 0)
+  const pct = (t: number) => `${frac(t) * 100}%`
 
   function at(e: PointerEvent) {
     const r = track.getBoundingClientRect()
@@ -47,7 +50,7 @@
       end = Math.max(t, start + MIN)
       onseek(end)
     } else {
-      onseek(t)
+      onseek(trim ? Math.min(end, Math.max(start, t)) : t)
     }
   }
 
@@ -58,7 +61,7 @@
 
 <div
   class="track"
-  class:trim
+  class:dragging={drag !== null}
   bind:this={track}
   onpointerdown={(e) => down(e, 'seek')}
   onpointermove={move}
@@ -71,116 +74,124 @@
   aria-valuenow={time}
   tabindex="-1"
 >
+  <div class="rail">
+    {#if trim}
+      <div class="kept" style:left={pct(start)} style:width="{(frac(end) - frac(start)) * 100}%"></div>
+      <div class="played" style:left={pct(start)} style:width="{Math.max(0, frac(Math.min(time, end)) - frac(start)) * 100}%"></div>
+    {:else}
+      <div class="played" style:left="0" style:width={pct(time)}></div>
+    {/if}
+  </div>
   {#if trim}
-    <div class="dim" style:left="0" style:width={pct(start)}></div>
-    <div class="dim" style:left={pct(end)} style:right="0"></div>
-    <div class="range" style:left={pct(start)} style:width={pct(end - start)}></div>
-    <div class="handle" style:left={pct(start)} onpointerdown={(e) => down(e, 'start')} role="presentation"></div>
-    <div class="handle end" style:left={pct(end)} onpointerdown={(e) => down(e, 'end')} role="presentation"></div>
-    <div class="playhead" style:left={pct(time)}></div>
-  {:else}
-    <div class="rail"><div class="played" style:width={pct(time)}></div></div>
-    <div class="thumb" style:left={pct(time)}></div>
+    <div
+      class="marker"
+      style:left={pct(start)}
+      onpointerdown={(e) => down(e, 'start')}
+      role="slider"
+      aria-label="Trim start"
+      aria-valuemin={0}
+      aria-valuemax={duration}
+      aria-valuenow={start}
+      tabindex="-1"
+    ></div>
+    <div
+      class="marker"
+      style:left={pct(end)}
+      onpointerdown={(e) => down(e, 'end')}
+      role="slider"
+      aria-label="Trim end"
+      aria-valuemin={0}
+      aria-valuemax={duration}
+      aria-valuenow={end}
+      tabindex="-1"
+    ></div>
   {/if}
+  <div class="dot" style:left={pct(time)}></div>
 </div>
 
 <style>
+  /* Tall enough to grab; the visible line is thin and centred in it. */
   .track {
     position: relative;
-    height: 20px;
+    height: 18px;
     cursor: pointer;
     touch-action: none;
   }
 
-  /* Seek bar */
   .rail {
     position: absolute;
-    top: 8px;
+    top: 50%;
     left: 0;
     right: 0;
-    height: 4px;
-    border-radius: 2px;
-    background: var(--color-line-strong);
-    overflow: hidden;
-    transition:
-      height 0.12s,
-      top 0.12s;
+    height: 3px;
+    transform: translateY(-50%);
+    border-radius: 999px;
+    background: rgb(255 255 255 / 22%);
+    transition: height var(--duration-fast);
   }
 
-  .track:hover .rail {
-    top: 7px;
-    height: 6px;
+  .track:hover .rail,
+  .track.dragging .rail {
+    height: 5px;
+  }
+
+  .kept {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    background: rgb(255 255 255 / 45%);
   }
 
   .played {
-    height: 100%;
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    border-radius: inherit;
     background: var(--color-accent);
   }
 
-  .thumb {
+  .dot {
     position: absolute;
-    top: 4px;
-    width: 12px;
-    height: 12px;
-    margin-left: -6px;
+    top: 50%;
+    width: 11px;
+    height: 11px;
     border-radius: 50%;
     background: #fff;
-    opacity: 0;
-    transition: opacity 0.12s;
+    box-shadow: 0 0 0 1px rgb(0 0 0 / 25%);
+    transform: translate(-50%, -50%);
     pointer-events: none;
+    transition:
+      width var(--duration-fast),
+      height var(--duration-fast);
   }
 
-  .track:hover .thumb {
-    opacity: 1;
+  .track:hover .dot,
+  .track.dragging .dot {
+    width: 14px;
+    height: 14px;
   }
 
-  /* Trim track */
-  .track.trim {
-    height: 48px;
-    border-radius: var(--radius-ctl);
-    background: var(--color-canvas);
-    border: 1px solid var(--color-line);
-  }
-
-  .dim {
+  /* In/out markers: small accent pills across the line, with a wider
+     invisible grab area around each. */
+  .marker {
     position: absolute;
-    top: 0;
-    bottom: 0;
-    background: rgba(0, 0, 0, 0.55);
-  }
-
-  .range {
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    border-top: 2px solid var(--color-accent);
-    border-bottom: 2px solid var(--color-accent);
-    background: color-mix(in srgb, var(--color-accent) 8%, transparent);
-  }
-
-  .handle {
-    position: absolute;
-    top: -1px;
-    bottom: -1px;
-    width: 10px;
-    margin-left: -10px;
-    background: var(--color-accent);
-    border-radius: 4px 0 0 4px;
+    top: 50%;
+    width: 16px;
+    height: 22px;
+    transform: translate(-50%, -50%);
     cursor: ew-resize;
   }
 
-  .handle.end {
-    margin-left: 0;
-    border-radius: 0 4px 4px 0;
-  }
-
-  .playhead {
+  .marker::after {
+    content: '';
     position: absolute;
-    top: -4px;
-    bottom: -4px;
-    width: 2px;
-    margin-left: -1px;
-    background: #fff;
-    pointer-events: none;
+    left: 50%;
+    top: 50%;
+    width: 4px;
+    height: 14px;
+    border-radius: 2px;
+    background: var(--color-accent);
+    box-shadow: 0 0 0 1px rgb(0 0 0 / 35%);
+    transform: translate(-50%, -50%);
   }
 </style>
