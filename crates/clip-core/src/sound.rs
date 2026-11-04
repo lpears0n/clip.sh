@@ -117,11 +117,18 @@ mod tests {
         let samples = (48_000.0 * secs) as u64;
         let pipeline = gst::parse::launch(&format!(
             "audiotestsrc num-buffers={} samplesperbuffer=480 ! audio/x-raw,rate=48000,channels=1 \
-             ! audioconvert ! {encoder} ! filesink location=\"{}\"",
+             ! audioconvert ! {encoder} ! filesink name=out",
             samples / 480,
-            path.display()
         ))
+        .unwrap()
+        .downcast::<gst::Bin>()
         .unwrap();
+        // Set as a property, not in the launch string: the launch syntax
+        // eats the backslashes of a Windows path.
+        pipeline
+            .by_name("out")
+            .unwrap()
+            .set_property("location", path.to_str().unwrap());
         pipeline.set_state(gst::State::Playing).unwrap();
         let bus = pipeline.bus().unwrap();
         let msg = bus
