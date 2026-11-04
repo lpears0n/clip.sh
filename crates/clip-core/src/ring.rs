@@ -15,6 +15,11 @@ use gstreamer as gst;
 pub struct Track {
     caps: Option<gst::Caps>,
     packets: VecDeque<gst::Buffer>,
+    /// Every packet ever offered, kept or not: tells "nothing arrived"
+    /// apart from "arrived but evicted" when a track comes out empty.
+    received: u64,
+    /// Of those, packets dropped for having no timestamp.
+    no_pts: u64,
 }
 
 impl Track {
@@ -24,8 +29,23 @@ impl Track {
 
     /// Append a packet. Packets without a PTS can't be placed and are dropped.
     pub fn push(&mut self, buffer: gst::Buffer) {
+        self.received += 1;
         if buffer.pts().is_some() {
             self.packets.push_back(buffer);
+        } else {
+            self.no_pts += 1;
+        }
+    }
+
+    /// What the track holds now, for the log.
+    pub fn stats(&self) -> TrackStats {
+        TrackStats {
+            received: self.received,
+            no_pts: self.no_pts,
+            buffered: self.packets.len(),
+            oldest: self.oldest_pts(),
+            newest: self.newest_end(),
+            has_caps: self.caps.is_some(),
         }
     }
 
@@ -118,6 +138,45 @@ pub fn running_time_buffer(sample: &gst::Sample) -> Option<gst::Buffer> {
 
 fn is_keyframe(buffer: &gst::BufferRef) -> bool {
     !buffer.flags().contains(gst::BufferFlags::DELTA_UNIT)
+}
+
+/// A track's state for the log: how much arrived, how much is kept, and
+/// the running-time range it covers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TrackStats {
+    pub received: u64,
+    pub no_pts: u64,
+    pub buffered: usize,
+    pub oldest: Option<gst::ClockTime>,
+    pub newest: Option<gst::ClockTime>,
+    pub has_caps: bool,
+}
+
+impl TrackStats {
+    /// Why a track with these stats would be left out of a clip covering
+    /// `start..end`, or `None` if it would be in it.
+    pub fn missing_reason(&self, start: gst::ClockTime, end: gst::ClockTime) -> Option<String> {
+        if self.received == 0 {
+            return Some("no audio packets have arrived from the device".into());
+        }
+        if self.no_pts == self.received {
+            return Some(format!("all {} packets had no timestamp", self.received));
+        }
+        if !self.has_caps {
+            return Some("packets arrived without a format".into());
+        }
+        match (self.oldest, self.newest) {
+            (Some(a), Some(b)) if b <= start || a >= end => Some(format!(
+                "its timestamps ({a}..{b}) don't overlap the video's ({start}..{end})"
+            )),
+            (None, _) | (_, None) => Some(format!(
+                "{} packets arrived but none are buffered: their timestamps fall \
+                 before the oldest video frame ({start})",
+                self.received
+            )),
+            _ => None,
+        }
+    }
 }
 
 /// How far past the requested start a keyframe may sit and still be used.
@@ -300,6 +359,37 @@ mod tests {
 
     fn pts_ms(b: &gst::Buffer) -> u64 {
         b.pts().unwrap().mseconds()
+    }
+
+    /// The three ways an audio track can look when a clip is saved: never
+    /// fed, fed on a timeline before the video's (all evicted), or fine.
+    #[test]
+    fn explains_why_audio_is_missing_from_a_clip() {
+        let mut buf = new_buf(5, 3);
+        fill_video(&mut buf, 100_000, 110_000);
+        // Track 1: audio stamped ~100 s earlier than the video.
+        for t in (0..10_000).step_by(20) {
+            buf.push_audio(1, packet(t, 20, true));
+        }
+        // Track 2: audio on the video's timeline.
+        for t in (100_000..110_000).step_by(20) {
+            buf.push_audio(2, packet(t, 20, true));
+        }
+        let clip = buf.snapshot(gst::ClockTime::from_seconds(5)).unwrap();
+        let (start, end) = (clip.start, clip.start + clip.duration);
+        let stats: Vec<_> = buf.audio.iter().map(|t| t.stats()).collect();
+
+        let never = stats[0].missing_reason(start, end).unwrap();
+        assert!(never.contains("no audio packets have arrived"), "{never}");
+
+        assert_eq!(stats[1].received, 500);
+        assert_eq!(stats[1].buffered, 0);
+        let early = stats[1].missing_reason(start, end).unwrap();
+        assert!(early.contains("before the oldest video frame"), "{early}");
+
+        assert_eq!(stats[2].missing_reason(start, end), None);
+        // Only the healthy track made it into the clip.
+        assert_eq!(clip.audio.len(), 1);
     }
 
     fn new_buf(window_s: u64, audio: usize) -> ReplayBuffer {

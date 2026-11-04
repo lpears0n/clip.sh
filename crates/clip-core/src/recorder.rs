@@ -246,6 +246,8 @@ pub struct Recorder {
     encoder: Encoder,
     path: CapturePath,
     replay_seconds: u32,
+    /// Audio track names ("desktop", "mic"), in buffer order, for the log.
+    audio_names: Vec<&'static str>,
     error: Arc<Mutex<Option<String>>>,
     stop: Arc<AtomicBool>,
     bus_thread: Option<JoinHandle<()>>,
@@ -310,7 +312,11 @@ impl Recorder {
             tracing::info!(
                 ?encoder,
                 ?path,
+                codec = ?cfg.video.codec,
+                fps = cfg.video.fps,
+                bitrate_kbps = cfg.video.bitrate_kbps,
                 replay_seconds = cfg.replay_seconds,
+                audio = ?cfg.audio,
                 "recorder started"
             );
             return Ok(Self {
@@ -320,6 +326,7 @@ impl Recorder {
                 encoder,
                 path,
                 replay_seconds: cfg.replay_seconds,
+                audio_names: cfg.audio.iter().map(AudioSource::name).collect(),
                 error: built.error,
                 stop: built.stop,
                 bus_thread: Some(built.bus_thread),
@@ -413,7 +420,12 @@ impl Recorder {
         let duration = seconds
             .map(|s| gst::ClockTime::from_seconds(s.into()))
             .unwrap_or_else(|| self.buffer.lock().unwrap().window());
-        let clip = self.buffer.lock().unwrap().snapshot(duration)?;
+        let (clip, audio_stats) = {
+            let buffer = self.buffer.lock().unwrap();
+            let stats: Vec<_> = buffer.audio.iter().map(|t| t.stats()).collect();
+            (buffer.snapshot(duration)?, stats)
+        };
+        self.log_audio(&audio_stats, Some((clip.start, clip.start + clip.duration)));
         let markers = markers_in(&self.marks.lock().unwrap(), clip.start, clip.duration);
         let path = path.to_owned();
         tokio::task::spawn_blocking(move || {
@@ -441,7 +453,45 @@ impl Recorder {
         .await?
     }
 
+    /// One line per audio track: what arrived and what is buffered. With
+    /// a clip's running-time range, a track that won't be in the clip is a
+    /// warning that says why (it is otherwise left out silently).
+    fn log_audio(
+        &self,
+        stats: &[crate::ring::TrackStats],
+        clip: Option<(gst::ClockTime, gst::ClockTime)>,
+    ) {
+        for (name, s) in self.audio_names.iter().zip(stats) {
+            match clip.and_then(|(start, end)| s.missing_reason(start, end)) {
+                Some(why) => tracing::warn!(
+                    track = name,
+                    received = s.received,
+                    buffered = s.buffered,
+                    "audio track left out of the clip: {why}"
+                ),
+                None => tracing::info!(
+                    track = name,
+                    received = s.received,
+                    no_pts = s.no_pts,
+                    buffered = s.buffered,
+                    oldest = ?s.oldest,
+                    newest = ?s.newest,
+                    "audio"
+                ),
+            }
+        }
+    }
+
     pub async fn stop(mut self) -> Result<()> {
+        let stats: Vec<_> = self
+            .buffer
+            .lock()
+            .unwrap()
+            .audio
+            .iter()
+            .map(|t| t.stats())
+            .collect();
+        self.log_audio(&stats, None);
         if let Some(rate) = self.pipeline.by_name("rate") {
             tracing::info!(
                 frames_in = rate.property::<u64>("in"),
