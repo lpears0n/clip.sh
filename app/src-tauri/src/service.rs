@@ -7,7 +7,7 @@ use clip_core::{
     RecorderConfig,
     auto::{AutoRecorder, Backend, Change},
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::{mpsc, oneshot};
 
@@ -19,6 +19,15 @@ pub const CLIP_SAVED: &str = "clip-saved";
 pub const SCREENSHOT_SAVED: &str = "screenshot-saved";
 /// A game started recording; the payload is its name.
 pub const RECORDING_STARTED: &str = "recording-started";
+/// A moment was marked; the payload is a [`Marked`].
+pub const MARKED: &str = "moment-marked";
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct Marked {
+    pub game: String,
+    /// How far into the replay buffer the mark is, in seconds.
+    pub at: f64,
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -57,6 +66,7 @@ enum Cmd {
     Status(oneshot::Sender<Status>),
     Save(PathBuf, oneshot::Sender<Result<PathBuf, String>>),
     Screenshot(PathBuf, oneshot::Sender<Result<PathBuf, String>>),
+    Mark(oneshot::Sender<Result<f64, String>>),
     Configure(RecorderConfig),
     ChooseScreen(oneshot::Sender<Result<(), String>>),
     /// What to add to the ignore list for the game being recorded.
@@ -106,6 +116,14 @@ impl Service {
     pub async fn screenshot(&self, clips_dir: PathBuf) -> Result<PathBuf, String> {
         let (tx, rx) = oneshot::channel();
         self.send(Cmd::Screenshot(clips_dir, tx))?;
+        rx.await.map_err(|_| "recorder stopped".to_string())?
+    }
+
+    /// Mark this moment in the recording; saved clips show it. Returns how
+    /// far into the replay buffer it is, in seconds.
+    pub async fn mark(&self) -> Result<f64, String> {
+        let (tx, rx) = oneshot::channel();
+        self.send(Cmd::Mark(tx))?;
         rx.await.map_err(|_| "recorder stopped".to_string())?
     }
 
@@ -160,6 +178,7 @@ async fn run(
                     Cmd::Save(_, r) | Cmd::Screenshot(_, r) => {
                         drop(r.send(Err("automatic capture is unavailable".into())))
                     }
+                    Cmd::Mark(r) => drop(r.send(Err("automatic capture is unavailable".into()))),
                     Cmd::Configure(_) => {}
                     Cmd::ChooseScreen(r) => {
                         drop(r.send(Err("automatic capture is unavailable".into())))
@@ -196,20 +215,21 @@ async fn run(
                     Cmd::Status(r) => drop(r.send(status(&auto, replay_seconds, session.as_ref()))),
                     Cmd::Save(dir, r) => {
                         let res = auto.save(&dir, None).await.map_err(|e| format!("{e:#}"));
-                        if let Ok(p) = &res {
+                        if let Ok(saved) = &res {
                             if let Some(g) = auto.current_game() {
                                 let meta = library::ClipMeta {
                                     game: g.name.clone(),
                                     steam_app_id: g.steam_app_id,
+                                    markers: saved.markers.clone(),
                                     ..Default::default()
                                 };
-                                if let Err(e) = library::write_meta(p, &meta) {
+                                if let Err(e) = library::write_meta(&saved.path, &meta) {
                                     tracing::warn!("clip metadata: {e:#}");
                                 }
                             }
-                            let _ = app.emit(CLIP_SAVED, p);
+                            let _ = app.emit(CLIP_SAVED, &saved.path);
                         }
-                        drop(r.send(res));
+                        drop(r.send(res.map(|s| s.path)));
                     }
                     Cmd::Screenshot(dir, r) => {
                         let res = auto.screenshot(&dir).await.map_err(|e| format!("{e:#}"));
@@ -230,6 +250,14 @@ async fn run(
                         };
                         drop(r.send(res));
                         let _ = app.emit(STATUS_CHANGED, status(&auto, replay_seconds, session.as_ref()));
+                    }
+                    Cmd::Mark(r) => {
+                        let res = auto.mark().map_err(|e| format!("{e:#}"));
+                        if let Ok(at) = res {
+                            let game = auto.current_game().map(|g| g.name.clone()).unwrap_or_default();
+                            let _ = app.emit(MARKED, Marked { game, at });
+                        }
+                        drop(r.send(res));
                     }
                     Cmd::IgnoreEntry(r) => drop(r.send(auto.ignore_entry())),
                     Cmd::Configure(cfg) => {

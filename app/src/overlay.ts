@@ -7,7 +7,7 @@ import './overlay.css'
 import { ACCENTS, type Accent } from './lib/prefs.svelte'
 
 interface Popup {
-  kind: 'ready' | 'saved' | 'screenshot'
+  kind: 'ready' | 'saved' | 'screenshot' | 'marked'
   title: string
   detail: string
   /** Hotkey to show as a key cap after the detail, if any. */

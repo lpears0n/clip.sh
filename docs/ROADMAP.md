@@ -132,10 +132,12 @@ ship on its own.
 - **Audio**: per-track mute buttons on the timeline, waveform strip under
   the trim track (`level` element at inspect time, cached next to the
   thumbnail).
-- **Markers.** Press a second hotkey while playing to drop a marker into the
-  buffer; saved into the sidecar; shown as ticks on the timeline. This is
-  the manual half of Steam's timeline and the foundation for event
-  detection.
+- ~~**Markers.**~~ Done. `F7` (or `clipsh mark`) records the moment on
+  the recording's clock; a save keeps the marks inside the clip, relative
+  to its start, in the sidecar, and an edit carries the ones inside its
+  trim. The viewer shows them as ticks on the line, `[` / `]` jump between
+  them. This is the manual half of Steam's timeline and the foundation for
+  event detection.
 
 ### Phase 3 — Capture quality
 

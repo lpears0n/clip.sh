@@ -1,7 +1,8 @@
 <!--
   The progress line over the video: a thin rail, the played part in the
   accent, a dot at the playhead. Trimming happens on the same line: the
-  kept range is brighter and two small markers set in and out. Click or
+  kept range is brighter and two small markers set in and out. Moments
+  marked while recording show as ticks; clicking one jumps there. Click or
   drag anywhere else to seek.
 -->
 <script lang="ts">
@@ -11,6 +12,7 @@
     trim,
     start = $bindable(),
     end = $bindable(),
+    markers = [],
     onseek,
   }: {
     duration: number
@@ -18,6 +20,8 @@
     trim: boolean
     start: number
     end: number
+    /** Marked moments, in seconds. */
+    markers?: number[]
     onseek: (t: number) => void
   } = $props()
 
@@ -82,6 +86,19 @@
       <div class="played" style:left="0" style:width={pct(time)}></div>
     {/if}
   </div>
+  {#each markers as m, i (i)}
+    <button
+      class="tick"
+      style:left={pct(m)}
+      onpointerdown={(e) => {
+        e.stopPropagation()
+        onseek(m)
+      }}
+      aria-label="Marked moment at {m.toFixed(1)} s"
+      title="Marked moment"
+      tabindex="-1"
+    ></button>
+  {/each}
   {#if trim}
     <div
       class="marker"
@@ -169,6 +186,33 @@
   .track.dragging .dot {
     width: 14px;
     height: 14px;
+  }
+
+  /* Marked moments: short white ticks standing above the line, with a
+     wider invisible hit area. */
+  .tick {
+    position: absolute;
+    top: 0;
+    width: 10px;
+    height: 50%;
+    padding: 0;
+    border: 0;
+    background: none;
+    transform: translateX(-50%);
+    cursor: pointer;
+  }
+
+  .tick::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    bottom: 1px;
+    width: 2px;
+    height: 7px;
+    border-radius: 1px;
+    background: #fff;
+    box-shadow: 0 0 0 1px rgb(0 0 0 / 30%);
+    transform: translateX(-50%);
   }
 
   /* In/out markers: small accent pills across the line, with a wider

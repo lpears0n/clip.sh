@@ -1,4 +1,4 @@
-//! The global keys: save a clip, save a screenshot. Linux asks the desktop
+//! The global keys: save a clip, save a screenshot, mark a moment. Linux asks the desktop
 //! (KGlobalAccel or the GlobalShortcuts portal); Windows registers native
 //! hotkeys through the global-shortcut plugin, which fire over fullscreen
 //! games.
@@ -22,8 +22,9 @@ pub enum Backend {
 pub async fn fire(app: &AppHandle, action: Action) {
     let state = app.state::<crate::AppState>();
     let result = match action {
-        Action::SaveClip => state.service.save(state.clips_dir()).await,
-        Action::Screenshot => state.service.screenshot(state.clips_dir()).await,
+        Action::SaveClip => state.service.save(state.clips_dir()).await.map(drop),
+        Action::Screenshot => state.service.screenshot(state.clips_dir()).await.map(drop),
+        Action::Marker => state.service.mark().await.map(drop),
     };
     if let Err(e) = result {
         tracing::warn!("hotkey {}: {e}", action.id());

@@ -488,14 +488,20 @@
             >
               <HotkeyBinder value={settings.screenshot_hotkey} onbind={(screenshot_hotkey) => update({ screenshot_hotkey })} />
             </Row>
+            <Row
+              title="Mark a moment"
+              description="Drops a marker into the recording. Clips you save show it on their timeline; [ and ] jump between markers."
+            >
+              <HotkeyBinder value={settings.marker_hotkey} onbind={(marker_hotkey) => update({ marker_hotkey })} />
+            </Row>
           {/if}
           <Row
             title="Command"
             description={hotkeyBackend === null
-              ? 'Your desktop has no global shortcut service. Bind this command to a key in its keyboard settings; clipsh screenshot takes a screenshot.'
+              ? 'Your desktop has no global shortcut service. Bind this command to a key in its keyboard settings; clipsh screenshot takes a screenshot and clipsh mark marks a moment.'
               : hotkeyBackend === 'native'
-                ? 'Use it from scripts, Stream Deck profiles or AutoHotkey. clipsh screenshot takes a screenshot.'
-                : 'Bind this to any key in your desktop’s keyboard settings, or use it from scripts. clipsh screenshot takes a screenshot.'}
+                ? 'Use it from scripts, Stream Deck profiles or AutoHotkey. clipsh screenshot takes a screenshot; clipsh mark marks a moment.'
+                : 'Bind this to any key in your desktop’s keyboard settings, or use it from scripts. clipsh screenshot takes a screenshot; clipsh mark marks a moment.'}
           >
             <code class="rounded-ctl border border-line bg-canvas px-2.5 py-1.5 text-secondary text-fg-2">clipsh save</code>
             <button class="btn" onclick={copyCommand}>{copied ? 'Copied' : 'Copy'}</button>

@@ -1,5 +1,6 @@
 //! The in-game popup: "Ready to record" when a game starts recording,
-//! "Clip saved" / "Screenshot saved" on a save. Windows only.
+//! "Clip saved" / "Screenshot saved" on a save, "Moment marked" on a
+//! marker. Windows only.
 //!
 //! It is a small transparent window kept on top of the game, not something
 //! drawn into the game: hooking a game's rendering (the way Discord's or
@@ -26,6 +27,7 @@ pub enum Kind {
     Ready,
     Saved,
     Screenshot,
+    Marked,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -55,12 +57,21 @@ impl Popup {
             kind,
             title: match kind {
                 Kind::Screenshot => "Screenshot saved",
+                Kind::Marked => "Moment marked",
                 _ => "Clip saved",
             }
             .into(),
             detail: game.into(),
             key: None,
             ms: 2500,
+        }
+    }
+
+    /// Short: a marker is pressed mid-fight.
+    pub fn marked(game: &str) -> Self {
+        Self {
+            ms: 1500,
+            ..Self::saved(Kind::Marked, game)
         }
     }
 }

@@ -13,6 +13,7 @@
     initMedia,
     onClipSaved,
     onScreenshotSaved,
+    onMarked,
     onLibraryChanged,
     onRenderProgress,
     onStatusChanged,
@@ -332,6 +333,7 @@
       onScreenshotSaved((path) => {
         notify(`Screenshot saved as ${path.split(/[\\/]/).pop()}`)
       }),
+      onMarked(() => notify('Moment marked')),
       onLibraryChanged(() => {
         refreshLibrary()
         refreshUsage()

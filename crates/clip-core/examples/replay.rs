@@ -70,9 +70,9 @@ mod imp {
             }
             let path = clip_path(&root, "Desktop");
             match recorder.save(None, &path).await {
-                Ok(p) => println!(
+                Ok(s) => println!(
                     "saved {} (buffered {:.1}s)",
-                    p.display(),
+                    s.path.display(),
                     status.buffered_seconds
                 ),
                 Err(e) => eprintln!("save failed: {e:#}"),

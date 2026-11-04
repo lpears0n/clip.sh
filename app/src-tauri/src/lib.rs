@@ -420,7 +420,7 @@ async fn render_clip(
     .await
     .map_err(err)?
     .map_err(|e| format!("{e:#}"))?;
-    library::copy_meta(&source, &result);
+    library::copy_meta(&source, &result, start, end);
     let _ = app.emit(service::CLIP_SAVED, &result);
     Ok(result)
 }
@@ -501,8 +501,9 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, "open", "Open clip.sh", true, None::<&str>)?;
     let save = MenuItem::with_id(app, "save", "Save clip", true, None::<&str>)?;
     let shot = MenuItem::with_id(app, "screenshot", "Save screenshot", true, None::<&str>)?;
+    let mark = MenuItem::with_id(app, "mark", "Mark a moment", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open, &save, &shot, &quit])?;
+    let menu = Menu::with_items(app, &[&open, &save, &shot, &mark, &quit])?;
     TrayIconBuilder::with_id("main")
         .icon(app.default_window_icon().unwrap().clone())
         .tooltip("clip.sh")
@@ -510,11 +511,11 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "open" => show_main(app),
-            "save" | "screenshot" => {
-                let action = if event.id.as_ref() == "save" {
-                    clip_core::Action::SaveClip
-                } else {
-                    clip_core::Action::Screenshot
+            "save" | "screenshot" | "mark" => {
+                let action = match event.id.as_ref() {
+                    "save" => clip_core::Action::SaveClip,
+                    "screenshot" => clip_core::Action::Screenshot,
+                    _ => clip_core::Action::Marker,
                 };
                 let app = app.clone();
                 tauri::async_runtime::spawn(async move { hotkeys::fire(&app, action).await });
@@ -651,6 +652,16 @@ pub fn run() {
                         Some(overlay::Kind::Screenshot),
                         &path,
                     );
+                });
+            }
+            {
+                let handle = app.handle().clone();
+                app.listen_any(service::MARKED, move |event| {
+                    if overlay::enabled(&handle) {
+                        let m: service::Marked =
+                            serde_json::from_str(event.payload()).unwrap_or_default();
+                        overlay::show(&handle, overlay::Popup::marked(&m.game));
+                    }
                 });
             }
             {

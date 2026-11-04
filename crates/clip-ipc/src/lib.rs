@@ -16,6 +16,8 @@ pub enum Request {
     Save,
     /// Save the newest frame as a PNG.
     Screenshot,
+    /// Mark this moment in the recording.
+    Mark,
     /// Recorder status.
     Status,
     /// Bring the window to the front.

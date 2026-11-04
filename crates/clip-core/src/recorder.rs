@@ -58,6 +58,30 @@ fn zero_copy_default() -> bool {
     cfg!(windows)
 }
 
+/// A saved clip: its file and the marks inside it, in seconds from its
+/// start.
+#[derive(Debug, Clone)]
+pub struct SavedClip {
+    pub path: PathBuf,
+    pub markers: Vec<f64>,
+}
+
+/// The marks within `start ..= start + duration`, in seconds from `start`,
+/// in order.
+fn markers_in(
+    marks: &[gst::ClockTime],
+    start: gst::ClockTime,
+    duration: gst::ClockTime,
+) -> Vec<f64> {
+    let mut out: Vec<f64> = marks
+        .iter()
+        .filter(|&&m| m >= start && m <= start + duration)
+        .map(|&m| (m - start).seconds_f64())
+        .collect();
+    out.sort_by(f64::total_cmp);
+    out
+}
+
 /// When to restart a recording that failed, shared by every platform's
 /// auto-recorder: the first retry at once, then backing off, with the
 /// count reset by a recording that ran a good while.
@@ -207,6 +231,8 @@ impl CaptureSource {
 pub struct Recorder {
     pipeline: gst::Pipeline,
     buffer: Arc<Mutex<ReplayBuffer>>,
+    /// Moments the user marked, on the recording's running-time timeline.
+    marks: Mutex<Vec<gst::ClockTime>>,
     encoder: Encoder,
     path: CapturePath,
     replay_seconds: u32,
@@ -280,6 +306,7 @@ impl Recorder {
             return Ok(Self {
                 pipeline: built.pipeline,
                 buffer: built.buffer,
+                marks: Mutex::new(Vec::new()),
                 encoder,
                 path,
                 replay_seconds: cfg.replay_seconds,
@@ -341,8 +368,28 @@ impl Recorder {
         Some(now.saturating_sub(newest))
     }
 
-    /// Save the last `seconds` (default: the whole buffer) to `path`.
-    pub async fn save(&self, seconds: Option<u32>, path: &Path) -> Result<PathBuf> {
+    /// Mark this moment (a marker hotkey press). Returns how far into the
+    /// replay buffer it is, in seconds. Marks older than the buffer are
+    /// forgotten.
+    pub fn mark(&self) -> Result<f64> {
+        let now = self
+            .pipeline
+            .current_running_time()
+            .context("the recording hasn't started")?;
+        let (oldest, window) = {
+            let b = self.buffer.lock().unwrap();
+            (b.video.oldest_pts(), b.window())
+        };
+        let mut marks = self.marks.lock().unwrap();
+        let floor = oldest.unwrap_or(now).min(now.saturating_sub(window));
+        marks.retain(|&m| m >= floor);
+        marks.push(now);
+        Ok(now.saturating_sub(oldest.unwrap_or(now)).seconds_f64())
+    }
+
+    /// Save the last `seconds` (default: the whole buffer) to `path`, with
+    /// the marks that fall inside it.
+    pub async fn save(&self, seconds: Option<u32>, path: &Path) -> Result<SavedClip> {
         if let Some(age) = self.frame_age()
             && age > STALE
         {
@@ -357,11 +404,17 @@ impl Recorder {
             .map(|s| gst::ClockTime::from_seconds(s.into()))
             .unwrap_or_else(|| self.buffer.lock().unwrap().window());
         let clip = self.buffer.lock().unwrap().snapshot(duration)?;
+        let markers = markers_in(&self.marks.lock().unwrap(), clip.start, clip.duration);
         let path = path.to_owned();
         tokio::task::spawn_blocking(move || {
             write_mp4(&clip, &path)?;
-            tracing::info!(path = %path.display(), duration = %clip.duration, "saved clip");
-            Ok(path)
+            tracing::info!(
+                path = %path.display(),
+                duration = %clip.duration,
+                markers = markers.len(),
+                "saved clip"
+            );
+            Ok(SavedClip { path, markers })
         })
         .await?
     }
@@ -657,6 +710,16 @@ mod tests {
         p.reset();
         assert!(p.due());
         assert_eq!(p.failures(), 0);
+    }
+
+    #[test]
+    fn markers_inside_the_clip_are_kept_relative_to_its_start() {
+        let marks = [s(5.0), s(12.5), s(20.0), s(31.0)];
+        // A clip from 10 s, 20 s long: 12.5 and 20 fall inside.
+        assert_eq!(markers_in(&marks, s(10.0), s(20.0)), [2.5, 10.0]);
+        assert!(markers_in(&marks, s(40.0), s(5.0)).is_empty());
+        // Inclusive at both ends.
+        assert_eq!(markers_in(&marks, s(5.0), s(7.5)), [0.0, 7.5]);
     }
 
     #[test]
