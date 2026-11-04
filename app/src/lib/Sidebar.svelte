@@ -40,7 +40,7 @@
 >
   <div class="flex h-14 flex-none items-center {collapsed ? 'justify-center' : 'px-5'}">
     <span class="display-face text-title font-bold">
-      {#if collapsed}c<span class="text-accent">.</span>{:else}clip<span class="text-accent">.sh</span>{/if}
+      {#if collapsed}r<span class="text-accent">.</span>{:else}reruns<span class="text-accent">.gg</span>{/if}
     </span>
   </div>
 
