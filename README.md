@@ -5,7 +5,7 @@ An instant replay recorder for games on Windows and Linux, kind of like Medal. I
 ## Download
 
 Installers for Windows (`.exe`) and Linux (AppImage, `.deb`, `.rpm`) are on the
-[releases page](https://github.com/lpears0n/clip.sh/releases). The Windows
+[releases page](https://github.com/lpears0n/reruns/releases). The Windows
 installer bundles everything it needs.
 
 ## How to run it locally

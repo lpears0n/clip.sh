@@ -5,7 +5,7 @@ pkgver=0.1.0
 pkgrel=1
 pkgdesc="Instant-replay game clipping for Linux (like ShadowPlay / Medal)"
 arch=('x86_64')
-url="https://github.com/lpears0n/clip.sh"
+url="https://github.com/lpears0n/reruns"
 license=('GPL-3.0-or-later')
 depends=(
   'webkit2gtk-4.1' 'libayatana-appindicator' 'gstreamer'
@@ -21,7 +21,7 @@ makedepends=('cargo' 'pnpm' 'nodejs')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
 sha256sums=('SKIP') # updated by the release script
 
-_srcdir="clip.sh-$pkgver"
+_srcdir="reruns-$pkgver"
 
 prepare() {
   cd "$_srcdir/app"

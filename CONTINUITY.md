@@ -8,8 +8,9 @@ executable, desktop file, icon, AUR package); `clipsh` → `rerunsctl`
 .local/share/clip.sh` → `…/reruns`; `~/Videos/clip.sh` → `~/Videos/Reruns`;
 `CLIPSH_*` env vars → `RERUNS_*`; socket `reruns.sock`, pipe
 `\\.\pipe\reruns-<user>`, KGlobalAccel component `reruns`. Internal crate
-names (`clip-core`, `clip-ipc`; the CLI crate is `rerunsctl`) and the
-GitHub repo name `lpears0n/clip.sh` are unchanged. Nothing migrates old
+names (`clip-core`, `clip-ipc`; the CLI crate is `rerunsctl`) are
+unchanged. The GitHub repo is now `lpears0n/reruns` (the old
+`lpears0n/clip.sh` URL redirects). Nothing migrates old
 settings or clips: there were no released users.
 
 Last updated: 2026-11-04. Current plans live in the repo: `docs/ROADMAP.md`

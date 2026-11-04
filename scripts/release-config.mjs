@@ -18,7 +18,7 @@ const out = resolve(process.argv[2] ?? 'app/src-tauri/release.conf.json')
 const config = {}
 
 if (env.UPDATER_PUBKEY?.trim() && env.TAURI_SIGNING_PRIVATE_KEY?.trim()) {
-  const repo = env.GITHUB_REPOSITORY ?? 'lpears0n/clip.sh'
+  const repo = env.GITHUB_REPOSITORY ?? 'lpears0n/reruns'
   config.bundle = { createUpdaterArtifacts: true }
   config.plugins = {
     updater: {
