@@ -258,6 +258,16 @@ Ad slots: AdSlot component, off unless `"ads": true` in settings.json (728×90 u
   subscription; Azure for Students credit doesn't qualify), Microsoft
   Store (free, but only signs MSIX).
 
+- First `v1.0.0` tag (2026-11-04) was pushed on `ed5d932` (pre-rename)
+  from a stale local `main`, so it built "clip.sh 0.1.0"; both jobs then
+  failed with "Wrong password for that key". A correct password still
+  fails that way if the secret has a trailing space or line break. The
+  Release workflow now checks key + password right after `pnpm install`
+  (seconds, not after the 10-minute build). The tag must be moved to
+  `main` (`git tag -f v1.0.0 origin/main`, `git push -f origin v1.0.0`).
+- The app icon is still Tauri's default placeholder (app/src-tauri/icons).
+- Sidebar wordmark is "reruns" + accent ".gg" ("r." collapsed).
+
 ## Next, in order
 1. v1.0.0: owner adds the updater key secrets (`docs/RELEASING.md`), then
    tags `v1.0.0` on `main`; the Release workflow makes the draft. Owner

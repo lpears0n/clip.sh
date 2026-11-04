@@ -25,6 +25,7 @@ jobs:
       # Only whether they are set; the secrets themselves are given to the
       # steps that use them.
       HAS_WINDOWS_CERT: ${{ secrets.WINDOWS_CERTIFICATE != '' }}
+      HAS_UPDATER_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -92,6 +93,24 @@ jobs:
           workspaces: '. -> target'
       - run: pnpm install --frozen-lockfile
         working-directory: app
+      # The key is otherwise only used after the full build, so a wrong
+      # password or a mismatched key cost a 10-minute run to find out.
+      - name: Check the updater key and password
+        if: env.HAS_UPDATER_KEY == 'true'
+        shell: bash
+        working-directory: app
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          probe="$RUNNER_TEMP/updater-key-check.txt"
+          echo "key check" > "$probe"
+          if ! pnpm --silent tauri signer sign "$probe" > "$RUNNER_TEMP/updater-key-check.log" 2>&1; then
+            cat "$RUNNER_TEMP/updater-key-check.log"
+            echo "::error::TAURI_SIGNING_PRIVATE_KEY and TAURI_SIGNING_PRIVATE_KEY_PASSWORD don't match: re-enter the password secret (no trailing space or line break), or check the key is the one it was made with"
+            exit 1
+          fi
+          echo "updater key and password match"
       - name: Collect the GStreamer runtime for bundling (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
