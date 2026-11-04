@@ -69,6 +69,9 @@ export interface ClipPatch {
   labels?: string[]
 }
 
+/** A save sound: the built-in beep, or a file the user imported. */
+export type Sound = { kind: 'builtin' } | { kind: 'custom'; path: string; name: string }
+
 export interface Settings {
   replay_seconds: number
   mic: boolean
@@ -84,6 +87,12 @@ export interface Settings {
   close_to_tray: boolean
   notify_on_save: boolean
   sound_on_save: boolean
+  /** Percent of the sound file's own level, 0–200. */
+  sound_volume: number
+  /** Played when a clip saves or an edit renders. */
+  clip_sound: Sound
+  /** Played when a screenshot saves; null = same as clips. */
+  screenshot_sound: Sound | null
   /** Windows: popup over the game when recording starts and on a save. */
   overlay: boolean
   fps: number
@@ -172,6 +181,9 @@ export const api = {
   exportPlan: (maxMb: number, seconds: number, audio: boolean) =>
     invoke<ExportPlan>('export_plan', { maxMb, seconds, audio }),
   cancelRender: () => invoke<void>('cancel_render'),
+  /** Check a picked sound file and copy it in; resolves to the sound to store. */
+  importSound: (path: string, slot: 'clip' | 'screenshot') => invoke<Sound>('import_sound', { path, slot }),
+  previewSound: (sound: Sound, volume: number) => invoke<void>('preview_sound', { sound, volume }),
 }
 
 export const onRenderProgress = (f: (p: { path: string; fraction: number }) => void): Promise<UnlistenFn> =>

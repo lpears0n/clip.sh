@@ -52,7 +52,7 @@ function fixtures(scenario) {
       : { state: 'recording', game: 'ELDEN RING', steam_app_id: 1245620, session_start_ms: now - h, buffered_seconds: 30, replay_seconds: 30, encoder: 'nvenc', capture_path: 'zerocopy', error: null, backend: 'kwin', needs_screen: false, hdr: { sdr_white_nits: 240, peak_nits: 1000 }, hdr_tonemapped: false },
     get_settings: {
       replay_seconds: 30, mic: true, clips_dir: '/home/u/Videos/clip.sh', hotkey: 'F8', screenshot_hotkey: 'F9', marker_hotkey: 'F7', capture_backend: null,
-      launch_at_login: false, start_in_tray: true, close_to_tray: true, notify_on_save: true, sound_on_save: true, overlay: true,
+      launch_at_login: false, start_in_tray: true, close_to_tray: true, notify_on_save: true, sound_on_save: true, sound_volume: 100, clip_sound: { kind: 'builtin' }, screenshot_sound: null, overlay: true,
       fps: 60, bitrate_kbps: 20000, codec: 'h264', encoder: null, cursor: true, zero_copy: true, hdr_compatibility: false, ignored_games: [], desktop_audio: true, desktop_device: 'out-headset',
       mic_device: null, audio_bitrate_kbps: 160, storage_limit_gb: 25, protect_edits: true, use_trash: true, ads: false,
     },
@@ -110,6 +110,9 @@ function mockBridge(data) {
         (window.__listeners ||= {})[args.event] = args.handler
         return args.handler
       }
+      if (cmd === 'plugin:dialog|open') return '/home/u/Music/airhorn.mp3'
+      if (cmd === 'import_sound') return { kind: 'custom', path: `/home/u/.config/clip.sh/sounds/${args.slot}-1.mp3`, name: 'airhorn.mp3' }
+      if (cmd === 'preview_sound') { (window.__previews ||= []).push(args); return null }
       if (cmd.startsWith('plugin:')) return 1
       if (cmd in data) return data[cmd]
       return null
@@ -290,6 +293,17 @@ async function runScenario(scenario, browser) {
   assert.equal(await page.getByLabel('Output device').inputValue(), 'out-headset', 'chosen output is selected')
   assert.equal(await page.getByLabel('Output device').locator('option').count(), 3, 'default + two outputs')
   await shot('settings-audio')
+  // Save sounds: pick a file for clips; screenshots follow it.
+  await page.getByRole('button', { name: 'General' }).click()
+  await page.getByRole('button', { name: 'Play the clip sound' }).click()
+  await page.getByRole('button', { name: 'Choose file…' }).first().click()
+  await page.getByText('airhorn.mp3').first().waitFor()
+  assert.equal(await page.getByRole('button', { name: 'Use default' }).count(), 1, 'a custom sound can be reset')
+  assert.ok(await page.getByText('Same as clips').isVisible(), 'screenshots use the clip sound')
+  const previews = await page.evaluate(() => window.__previews)
+  assert.deepEqual(previews[0], { sound: { kind: 'builtin' }, volume: 100 }, 'preview plays the built-in sound')
+  assert.equal(previews.at(-1).sound.name, 'airhorn.mp3', 'a picked sound is played once')
+  await shot('settings-sounds')
   await page.getByRole('button', { name: 'Hotkeys' }).click()
   await page.waitForTimeout(150)
   assert.equal(await page.locator('kbd', { hasText: /^F9$/ }).count(), 1, 'screenshot hotkey row')

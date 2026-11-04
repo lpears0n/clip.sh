@@ -4,7 +4,7 @@
 </script>
 
 <script lang="ts">
-  import { AudioLines, Check, FolderOpen, HardDrive, Keyboard, Palette, SlidersHorizontal, Video } from '@lucide/svelte'
+  import { AudioLines, Check, FolderOpen, HardDrive, Keyboard, Palette, Play, SlidersHorizontal, Video } from '@lucide/svelte'
   import { open as openDialog } from '@tauri-apps/plugin-dialog'
   import {
     api,
@@ -13,6 +13,7 @@
     type Encoder,
     type HotkeyBackend,
     type Settings,
+    type Sound,
     type Status,
     type Usage,
   } from './api'
@@ -118,6 +119,27 @@
     else if (settings.storage_limit_gb == null) update({ storage_limit_gb: 20 })
   }
 
+  // Save sounds
+  const SOUND_FILES = ['wav', 'mp3', 'ogg', 'oga', 'opus', 'flac', 'm4a']
+  let soundError = $state<string | null>(null)
+  const soundName = (s: Sound | null) =>
+    s === null ? 'Same as clips' : s.kind === 'builtin' ? 'The built-in beep' : s.name || 'Your sound'
+
+  async function chooseSound(slot: 'clip' | 'screenshot') {
+    soundError = null
+    const file = await openDialog({ filters: [{ name: 'Sounds', extensions: SOUND_FILES }] })
+    if (typeof file !== 'string') return
+    try {
+      const sound = await api.importSound(file, slot)
+      await update(slot === 'clip' ? { clip_sound: sound } : { screenshot_sound: sound })
+      api.previewSound(sound, settings.sound_volume)
+    } catch (e) {
+      soundError = String(e)
+    }
+  }
+
+  const previewSound = (s: Sound | null) => api.previewSound(s ?? settings.clip_sound, settings.sound_volume)
+
   async function browse() {
     const dir = await openDialog({ directory: true, defaultPath: settings.clips_dir })
     if (typeof dir === 'string') update({ clips_dir: dir })
@@ -182,9 +204,60 @@
           <Row title="Show a notification" description="Includes the game the clip was saved under.">
             <Toggle label="Show a notification" checked={settings.notify_on_save} onchange={(notify_on_save) => update({ notify_on_save })} />
           </Row>
-          <Row title="Play a sound" description="A short shutter sound you can hear in-game.">
+          <Row title="Play a sound" description="A short sound you can hear in-game.">
             <Toggle label="Play a sound" checked={settings.sound_on_save} onchange={(sound_on_save) => update({ sound_on_save })} />
           </Row>
+          {#if settings.sound_on_save}
+            <Row title="Clip sound" description={soundName(settings.clip_sound)}>
+              <div class="flex items-center gap-2">
+                <button class="btn h-9 w-9 px-0" onclick={() => previewSound(settings.clip_sound)} aria-label="Play the clip sound" title="Play">
+                  <Play size={15} />
+                </button>
+                {#if settings.clip_sound.kind === 'custom'}
+                  <button class="btn h-9" onclick={() => update({ clip_sound: { kind: 'builtin' } })}>Use default</button>
+                {/if}
+                <button class="btn h-9" onclick={() => chooseSound('clip')}>Choose file…</button>
+              </div>
+            </Row>
+            <Row title="Screenshot sound" description={soundName(settings.screenshot_sound)}>
+              <div class="flex items-center gap-2">
+                <button
+                  class="btn h-9 w-9 px-0"
+                  onclick={() => previewSound(settings.screenshot_sound)}
+                  aria-label="Play the screenshot sound"
+                  title="Play"
+                >
+                  <Play size={15} />
+                </button>
+                {#if settings.screenshot_sound !== null}
+                  <button class="btn h-9" onclick={() => update({ screenshot_sound: null })}>Same as clips</button>
+                {/if}
+                <button class="btn h-9" onclick={() => chooseSound('screenshot')}>Choose file…</button>
+              </div>
+            </Row>
+            <Row title="Sound volume" description="Relative to the sound file itself. The built-in beep is already quiet.">
+              <div class="flex items-center gap-3">
+                <input
+                  type="range"
+                  min="0"
+                  max="200"
+                  step="5"
+                  value={settings.sound_volume}
+                  aria-label="Sound volume"
+                  class="w-36"
+                  style:--fill="{settings.sound_volume / 2}%"
+                  onchange={async (e) => {
+                    await update({ sound_volume: Number(e.currentTarget.value) })
+                    previewSound(settings.clip_sound)
+                  }}
+                />
+                <span class="w-10 text-right tabular-nums text-fg-2">{settings.sound_volume}%</span>
+              </div>
+            </Row>
+            {#if soundError}
+              <div class="px-4 py-3 text-secondary text-danger" role="alert">{soundError}</div>
+            {/if}
+          {/if}
           {#if status?.backend === 'windows'}
             <Row
               title="In-game popup"
