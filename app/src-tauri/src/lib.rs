@@ -204,6 +204,27 @@ async fn save_clip(state: State<'_, AppState>) -> CmdResult<PathBuf> {
     state.service.save(state.clips_dir()).await
 }
 
+/// "Not a game": stop recording the current game and never detect it
+/// again. Returns the updated settings (the entry is on their list).
+#[tauri::command]
+async fn ignore_current_game(state: State<'_, AppState>) -> CmdResult<Settings> {
+    let entry = state
+        .service
+        .ignore_entry()
+        .await?
+        .ok_or("no game is being recorded")?;
+    let settings = {
+        let mut s = state.settings.lock().unwrap();
+        if !s.ignored_games.contains(&entry) {
+            s.ignored_games.push(entry);
+        }
+        s.clone()
+    };
+    settings.save().map_err(|e| format!("{e:#}"))?;
+    state.service.configure(settings.recorder_config())?;
+    Ok(settings)
+}
+
 #[tauri::command]
 async fn save_screenshot(state: State<'_, AppState>) -> CmdResult<PathBuf> {
     state.service.screenshot(state.clips_dir()).await
@@ -694,6 +715,7 @@ pub fn run() {
             get_status,
             save_clip,
             save_screenshot,
+            ignore_current_game,
             list_clips,
             delete_clip,
             update_clip,

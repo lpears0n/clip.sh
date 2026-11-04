@@ -24,7 +24,10 @@ use windows::{
     core::{BOOL, PWSTR},
 };
 
-use crate::game::{Game, steam_app_name, steam_libraries, vdf_value};
+use crate::{
+    game::{Game, steam_app_name, steam_libraries, vdf_value},
+    launchers::{self, InstallIndex},
+};
 
 /// A game with the window it is drawing into and the monitor that window
 /// is on (what gets captured).
@@ -35,6 +38,9 @@ pub struct RunningGame {
     pub monitor: isize,
     /// It's the window the user is interacting with.
     pub foreground: bool,
+    /// The game's executable, lower-case file stem (`r5apex`), for the
+    /// "not a game" list.
+    pub exe: String,
 }
 
 /// Processes that own large windows but are never games.
@@ -95,6 +101,10 @@ const STEAM_REFRESH: Duration = Duration::from_secs(60);
 pub struct Scanner {
     exes: HashMap<u32, Option<PathBuf>>,
     steam: Option<(SteamIndex, Instant)>,
+    /// Other launchers' installs (Epic, Riot, GOG, Ubisoft, EA, Battle.net).
+    launchers: Option<(InstallIndex, Instant)>,
+    /// Xbox / Game Pass names by executable (they come from a file).
+    xbox: HashMap<PathBuf, Option<String>>,
 }
 
 impl Scanner {
@@ -111,8 +121,12 @@ impl Scanner {
             .is_none_or(|(_, at)| at.elapsed() > STEAM_REFRESH)
         {
             self.steam = Some((SteamIndex::load(), Instant::now()));
+            let index = launchers::windows_index();
+            tracing::debug!(games = index.len(), "launcher installs indexed");
+            self.launchers = Some((index, Instant::now()));
         }
         let steam = &self.steam.as_ref().unwrap().0;
+        let installs = &self.launchers.as_ref().unwrap().0;
         let me = std::process::id();
 
         let mut seen = HashSet::new();
@@ -143,25 +157,54 @@ impl Scanner {
             else {
                 continue;
             };
-            let stem = exe
-                .file_stem()
-                .map(|s| s.to_string_lossy().to_ascii_lowercase())
-                .unwrap_or_default();
+            let mut exe = exe;
+            if stem_of(&exe) == "applicationframehost" {
+                // A Microsoft Store (UWP) app: the frame window belongs to
+                // the host; the app runs in the process of a child window.
+                // The frame is still what gets captured.
+                let Some(hosted) = hosted_process(hwnd, pid) else {
+                    continue;
+                };
+                seen.insert(hosted);
+                match self
+                    .exes
+                    .entry(hosted)
+                    .or_insert_with(|| process_image(hosted))
+                    .clone()
+                {
+                    Some(e) => exe = e,
+                    None => continue,
+                }
+            }
+            let stem = stem_of(&exe);
             if NOT_GAMES.contains(&stem.as_str()) {
                 continue;
             }
-            let game = match steam.lookup(&exe) {
-                Some((id, name)) => Game {
+            let xbox = self
+                .xbox
+                .entry(exe.clone())
+                .or_insert_with(|| launchers::xbox_game(&exe).map(|g| g.name))
+                .clone();
+            let game = if let Some((id, name)) = steam.lookup(&exe) {
+                Game {
                     name,
                     steam_app_id: Some(id),
-                },
-                // Not from Steam: only count it if it fills its monitor, the way
+                }
+            } else if let Some(name) = installs.lookup(&exe).map(str::to_owned).or(xbox) {
+                // Installed by a launcher: a game even when windowed.
+                Game {
+                    name,
+                    steam_app_id: None,
+                }
+            } else if fills_monitor(hwnd) {
+                // Unknown: only count it if it fills its monitor, the way
                 // games do and productivity apps rarely do.
-                None if fills_monitor(hwnd) => Game {
+                Game {
                     name: title_or_stem(&title, &stem),
                     steam_app_id: None,
-                },
-                None => continue,
+                }
+            } else {
+                continue;
             };
             // SAFETY: plain query on a live window handle.
             let monitor = unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) };
@@ -170,6 +213,7 @@ impl Scanner {
                 hwnd: hwnd.0 as isize,
                 monitor: monitor.0 as isize,
                 foreground: hwnd == fg,
+                exe: stem,
             };
             let area = window_area(hwnd);
             // A game with several windows (launcher, splash, overlay) is
@@ -189,14 +233,44 @@ impl Scanner {
         }
         // Forget processes whose windows are gone (their ids get reused).
         self.exes.retain(|pid, _| seen.contains(pid));
+        if self.xbox.len() > 256 {
+            self.xbox.clear();
+        }
         let mut games: Vec<RunningGame> = games.into_iter().map(|(g, _)| g).collect();
         games.sort_by_key(|g| !g.foreground);
         games
     }
 }
 
+fn stem_of(exe: &Path) -> String {
+    exe.file_stem()
+        .map(|s| s.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default()
+}
+
+/// The process of a UWP app hosted in `frame` (owned by `frame_pid`, the
+/// ApplicationFrameHost): the owner of a child window that isn't the host.
+fn hosted_process(frame: HWND, frame_pid: u32) -> Option<u32> {
+    let mut children: Vec<HWND> = Vec::new();
+    // SAFETY: the callback only pushes handles into the Vec passed as LPARAM.
+    let _ = unsafe {
+        windows::Win32::UI::WindowsAndMessaging::EnumChildWindows(
+            Some(frame),
+            Some(collect),
+            LPARAM(&mut children as *mut _ as isize),
+        )
+    };
+    children.into_iter().find_map(|child| {
+        let mut pid = 0u32;
+        // SAFETY: writes the owning process id into `pid`.
+        unsafe { GetWindowThreadProcessId(child, Some(&mut pid)) };
+        (pid != 0 && pid != frame_pid).then_some(pid)
+    })
+}
+
 unsafe extern "system" fn collect(hwnd: HWND, lparam: LPARAM) -> BOOL {
-    // SAFETY: lparam is the Vec<HWND> passed by `Scanner::scan`.
+    // SAFETY: lparam is the Vec<HWND> passed by `Scanner::scan` or
+    // `hosted_process`.
     let list = unsafe { &mut *(lparam.0 as *mut Vec<HWND>) };
     list.push(hwnd);
     BOOL(1)

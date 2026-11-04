@@ -248,6 +248,17 @@
     refreshUsage()
   }
 
+  /** "Not a game": stops within a scan; undo under Settings → Recording. */
+  async function ignoreGame() {
+    const name = status?.game
+    try {
+      settings = await api.ignoreCurrentGame()
+      notify(`Won’t record ${name ?? 'that app'} again. Undo in Settings → Recording.`)
+    } catch (e) {
+      notify(String(e), true)
+    }
+  }
+
   async function chooseScreen() {
     try {
       await api.chooseScreen()
@@ -368,7 +379,7 @@
       </button>
       <h1 class="display-face truncate text-title font-semibold">{title}</h1>
       <div class="min-w-0 flex-1"></div>
-      <StatusBar {status} {now} {flash} {saving} {hotkey} onsave={save} onopen={pickVideo} onchoosescreen={chooseScreen} />
+      <StatusBar {status} {now} {flash} {saving} {hotkey} onsave={save} onopen={pickVideo} onchoosescreen={chooseScreen} onignore={ignoreGame} />
     </header>
 
     <main class="flex min-h-0 flex-1 flex-col bg-canvas">

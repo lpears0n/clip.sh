@@ -360,6 +360,24 @@
                 : `The game’s display is in HDR (SDR white at ${Math.round(status.hdr.sdr_white_nits)} nits). Clips are SDR, so bright HDR highlights look blown out${status.backend === 'windows' ? '; turn on HDR compatibility to fix that' : ''}.`}
             />
           {/if}
+          {#if settings.ignored_games.length}
+            <Row title="Not games" description="Apps you said aren’t games. They’re never recorded; remove one to detect it again.">
+              <div class="flex max-w-80 flex-wrap justify-end gap-1.5">
+                {#each settings.ignored_games as g, i (g.exe ?? g.name)}
+                  <span class="chip" title={g.exe ? `${g.exe}.exe` : g.name}>
+                    {g.name}
+                    <button
+                      class="ml-0.5 text-muted hover:text-fg"
+                      aria-label="Detect {g.name} again"
+                      onclick={() => update({ ignored_games: settings.ignored_games.filter((_, j) => j !== i) })}
+                    >
+                      ×
+                    </button>
+                  </span>
+                {/each}
+              </div>
+            </Row>
+          {/if}
           {#if status?.backend === 'portal'}
             <Row
               title="Screen"

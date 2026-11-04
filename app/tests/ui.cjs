@@ -52,7 +52,7 @@ function fixtures(scenario) {
     get_settings: {
       replay_seconds: 30, mic: true, clips_dir: '/home/u/Videos/clip.sh', hotkey: 'F8', screenshot_hotkey: 'F9', capture_backend: null,
       launch_at_login: false, start_in_tray: true, close_to_tray: true, notify_on_save: true, sound_on_save: true, overlay: true,
-      fps: 60, bitrate_kbps: 20000, codec: 'h264', encoder: null, cursor: true, zero_copy: true, hdr_compatibility: false, desktop_audio: true, desktop_device: 'out-headset',
+      fps: 60, bitrate_kbps: 20000, codec: 'h264', encoder: null, cursor: true, zero_copy: true, hdr_compatibility: false, ignored_games: [], desktop_audio: true, desktop_device: 'out-headset',
       mic_device: null, audio_bitrate_kbps: 160, storage_limit_gb: 25, protect_edits: true, use_trash: true, ads: false,
     },
     list_clips: empty ? [] : clips,
@@ -92,6 +92,10 @@ function mockBridge(data) {
           labels: args.patch.labels ?? c.labels,
         })
         return c
+      }
+      if (cmd === 'ignore_current_game') {
+        data.get_settings.ignored_games.push({ name: data.get_status.game, exe: 'eldenring' })
+        return data.get_settings
       }
       if (cmd === 'delete_clip') { data.list_clips = data.list_clips.filter((c) => c.path !== args.path); return null }
       if (cmd === 'plugin:event|listen') {
@@ -238,6 +242,10 @@ async function runScenario(scenario, browser) {
   await page.keyboard.press('Escape')
   await page.keyboard.press('Escape')
 
+  // "Not a game" from the top bar, listed under Settings → Recording.
+  await page.getByRole('button', { name: 'Not a game' }).click()
+  await page.getByText('Won’t record ELDEN RING again').waitFor()
+
   // Settings and appearance.
   await page.getByRole('button', { name: 'Settings 3' }).click()
   await page.getByRole('button', { name: 'Appearance' }).click()
@@ -247,6 +255,7 @@ async function runScenario(scenario, browser) {
   await page.getByRole('button', { name: 'Recording' }).click()
   await page.waitForTimeout(150)
   await shot('settings-recording-blue')
+  assert.equal(await page.getByRole('button', { name: 'Detect ELDEN RING again' }).count(), 1, 'ignored app listed')
   await page.getByText('HDR display').waitFor()
   assert.ok(await page.getByText('SDR white at 240 nits').isVisible(), 'HDR row shows the SDR white level')
   await page.getByRole('button', { name: 'Audio' }).click()
