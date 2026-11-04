@@ -176,6 +176,7 @@ Ad slots: AdSlot component, off unless `"ads": true` in settings.json (728×90 u
   game frames. Measure before and after any capture change.
 - Branches are named for their purpose (`windows-port`, `fix-release-linux-deps`).
   No tool or assistant names anywhere: branches, commits, PR text, docs.
+  That includes `Co-Authored-By` and session trailers on commits.
 - Commits are authored `lpears0n <lucas.pearson@live.com>` (set in the
   clone's git config). Earlier commits used `notlucaspearson@gmail.com`;
   adding that address to the GitHub account attributes them retroactively.
@@ -225,11 +226,23 @@ Ad slots: AdSlot component, off unless `"ads": true` in settings.json (728×90 u
   landed elsewhere. Fixed by naming the `filesink` and setting `location`
   as a property. Rule: never put a filesystem path in a launch string;
   set it as a property (URIs from `filename_to_uri` are fine).
+- CI flake, fixed: on Windows runners Chocolatey's 370 MB
+  `gstreamer-devel` download sometimes arrives corrupted and fails its
+  checksum, so the job died before building. Both workflows now retry the
+  install up to 3 times (checksum check kept). Linux runners also hung on
+  `apt-get` twice on 2026-11-04 (GitHub mirror); a re-run fixed it.
 - Draft release `v0.1.0` is still unpublished; tag at `2626033` (the
   PR #2 merge).
-- Branches merged into `main` and waiting for the owner to delete:
-  `windows-port`, `fix-release-linux-deps`, `continuity-notes`, the ten
-  stack branches, and the two `claude/*` session branches.
+- Old branches are deleted; `main` is the only long-lived branch.
+- Name: the owner is considering renaming the app to **Reruns**
+  (domain reruns.gg, identifier `gg.reruns.app`, CLI `reruns`). Do the
+  rename in one PR with a LICENSE file (GPL-3.0) and the bundle
+  publisher field, before the first public release.
+- Signing: updater key is free (see `docs/RELEASING.md`). Windows
+  Authenticode options: SignPath Foundation (free for OSS, needs the
+  LICENSE file), Azure Trusted Signing (individuals: US/Canada only, paid
+  subscription; Azure for Students credit doesn't qualify), Microsoft
+  Store (free, but only signs MSIX).
 
 ## Next, in order
 1. Windows run on the owner's machine of what landed: capture restart +
