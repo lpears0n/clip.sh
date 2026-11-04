@@ -69,7 +69,7 @@
         status.backend === 'kwin'
           ? 'Game windows are captured directly, no prompts.'
           : status.backend === 'windows'
-            ? 'The monitor your game is on is captured, no prompts.'
+            ? 'Your game’s window is captured directly, no prompts.'
             : 'Capturing the screen you chose.',
     }
   })

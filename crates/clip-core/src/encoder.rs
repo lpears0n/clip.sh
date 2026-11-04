@@ -205,7 +205,23 @@ impl Encoder {
 
     /// First encoder that actually encodes `codec` on this machine.
     pub fn probe(codec: Codec) -> Option<Encoder> {
-        Self::ALL.into_iter().find(|e| e.works(codec))
+        Self::probe_excluding(codec, &[])
+    }
+
+    /// Like [`probe`](Self::probe), skipping encoders that passed the
+    /// probe but then failed while recording.
+    pub fn probe_excluding(codec: Codec, skip: &[Encoder]) -> Option<Encoder> {
+        Self::ALL
+            .into_iter()
+            .filter(|e| !skip.contains(e))
+            .find(|e| e.works(codec))
+    }
+
+    /// Whether a pipeline error `message` came from this encoder's element
+    /// (GStreamer names the failing element, e.g. `nvd3d11h264enc3`).
+    pub fn is_blamed_in(self, codec: Codec, message: &str) -> bool {
+        self.element(codec)
+            .is_some_and(|name| message.contains(name))
     }
 
     /// Whether the element exists *and* can encode a test frame. Factories can
@@ -405,6 +421,38 @@ impl Encoder {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn blames_the_encoder_named_in_an_error() {
+        let element = Encoder::Nvenc.element(Codec::H264).unwrap();
+        let msg = format!(
+            "Could not encode stream. from Some(\"/GstPipeline:pipeline37/X:{element}17\"): \
+             Failed to open session"
+        );
+        assert!(Encoder::Nvenc.is_blamed_in(Codec::H264, &msg));
+        assert!(!Encoder::Amf.is_blamed_in(Codec::H264, &msg));
+        // A capture failure upstream of the encoder isn't the encoder's.
+        let capture = "Internal data stream error. from Some(\"/GstPipeline:p/GstQueue:queue12\"): \
+                       streaming stopped, reason not-negotiated (-4)";
+        assert!(!Encoder::Nvenc.is_blamed_in(Codec::H264, capture));
+    }
+
+    #[test]
+    fn probing_skips_encoders_set_aside() {
+        crate::init().unwrap();
+        // x264 is the last resort everywhere CI runs; skipping it leaves
+        // whatever hardware the machine has, or nothing.
+        let found = Encoder::probe_excluding(Codec::H264, &[Encoder::X264]);
+        assert_ne!(found, Some(Encoder::X264));
+        let all_but_x264: Vec<_> = Encoder::ALL
+            .into_iter()
+            .filter(|e| *e != Encoder::X264)
+            .collect();
+        assert_eq!(
+            Encoder::probe_excluding(Codec::H264, &all_but_x264),
+            Some(Encoder::X264)
+        );
+    }
 
     /// x264enc stands in for every encoder: the setters must survive a
     /// property the element lacks, a value name it doesn't know, a value

@@ -665,7 +665,9 @@ pub fn run() {
             tauri_plugin_window_state::Builder::default()
                 .with_state_flags(
                     tauri_plugin_window_state::StateFlags::all()
-                        - tauri_plugin_window_state::StateFlags::VISIBLE,
+                        - tauri_plugin_window_state::StateFlags::VISIBLE
+                        // The frame is chosen per platform below, not restored.
+                        - tauri_plugin_window_state::StateFlags::DECORATIONS,
                 )
                 // The overlay is placed over the game each time it shows.
                 .with_denylist(&["overlay"])
@@ -695,6 +697,14 @@ pub fn run() {
                 thumbs: thumbs::Thumbnailer::start(app.handle().clone()),
                 watcher: Mutex::new(None),
             });
+            // Windows: the app's header is the title bar (its own minimize,
+            // maximize and close), so the system frame goes before the
+            // window is first shown. Windows 11 keeps the rounded corners,
+            // shadow and resize edges of an undecorated window.
+            #[cfg(windows)]
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.set_decorations(false);
+            }
             allow_clips_dir(app.handle(), &app.state::<AppState>().clips_dir());
             watch_clips_dir(app.handle(), &app.state::<AppState>().clips_dir());
             updates::spawn_checks(app.handle());

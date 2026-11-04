@@ -37,6 +37,9 @@ pub enum State {
     /// Watching for a game window.
     Waiting,
     Recording,
+    /// A game's capture failed and is waiting to be restarted; `game` and
+    /// `error` say which and why.
+    Retrying,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -309,13 +312,19 @@ fn status(
     session: Option<&(clip_core::game::Game, u64)>,
 ) -> Status {
     let rec = auto.status();
+    let retrying = if rec.is_none() { auto.retrying() } else { None };
     Status {
         state: if rec.is_some() {
             State::Recording
+        } else if retrying.is_some() {
+            State::Retrying
         } else {
             State::Waiting
         },
-        game: auto.current_game().map(|g| g.name.clone()),
+        game: auto
+            .current_game()
+            .map(|g| g.name.clone())
+            .or_else(|| retrying.as_ref().map(|r| r.game.name.clone())),
         steam_app_id: auto.current_game().and_then(|g| g.steam_app_id),
         session_start_ms: session.map(|(_, t)| *t),
         buffered_seconds: rec.as_ref().map_or(0.0, |s| s.buffered_seconds),
@@ -325,7 +334,9 @@ fn status(
             .and_then(|e| e.element(auto.codec()))
             .map(str::to_owned),
         capture_path: rec.as_ref().map(|s| s.path),
-        error: rec.and_then(|s| s.error),
+        error: rec
+            .and_then(|s| s.error)
+            .or_else(|| retrying.map(|r| r.reason)),
         backend: Some(auto.backend()),
         needs_screen: auto.needs_screen(),
         hdr: auto.hdr(),

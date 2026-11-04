@@ -123,6 +123,12 @@ export function dayLabel(ms: number, now = new Date()): string {
   return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: d.getFullYear() === now.getFullYear() ? undefined : 'numeric' })
 }
 
+/** When something happened, as people say it: "Today, 15:58",
+ *  "Yesterday, 09:12", "Tuesday, 21:40", "3 Nov, 18:05". */
+export function when(ms: number, now = new Date()): string {
+  return `${dayLabel(ms, now)}, ${clock(ms)}`
+}
+
 /** Time of day, "15:58". */
 export function clock(ms: number): string {
   return new Date(ms).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })

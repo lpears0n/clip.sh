@@ -268,6 +268,38 @@ Ad slots: AdSlot component, off unless `"ads": true` in settings.json (728×90 u
 - The app icon is still Tauri's default placeholder (app/src-tauri/icons).
 - Sidebar wordmark is "reruns" + accent ".gg" ("r." collapsed).
 
+- App polish (branch `app-polish`):
+  - Icon: replay arrow round a play button, orange on the dark tile.
+    Source `app/src-tauri/icons/icon.svg`; regenerate the set with
+    `pnpm tauri icon <1024px png>` from `app/` (delete the android/ios
+    folders it adds). The favicon is the same SVG.
+  - Windows draws no system frame: the header is the title bar
+    (`WindowControls.svelte`, drag regions via `data-tauri-drag-region`,
+    `set_decorations(false)` in setup; window-state no longer restores
+    DECORATIONS). Linux keeps its native frame. UI test `full` runs
+    frameless.
+  - Sidebar folds to icons by itself below 1100 px, in Settings and in
+    the clip viewer; the toggle opens it there for the moment.
+  - Capture failing mid-game shows "Can't record <game> · retrying"
+    (status state `retrying`, reason from `RestartPolicy`), not
+    "Waiting for a game".
+  - Windows: an encoder named in two failures in a row (e.g. NVENC
+    "Failed to open session") is set aside for the session and the next
+    encoder that passes the probe takes over.
+- Real-hardware findings (owner's PC, 2026-11-04): Overwatch,
+  3440x1440 HDR display, SteelSeries Sonar. With HDR compatibility on,
+  the screen-area capture records the whole monitor for a fullscreen
+  game (as designed); "Capture the window in HDR" is being tried. Earlier
+  runs failed with NVENC "Failed to open session" (shown as
+  not-negotiated upstream). Clips have no audio with Sonar's Stream mix
+  selected; PR #17 logs why on the next save.
+- Deep-dive backlog, not done yet, best first: a live level meter per
+  audio track in Settings → Audio (would have shown the Sonar problem at
+  once); apply recording settings to the running capture instead of
+  "from the next game"; unload the webview while hidden in the tray
+  (~100–250 MB during games); make HDR window capture the default once
+  it works on real hardware; SignPath signing.
+
 ## Next, in order
 1. v1.0.0: owner adds the updater key secrets (`docs/RELEASING.md`), then
    tags `v1.0.0` on `main`; the Release workflow makes the draft. Owner

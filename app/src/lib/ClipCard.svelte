@@ -1,13 +1,13 @@
 <script lang="ts">
   import { Check, Clapperboard, FolderOpen, Scissors, Star, Trash2 } from '@lucide/svelte'
   import { type Clip, fileUrl, videoUrl } from './api'
-  import { date, duration } from './format'
+  import { duration, when } from './format'
   import { prefs } from './prefs.svelte'
 
   let {
     clip,
     fallback = clip.game,
-    subtitle = date(clip.created_ms),
+    subtitle = when(clip.created_ms),
     selectable = false,
     selected = false,
     onopen,
@@ -89,7 +89,7 @@
     role="button"
     tabindex="0"
     aria-pressed={selectable ? selected : undefined}
-    aria-label="{selectable ? 'Select' : 'Open'} {clip.game} clip from {date(clip.created_ms)}"
+    aria-label="{selectable ? 'Select' : 'Open'} {clip.game} clip from {when(clip.created_ms)}"
   >
     {#if clip.thumbnail}
       <img
@@ -100,7 +100,7 @@
         class="size-full object-cover"
       />
     {:else}
-      <div class="thumb-empty flex size-full items-end justify-start p-3 text-muted/50">
+      <div class="thumb-empty flex size-full items-center justify-center text-muted/50">
         <Clapperboard size={20} strokeWidth={1.6} />
       </div>
     {/if}

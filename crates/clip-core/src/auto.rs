@@ -211,6 +211,7 @@ impl AutoRecorder {
             };
             let _ = self.stop().await;
             let delay = self.restarts.failed(healthy_for);
+            self.restarts.set_reason(failure.clone());
             tracing::warn!(
                 game = %resume.game.name,
                 consecutive = self.restarts.failures(),
@@ -249,6 +250,7 @@ impl AutoRecorder {
             }
             Err(e) => {
                 self.restarts.failed(Duration::ZERO);
+                self.restarts.set_reason(format!("{e:#}"));
                 Err(e)
             }
         }
@@ -487,6 +489,19 @@ impl AutoRecorder {
 
     pub fn status(&self) -> Option<Status> {
         self.active.as_ref().map(|a| a.recorder.status())
+    }
+
+    /// The game whose capture failed and is waiting to be restarted.
+    pub fn retrying(&self) -> Option<crate::recorder::Retrying> {
+        if self.active.is_some() {
+            return None;
+        }
+        let r = self.resume.as_ref()?;
+        Some(crate::recorder::Retrying {
+            game: r.game.clone(),
+            reason: self.restarts.reason()?.to_owned(),
+            retry_in: self.restarts.retry_in(),
+        })
     }
 
     /// Save the last `seconds` (default: the whole buffer) under
