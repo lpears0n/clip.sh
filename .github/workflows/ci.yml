@@ -61,7 +61,17 @@ jobs:
       - name: Install GStreamer (MSVC runtime + development)
         shell: pwsh
         run: |
-          choco install -y --no-progress gstreamer gstreamer-devel pkgconfiglite ffmpeg
+          # The 370 MB devel installer sometimes arrives corrupted and fails
+          # Chocolatey's checksum check. Retry rather than skip the check;
+          # packages already installed are left as they are.
+          $installed = $false
+          foreach ($attempt in 1..3) {
+            choco install -y --no-progress gstreamer gstreamer-devel pkgconfiglite ffmpeg
+            if ($LASTEXITCODE -eq 0) { $installed = $true; break }
+            Write-Host "choco install failed (attempt $attempt of 3)"
+            Start-Sleep -Seconds (15 * $attempt)
+          }
+          if (-not $installed) { throw 'GStreamer install failed after 3 attempts' }
           # The installer records its folder in a machine variable; the job's
           # own environment predates it, so read it from the registry.
           $root = [Environment]::GetEnvironmentVariable('GSTREAMER_1_0_ROOT_MSVC_X86_64', 'Machine')
