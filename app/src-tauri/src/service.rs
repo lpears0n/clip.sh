@@ -221,6 +221,8 @@ async fn run(
                     Cmd::Configure(cfg) => {
                         replay_seconds = cfg.replay_seconds;
                         auto.set_config(cfg);
+                        // The status bar shows the replay length.
+                        let _ = app.emit(STATUS_CHANGED, status(&auto, replay_seconds, session.as_ref()));
                     }
                 }
             }

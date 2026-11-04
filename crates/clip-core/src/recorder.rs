@@ -239,6 +239,20 @@ impl Recorder {
         }
     }
 
+    /// Change the replay length of the running recording. Shorter takes
+    /// effect at once; longer fills as the game goes on.
+    pub fn set_replay_seconds(&mut self, seconds: u32) {
+        if seconds == self.replay_seconds {
+            return;
+        }
+        self.replay_seconds = seconds;
+        self.buffer
+            .lock()
+            .unwrap()
+            .set_window(gst::ClockTime::from_seconds(seconds.into()));
+        tracing::info!(seconds, "replay length changed");
+    }
+
     /// The error that stopped capture, if the pipeline failed after it
     /// started (the replay buffer then holds nothing newer than the
     /// failure).

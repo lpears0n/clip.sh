@@ -284,7 +284,7 @@
       <section class="space-y-2">
         <h3 class="section-title px-1">Capture</h3>
         <div class="card divide-y divide-line">
-          <Row title="Replay length" description="How far back a clip reaches when you press the hotkey.">
+          <Row title="Replay length" description="How far back a clip reaches when you press the hotkey. Applies right away, even mid-game.">
             <select
               class="field w-44"
               value={settings.replay_seconds}

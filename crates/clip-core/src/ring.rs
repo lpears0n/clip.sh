@@ -144,6 +144,18 @@ impl ReplayBuffer {
         self.window
     }
 
+    /// Change how much history is kept. A shorter window drops the excess
+    /// at once; a longer one fills as new frames arrive.
+    pub fn set_window(&mut self, window: gst::ClockTime) {
+        self.window = window;
+        self.video.evict(window);
+        if let Some(start) = self.video.oldest_pts() {
+            for t in &mut self.audio {
+                t.evict_before(start);
+            }
+        }
+    }
+
     pub fn push_video(&mut self, buffer: gst::Buffer) {
         self.video.push(buffer);
         self.video.evict(self.window);
@@ -434,6 +446,35 @@ mod tests {
         assert_eq!(pts_ms(&v[0]), 0);
         assert_eq!(clip.duration, ms(500));
         assert!(clip.audio.is_empty());
+    }
+
+    #[test]
+    fn window_changes_apply_to_a_running_buffer() {
+        let mut buf = new_buf(30, 1);
+        for t in (0..20_000).step_by(20) {
+            if t % 100 == 0 {
+                buf.push_video(packet(t, 100, t % 1000 == 0));
+            }
+            buf.push_audio(0, packet(t, 20, true));
+        }
+        assert_eq!(
+            buf.buffered(),
+            ms(20_000),
+            "all 20 s kept under a 30 s window"
+        );
+
+        // Shorter: trimmed right away, audio with it.
+        buf.set_window(gst::ClockTime::from_seconds(5));
+        assert_eq!(buf.video.oldest_pts(), Some(ms(15_000)));
+        assert_eq!(buf.audio[0].oldest_pts(), Some(ms(15_000)));
+        let clip = buf.snapshot(buf.window()).unwrap();
+        assert_eq!(clip.duration, ms(5000));
+
+        // Longer: nothing comes back, and new frames are kept up to it.
+        buf.set_window(gst::ClockTime::from_seconds(60));
+        assert_eq!(buf.buffered(), ms(5000));
+        fill_video(&mut buf, 20_000, 30_000);
+        assert_eq!(buf.buffered(), ms(15_000));
     }
 
     #[test]

@@ -211,8 +211,14 @@ impl AutoRecorder {
         Ok(Some(a.game))
     }
 
-    /// Replace the recording settings. Takes effect from the next game.
+    /// Replace the recording settings. The replay length applies now, the
+    /// rest from the next game.
     pub fn set_config(&mut self, cfg: RecorderConfig) {
+        // The replay length applies to the running recording right away;
+        // everything else (codec, bitrate, devices) needs a new pipeline.
+        if let Some(a) = &mut self.active {
+            a.recorder.set_replay_seconds(cfg.replay_seconds);
+        }
         self.cfg = cfg;
     }
 
