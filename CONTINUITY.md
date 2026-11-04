@@ -1,6 +1,6 @@
 # clip.sh: continuity notes
 
-Last updated: 2026-11-02 (evening). Current plans live in the repo: `docs/ROADMAP.md`
+Last updated: 2026-11-04. Current plans live in the repo: `docs/ROADMAP.md`
 (features, platforms), `docs/DESIGN.md` (design system, performance budgets),
 `docs/WINDOWS.md` (Windows build and what is unverified). The notes below
 are the running log; the sections at the end are newest.
@@ -180,7 +180,11 @@ Ad slots: AdSlot component, off unless `"ads": true` in settings.json (728×90 u
   clone's git config). Earlier commits used `notlucaspearson@gmail.com`;
   adding that address to the GitHub account attributes them retroactively.
 - PRs: open one when asked; merge with a merge commit once CI is green.
-  Tags and branch deletions are done by the owner from their own machine.
+  Tags and branch deletions are done by the owner from their own machine
+  (cloud sessions can't delete branches anyway: the git proxy refuses it).
+- Keep the PR count low: no long stacks of small PRs. Group related work
+  into one branch/PR, and land green PRs before starting new ones.
+- Update this file whenever a piece of work is completed.
 - Main machine: CachyOS/KDE Plasma 6 Wayland, RTX 5080, 3440×1440 240 Hz.
   Owner is moving to Windows as the daily driver; Linux testing will be in
   a VM (no GPU there: capture tests need real hardware).
@@ -208,10 +212,30 @@ Ad slots: AdSlot component, off unless `"ads": true` in settings.json (728×90 u
   signatures and need `TAURI_SIGNING_PRIVATE_KEY` only once the updater
   plugin is added.
 
+## State on 2026-11-04
+- PRs #4–#13 were opened as one stack (each on the one before) and are
+  all merged into `main`: Windows game capture + first-run fixes, viewer
+  scrubber, HDR compatibility toggle, Linux capture restart + fixed encode
+  size, launcher game detection, clip markers, export size presets, save
+  sounds, updater + signing hooks, experimental HDR window capture.
+  No PRs are open.
+- #10–#13 were red on Windows CI only because of test helpers, not app
+  code: a file path written into a `gst::parse::launch` string loses its
+  backslashes (`a\b` → `ab`, even in quotes), so on Windows the test file
+  landed elsewhere. Fixed by naming the `filesink` and setting `location`
+  as a property. Rule: never put a filesystem path in a launch string;
+  set it as a property (URIs from `filename_to_uri` are fine).
+- Draft release `v0.1.0` is still unpublished; tag at `2626033` (the
+  PR #2 merge).
+- Branches merged into `main` and waiting for the owner to delete:
+  `windows-port`, `fix-release-linux-deps`, `continuity-notes`, the ten
+  stack branches, and the two `claude/*` session branches.
+
 ## Next, in order
-1. First run on Windows; fix what it reports (property names on the d3d11
-   source and AMF/QSV encoders are the likely suspects).
-2. Code signing + `tauri-plugin-updater`.
-3. Marker hotkey (needs clip-core's Linux hotkey layer to take a second
-   binding; Windows plugin already can), then screenshot hotkey.
+1. Windows run on the owner's machine of what landed: capture restart +
+   fixed-size letterbox (#4 noted these as unverified), HDR compatibility.
+2. Updater + signing setup (one-time secrets, `docs/RELEASING.md`), then
+   tag a release from `main` and publish it.
+3. HDR window capture (#13) on a real HDR display; it is off by default
+   and marked experimental until then.
 4. Roadmap phase 2 (editor) per `docs/ROADMAP.md`.
