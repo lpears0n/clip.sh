@@ -51,7 +51,7 @@ pub fn play_sound(sound: &Sound, volume_percent: u32) {
 fn builtin_sound_file() -> Option<&'static Path> {
     static PATH: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
     PATH.get_or_init(|| {
-        let path = dirs::cache_dir()?.join("clip.sh/clip-saved.wav");
+        let path = dirs::cache_dir()?.join("reruns/clip-saved.wav");
         let current = std::fs::read(&path).is_ok_and(|b| b == SAVE_SOUND);
         if !current {
             std::fs::create_dir_all(path.parent()?).ok()?;
@@ -67,7 +67,7 @@ fn builtin_sound_file() -> Option<&'static Path> {
 pub fn sounds_dir() -> PathBuf {
     dirs::config_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("clip.sh/sounds")
+        .join("reruns/sounds")
 }
 
 /// Check `source` is a short sound and copy it in as `<slot>.<ext>`,
@@ -115,7 +115,7 @@ pub fn set_autostart(enabled: bool) -> Result<()> {
 fn autostart_file() -> PathBuf {
     dirs::config_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("autostart/clip-sh.desktop")
+        .join("autostart/reruns.desktop")
 }
 
 #[cfg(target_os = "linux")]
@@ -137,14 +137,14 @@ mod imp {
         let mut hints: HashMap<&str, Value> = HashMap::new();
         // We play our own sound; don't double up with the server's.
         hints.insert("suppress-sound", Value::Bool(true));
-        hints.insert("desktop-entry", Value::Str("clip-sh".into()));
+        hints.insert("desktop-entry", Value::Str("reruns".into()));
         conn.call_method(
             Some("org.freedesktop.Notifications"),
             "/org/freedesktop/Notifications",
             Some("org.freedesktop.Notifications"),
             "Notify",
             &(
-                "clip.sh",
+                "Reruns",
                 0u32,
                 "media-record",
                 summary,
@@ -177,7 +177,7 @@ mod imp {
             format!(
                 "[Desktop Entry]\n\
                  Type=Application\n\
-                 Name=clip.sh\n\
+                 Name=Reruns\n\
                  Comment=Instant replay game clipping\n\
                  Exec=\"{}\" {AUTOSTART_ARG}\n\
                  Icon=media-record\n\
@@ -233,10 +233,10 @@ mod imp {
             .context("opening the Run key")?;
         if enabled {
             let exe = std::env::current_exe()?;
-            key.set_value("clip.sh", &format!("\"{}\" {AUTOSTART_ARG}", exe.display()))
+            key.set_value("Reruns", &format!("\"{}\" {AUTOSTART_ARG}", exe.display()))
                 .context("writing the Run entry")?;
-        } else if key.get_value::<String, _>("clip.sh").is_ok() {
-            key.delete_value("clip.sh")
+        } else if key.get_value::<String, _>("Reruns").is_ok() {
+            key.delete_value("Reruns")
                 .context("removing the Run entry")?;
         }
         Ok(())
@@ -262,7 +262,7 @@ mod tests {
     #[test]
     fn imports_replace_the_previous_one_for_the_slot() {
         clip_core::init().unwrap();
-        let dir = std::env::temp_dir().join(format!("clipsh-import-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("reruns-import-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let src = dir.join("beep.WAV");
         std::fs::write(&src, SAVE_SOUND).unwrap();

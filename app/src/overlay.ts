@@ -26,7 +26,7 @@ function applyPrefs() {
   let accent: Accent = 'orange'
   let reduceMotion = false
   try {
-    const p = JSON.parse(localStorage.getItem('clip.sh/prefs') ?? '{}')
+    const p = JSON.parse(localStorage.getItem('reruns/prefs') ?? '{}')
     if (p.accent in ACCENTS) accent = p.accent
     reduceMotion = !!p.reduceMotion
   } catch {

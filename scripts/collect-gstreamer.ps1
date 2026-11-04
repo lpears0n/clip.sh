@@ -4,7 +4,7 @@
 #   pwsh scripts/collect-gstreamer.ps1 [-Root $env:GSTREAMER_1_0_ROOT_MSVC_X86_64]
 #
 # Everything in bin/ is taken (the core libraries and their dependencies,
-# about 100 MB); plugins are limited to the ones clip.sh uses, which keeps
+# about 100 MB); plugins are limited to the ones Reruns uses, which keeps
 # the installer well under the full 400 MB runtime.
 param(
   [string]$Root = $env:GSTREAMER_1_0_ROOT_MSVC_X86_64
@@ -51,7 +51,7 @@ $required = @(
 )
 $env:GST_PLUGIN_PATH = "$dest\plugins"
 $env:GST_PLUGIN_SYSTEM_PATH = "$dest\plugins"
-$env:GST_REGISTRY = Join-Path $env:TEMP 'clipsh-bundle-registry.bin'
+$env:GST_REGISTRY = Join-Path $env:TEMP 'reruns-bundle-registry.bin'
 Remove-Item $env:GST_REGISTRY -ErrorAction SilentlyContinue
 $missing = @()
 foreach ($e in $required) {

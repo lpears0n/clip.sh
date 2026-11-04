@@ -1,4 +1,4 @@
-//! Capture, encoding and instant-replay buffering for clip.sh.
+//! Capture, encoding and instant-replay buffering for Reruns.
 
 pub mod audio;
 pub mod backend;

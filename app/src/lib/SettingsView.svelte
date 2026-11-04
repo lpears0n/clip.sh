@@ -63,7 +63,7 @@
   })
   let copied = $state(false)
   async function copyCommand() {
-    await navigator.clipboard.writeText('clipsh save')
+    await navigator.clipboard.writeText('rerunsctl save')
     copied = true
     setTimeout(() => (copied = false), 1500)
   }
@@ -232,7 +232,7 @@
       <section class="space-y-2">
         <h3 class="section-title px-1">Startup</h3>
         <div class="card divide-y divide-line">
-          <Row title="Launch at login" description="Start clip.sh in the background when you sign in.">
+          <Row title="Launch at login" description="Start Reruns in the background when you sign in.">
             <Toggle label="Launch at login" checked={settings.launch_at_login} onchange={(launch_at_login) => update({ launch_at_login })} />
           </Row>
           <Row title="Start in tray" description="When launched at login, don't open the window." disabled={!settings.launch_at_login}>
@@ -250,7 +250,7 @@
               onchange={(e) => update({ close_to_tray: e.currentTarget.value === 'tray' })}
             >
               <option value="tray">Minimizes to tray</option>
-              <option value="quit">Quits clip.sh</option>
+              <option value="quit">Quits Reruns</option>
             </select>
           </Row>
         </div>
@@ -328,7 +328,7 @@
       <section class="space-y-2">
         <h3 class="section-title px-1">Updates</h3>
         <div class="card divide-y divide-line">
-          <Row title={support ? `clip.sh ${support.version}` : 'clip.sh'} description={updateText}>
+          <Row title={support ? `Reruns ${support.version}` : 'Reruns'} description={updateText}>
             {#if installing !== undefined}
               <div class="flex items-center gap-3">
                 <div
@@ -520,7 +520,7 @@
             {#if settings.hdr_compatibility}
               <Row
                 title="Capture the window in HDR"
-                description="Experimental. Records the game’s own window in HDR and tone-maps it on the GPU, so nothing on top of the game gets in. If it doesn’t work on your PC, clip.sh goes back to the screen area by itself."
+                description="Experimental. Records the game’s own window in HDR and tone-maps it on the GPU, so nothing on top of the game gets in. If it doesn’t work on your PC, Reruns goes back to the screen area by itself."
               >
                 <Toggle
                   label="Capture the window in HDR"
@@ -572,7 +572,7 @@
         <p class="px-1 text-secondary text-muted">
           {status?.backend === 'windows'
             ? 'Recording changes apply from the next game you launch.'
-            : 'Recording changes apply from the next game you launch; a new capture method applies after restarting clip.sh.'}
+            : 'Recording changes apply from the next game you launch; a new capture method applies after restarting Reruns.'}
         </p>
       </section>
     {:else if category === 'Audio'}
@@ -676,17 +676,17 @@
           <Row
             title="Command"
             description={hotkeyBackend === null
-              ? 'Your desktop has no global shortcut service. Bind this command to a key in its keyboard settings; clipsh screenshot takes a screenshot and clipsh mark marks a moment.'
+              ? 'Your desktop has no global shortcut service. Bind this command to a key in its keyboard settings; rerunsctl screenshot takes a screenshot and rerunsctl mark marks a moment.'
               : hotkeyBackend === 'native'
-                ? 'Use it from scripts, Stream Deck profiles or AutoHotkey. clipsh screenshot takes a screenshot; clipsh mark marks a moment.'
-                : 'Bind this to any key in your desktop’s keyboard settings, or use it from scripts. clipsh screenshot takes a screenshot; clipsh mark marks a moment.'}
+                ? 'Use it from scripts, Stream Deck profiles or AutoHotkey. rerunsctl screenshot takes a screenshot; rerunsctl mark marks a moment.'
+                : 'Bind this to any key in your desktop’s keyboard settings, or use it from scripts. rerunsctl screenshot takes a screenshot; rerunsctl mark marks a moment.'}
           >
-            <code class="rounded-ctl border border-line bg-canvas px-2.5 py-1.5 text-secondary text-fg-2">clipsh save</code>
+            <code class="rounded-ctl border border-line bg-canvas px-2.5 py-1.5 text-secondary text-fg-2">rerunsctl save</code>
             <button class="btn" onclick={copyCommand}>{copied ? 'Copied' : 'Copy'}</button>
           </Row>
         </div>
         {#if hotkeyBackend === 'kglobalaccel'}
-          <p class="px-1 text-secondary text-muted">Also listed in System Settings → Shortcuts, under clip.sh.</p>
+          <p class="px-1 text-secondary text-muted">Also listed in System Settings → Shortcuts, under Reruns.</p>
         {/if}
       </section>
     {:else if category === 'Storage'}

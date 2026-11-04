@@ -692,7 +692,7 @@ pub fn source(
     };
     // SAFETY: stored once under a unique key and only dropped with the
     // element, which stops the capture.
-    unsafe { appsrc.set_data("clipsh-hdr-window-capture", capture) };
+    unsafe { appsrc.set_data("reruns-hdr-window-capture", capture) };
     Ok((appsrc.upcast(), context))
 }
 

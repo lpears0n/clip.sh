@@ -14,7 +14,7 @@ Status and plan for HDR games. Windows first; Linux (KWin HDR) later.
   highlights above SDR white blow out and colours can look off. SDR
   games on an HDR desktop come out roughly right.
 - **Detection exists** (this is step 1 below): when recording starts,
-  clip.sh checks whether the game's monitor runs in HDR (DXGI output
+  Reruns checks whether the game's monitor runs in HDR (DXGI output
   colour space BT.2020/PQ), reads Windows' SDR white level and the
   display's peak brightness, logs them, and shows an "HDR display" row
   under Settings → Recording.
@@ -29,7 +29,7 @@ Status and plan for HDR games. Windows first; Linux (KWin HDR) later.
   gets no HDR. Unchanged on main.
 
 So stock elements give HDR-correct output only for whole-monitor DXGI
-capture, and clip.sh records only the game's window (owner's decision:
+capture, and Reruns records only the game's window (owner's decision:
 like Medal, nothing else on screen ends up in clips).
 
 ## HDR compatibility (Settings → Recording)
@@ -76,7 +76,7 @@ Safety:
 - GStreamer's D3D11 helper library is loaded at run time, so a missing
   function only disables this capture; it can't break the build or the
   app.
-- If the capture can't start, or fails while recording, clip.sh uses
+- If the capture can't start, or fails while recording, Reruns uses
   the screen-area capture for the rest of the session.
 - Not yet run on an HDR machine. The shader is compiled by Windows when
   the capture starts (`D3DCompile`), so a shader error also just falls
@@ -87,7 +87,7 @@ Safety:
 1. **Detect and report** (done). Gives the owner's machine a way to say
    whether it is affected, and gives step 2 its parameters.
 2. **Tone-mapped SDR from HDR games, window capture kept** (built,
-   experimental; see above). clip.sh's own
+   experimental; see above). Reruns's own
    WGC window capture (Rust, `windows` crate) requesting
    `R16G16B16A16Float` frames (scRGB, linear, BT.709 primaries, 1.0 =
    80 nits), a D3D11 pixel shader that scales by the SDR white level,

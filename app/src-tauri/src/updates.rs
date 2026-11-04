@@ -161,7 +161,7 @@ mod tests {
 
     fn config(plugins: serde_json::Value) -> tauri::Config {
         let mut c: tauri::Config = serde_json::from_value(serde_json::json!({
-            "identifier": "sh.clip.test",
+            "identifier": "gg.reruns.test",
         }))
         .unwrap();
         c.plugins = serde_json::from_value(plugins).unwrap();
@@ -184,7 +184,7 @@ mod tests {
     fn release_config_is_a_valid_updater_config() {
         let c: tauri_plugin_updater::Config = serde_json::from_value(serde_json::json!({
             "pubkey": "dW50cnVzdGVk",
-            "endpoints": ["https://github.com/lpears0n/clip.sh/releases/latest/download/latest.json"],
+            "endpoints": ["https://github.com/lpears0n/reruns/releases/latest/download/latest.json"],
             "windows": { "installMode": "passive" },
         }))
         .unwrap();

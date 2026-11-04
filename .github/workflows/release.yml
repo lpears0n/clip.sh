@@ -119,6 +119,23 @@ jobs:
           WINDOWS_SIGN_COMMAND: ${{ runner.os == 'Windows' && vars.WINDOWS_SIGN_COMMAND || '' }}
           WINDOWS_TIMESTAMP_URL: ${{ vars.WINDOWS_TIMESTAMP_URL }}
         run: node scripts/release-config.mjs
+      - name: Release notes and version check
+        id: notes
+        shell: bash
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            app=$(node -p "require('./app/src-tauri/tauri.conf.json').version")
+            if [ "${GITHUB_REF_NAME#v}" != "$app" ]; then
+              echo "::error::tag $GITHUB_REF_NAME doesn't match the app version $app; bump it first (docs/RELEASING.md)"
+              exit 1
+            fi
+          fi
+          f="docs/release-notes/${GITHUB_REF_NAME}.md"
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ -f "$f" ]; then
+            { echo 'body<<NOTES_EOF'; cat "$f"; echo 'NOTES_EOF'; } >> "$GITHUB_OUTPUT"
+          else
+            echo "body=See the changelog in the release notes." >> "$GITHUB_OUTPUT"
+          fi
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -134,15 +151,15 @@ jobs:
           args: --bundles ${{ matrix.bundles }} ${{ env.RELEASE_CONFIG_ARGS }}
           # Without a tag name the action only builds.
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
-          releaseName: clip.sh ${{ github.ref_name }}
-          releaseBody: See the changelog in the release notes.
+          releaseName: Reruns ${{ github.ref_name }}
+          releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: true
           prerelease: ${{ contains(github.ref_name, '-') }}
       - name: Keep the installers as run artifacts (branch builds)
         if: github.ref_type != 'tag'
         uses: actions/upload-artifact@v4
         with:
-          name: clip.sh ${{ matrix.name }}
+          name: Reruns ${{ matrix.name }}
           if-no-files-found: error
           path: |
             target/release/bundle/nsis/*.exe

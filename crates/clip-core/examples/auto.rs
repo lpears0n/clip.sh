@@ -16,7 +16,7 @@ mod imp {
     //!
     //!     cargo run -p clip-core --example auto -- [replay_seconds] [--mic] [--portal]
     //!
-    //! Clips go to ~/Videos/clip.sh/<game name>/ (or $CLIPSH_CLIPS_DIR).
+    //! Clips go to ~/Videos/Reruns/<game name>/ (or $RERUNS_CLIPS_DIR).
 
     use anyhow::Result;
     use clip_core::{
@@ -49,7 +49,7 @@ mod imp {
             .iter()
             .any(|a| a == "--portal")
             .then_some(Backend::Portal);
-        let token_path = std::env::var_os("CLIPSH_TOKEN_FILE")
+        let token_path = std::env::var_os("RERUNS_TOKEN_FILE")
             .map_or_else(|| default_clips_dir().join(".portal-token"), Into::into);
         let (mut auto, mut events) = AutoRecorder::new(cfg, prefer, token_path).await?;
         if auto.needs_screen() {
@@ -59,7 +59,7 @@ mod imp {
             }
         }
         println!("waiting for a game; Enter = save, q = quit");
-        let root = std::env::var_os("CLIPSH_CLIPS_DIR").map_or_else(default_clips_dir, Into::into);
+        let root = std::env::var_os("RERUNS_CLIPS_DIR").map_or_else(default_clips_dir, Into::into);
         let mut lines = BufReader::new(tokio::io::stdin()).lines();
 
         loop {

@@ -11,7 +11,7 @@ use zbus::{Connection, Proxy, zvariant::OwnedObjectPath};
 use crate::hotkey::{Action, Binding};
 
 const SERVICE: &str = "org.kde.kglobalaccel";
-const COMPONENT: &str = "clip_sh";
+const COMPONENT: &str = "reruns";
 /// KGlobalAccel::SetShortcutFlag: SetPresent | NoAutoloading.
 const SET_FLAGS: u32 = 0x2 | 0x4;
 
@@ -105,7 +105,7 @@ async fn accel(conn: &Connection) -> Result<Proxy<'static>> {
 
 /// [componentUnique, actionUnique, componentFriendly, actionFriendly]
 fn action_id(action: Action) -> Vec<&'static str> {
-    vec![COMPONENT, action.id(), "clip.sh", action.description()]
+    vec![COMPONENT, action.id(), "Reruns", action.description()]
 }
 
 /// Parse `"Ctrl+Shift+F8"` into a Qt key combination (`Qt::Key | modifiers`).

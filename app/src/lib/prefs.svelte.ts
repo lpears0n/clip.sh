@@ -27,7 +27,7 @@ export interface Prefs {
   density: Density
 }
 
-const KEY = 'clip.sh/prefs'
+const KEY = 'reruns/prefs'
 
 const DEFAULTS: Prefs = {
   accent: 'orange',

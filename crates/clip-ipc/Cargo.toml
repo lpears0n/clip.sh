@@ -1,6 +1,6 @@
 [package]
 name = "clip-ipc"
-description = "Socket protocol between the clip.sh app and the clipsh CLI"
+description = "Socket protocol between the Reruns app and the rerunsctl CLI"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

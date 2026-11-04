@@ -112,12 +112,12 @@ fn media_path(root: &Path, folder: &str, ext: &str) -> PathBuf {
     path
 }
 
-/// Default clips folder: `$XDG_VIDEOS_DIR/clip.sh`.
+/// Default clips folder: `$XDG_VIDEOS_DIR/Reruns`.
 pub fn default_clips_dir() -> PathBuf {
     dirs::video_dir()
         .or_else(|| dirs::home_dir().map(|h| h.join("Videos")))
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("clip.sh")
+        .join("Reruns")
 }
 
 fn sanitize(name: &str) -> String {

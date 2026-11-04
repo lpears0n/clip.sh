@@ -1,11 +1,11 @@
 # Maintainer: lpears0n <lucas.pearson@live.com>
-# Builds clip.sh from a tagged release. Submit to the AUR as `clip-sh`.
-pkgname=clip-sh
+# Builds Reruns from a tagged release. Submit to the AUR as `reruns`.
+pkgname=reruns
 pkgver=0.1.0
 pkgrel=1
 pkgdesc="Instant-replay game clipping for Linux (like ShadowPlay / Medal)"
 arch=('x86_64')
-url="https://github.com/lpears0n/clip.sh"
+url="https://github.com/lpears0n/reruns"
 license=('GPL-3.0-or-later')
 depends=(
   'webkit2gtk-4.1' 'libayatana-appindicator' 'gstreamer'
@@ -21,7 +21,7 @@ makedepends=('cargo' 'pnpm' 'nodejs')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
 sha256sums=('SKIP') # updated by the release script
 
-_srcdir="clip.sh-$pkgver"
+_srcdir="reruns-$pkgver"
 
 prepare() {
   cd "$_srcdir/app"
@@ -39,10 +39,10 @@ build() {
 
 package() {
   cd "$_srcdir"
-  install -Dm755 "$srcdir/target/release/clip-sh" "$pkgdir/usr/bin/clip-sh"
-  install -Dm755 "$srcdir/target/release/clipsh" "$pkgdir/usr/bin/clipsh"
-  install -Dm644 app/src-tauri/icons/128x128.png "$pkgdir/usr/share/icons/hicolor/128x128/apps/clip-sh.png"
-  install -Dm644 app/src-tauri/icons/icon.png "$pkgdir/usr/share/icons/hicolor/512x512/apps/clip-sh.png"
-  install -Dm644 packaging/clip-sh.desktop "$pkgdir/usr/share/applications/clip-sh.desktop"
+  install -Dm755 "$srcdir/target/release/reruns" "$pkgdir/usr/bin/reruns"
+  install -Dm755 "$srcdir/target/release/rerunsctl" "$pkgdir/usr/bin/rerunsctl"
+  install -Dm644 app/src-tauri/icons/128x128.png "$pkgdir/usr/share/icons/hicolor/128x128/apps/reruns.png"
+  install -Dm644 app/src-tauri/icons/icon.png "$pkgdir/usr/share/icons/hicolor/512x512/apps/reruns.png"
+  install -Dm644 packaging/reruns.desktop "$pkgdir/usr/share/applications/reruns.desktop"
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE" 2>/dev/null || true
 }

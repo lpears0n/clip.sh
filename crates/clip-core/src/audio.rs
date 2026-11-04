@@ -242,7 +242,7 @@ mod tests {
     #[test]
     fn missing_devices_fall_back_to_the_default() {
         crate::init().unwrap();
-        let gone = "clip.sh-test-device-that-does-not-exist";
+        let gone = "Reruns-test-device-that-does-not-exist";
         assert_eq!(
             present(&AudioSource::Desktop(Some(gone.into()))),
             AudioSource::Desktop(None)

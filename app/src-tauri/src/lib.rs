@@ -84,7 +84,7 @@ async fn choose_screen(state: State<'_, AppState>) -> CmdResult<()> {
 }
 
 /// How the global hotkey is provided: "kglobalaccel", "portal", or null when
-/// the desktop has neither (the UI then explains `clipsh save`).
+/// the desktop has neither (the UI then explains `rerunsctl save`).
 #[tauri::command]
 async fn hotkey_backend(state: State<'_, AppState>) -> CmdResult<Option<hotkeys::Backend>> {
     Ok(state.hotkeys.backend().await)
@@ -566,7 +566,7 @@ fn announce_saved(app: &AppHandle, saved: Saved, path: &std::path::Path) {
 }
 
 fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
-    let open = MenuItem::with_id(app, "open", "Open clip.sh", true, None::<&str>)?;
+    let open = MenuItem::with_id(app, "open", "Open Reruns", true, None::<&str>)?;
     let save = MenuItem::with_id(app, "save", "Save clip", true, None::<&str>)?;
     let shot = MenuItem::with_id(app, "screenshot", "Save screenshot", true, None::<&str>)?;
     let mark = MenuItem::with_id(app, "mark", "Mark a moment", true, None::<&str>)?;
@@ -574,7 +574,7 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
     let menu = Menu::with_items(app, &[&open, &save, &shot, &mark, &quit])?;
     TrayIconBuilder::with_id("main")
         .icon(app.default_window_icon().unwrap().clone())
-        .tooltip("clip.sh")
+        .tooltip("Reruns")
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
@@ -632,10 +632,10 @@ pub fn run() {
     tracing::info!(
         version = env!("CARGO_PKG_VERSION"),
         log = %logging::log_path().display(),
-        "clip.sh starting"
+        "Reruns starting"
     );
     if ipc_server::hand_off_to_running_instance() {
-        tracing::info!("clip.sh is already running; showed its window");
+        tracing::info!("Reruns is already running; showed its window");
         return;
     }
     #[cfg(windows)]
@@ -676,7 +676,7 @@ pub fn run() {
             let media = tauri::async_runtime::block_on(media_server::MediaServer::start())?;
             let token_path = dirs::data_dir()
                 .unwrap_or_else(|| PathBuf::from("."))
-                .join("clip.sh/portal-restore-token");
+                .join("reruns/portal-restore-token");
             let service = Service::spawn(
                 app.handle().clone(),
                 settings.recorder_config(),
@@ -823,5 +823,5 @@ pub fn run() {
             cancel_render,
         ])
         .run(context)
-        .expect("error while running clip.sh");
+        .expect("error while running Reruns");
 }

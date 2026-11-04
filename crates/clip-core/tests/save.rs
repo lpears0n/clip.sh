@@ -105,7 +105,7 @@ fn saves_last_n_seconds_as_mp4() {
     assert!(ring.buffered() >= gst::ClockTime::from_seconds(5));
 
     let clip = ring.snapshot(gst::ClockTime::from_seconds(3)).unwrap();
-    let dir = std::env::temp_dir().join(format!("clipsh-test-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("reruns-test-{}", std::process::id()));
     let path = dir.join("clip.mp4");
     write_mp4(&clip, &path).unwrap();
 
@@ -172,7 +172,7 @@ fn saves_last_n_seconds_as_mp4() {
 #[test]
 fn fits_an_export_under_a_size_limit() {
     clip_core::init().unwrap();
-    let dir = std::env::temp_dir().join(format!("clipsh-fit-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("reruns-fit-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let source = dir.join("source.mp4");
     // Four seconds of 720p60 with audio, at a generous rate.
@@ -297,7 +297,7 @@ fn saves_every_supported_codec() {
 
         let clip = ring.snapshot(gst::ClockTime::from_seconds(2)).unwrap();
         let path =
-            std::env::temp_dir().join(format!("clipsh-codec-{}-{codec:?}.mp4", std::process::id()));
+            std::env::temp_dir().join(format!("reruns-codec-{}-{codec:?}.mp4", std::process::id()));
         write_mp4(&clip, &path).unwrap();
         let probe = ffprobe(&path, "stream=codec_name,width,height");
         let expected = match codec {
@@ -323,7 +323,7 @@ fn screenshot_is_the_newest_frame_as_png() {
     // 30 fps, 1 s GOPs: the newest GOP is the last whole second.
     assert_eq!(gop.video.buffers.len(), 30, "newest GOP");
 
-    let dir = std::env::temp_dir().join(format!("clipsh-shot-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("reruns-shot-{}", std::process::id()));
     let path = dir.join("shot.png");
     clip_core::write_png(&gop, &path).unwrap();
 

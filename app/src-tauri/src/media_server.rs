@@ -252,7 +252,7 @@ mod tests {
 
     #[tokio::test]
     async fn serves_allowed_files_with_ranges_only() {
-        let dir = std::env::temp_dir().join(format!("clipsh-media-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("reruns-media-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("a b.mp4");
         std::fs::write(&file, b"0123456789").unwrap();
