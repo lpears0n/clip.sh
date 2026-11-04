@@ -2,7 +2,9 @@ mod games;
 mod hotkeys;
 mod ipc_server;
 mod library;
+mod logging;
 mod media_server;
+mod overlay;
 mod service;
 mod settings;
 mod storage;
@@ -32,7 +34,7 @@ use tauri_plugin_opener::OpenerExt;
 
 pub(crate) struct AppState {
     pub(crate) service: Service,
-    settings: Mutex<Settings>,
+    pub(crate) settings: Mutex<Settings>,
     hotkeys: hotkeys::Hotkeys,
     encoder: OnceLock<Encoder>,
     /// Which encoders handle which codecs; probing test-encodes, so do it once.
@@ -137,7 +139,8 @@ struct EncoderSupport {
 struct Capabilities {
     display_hz: Option<f64>,
     encoders: Vec<EncoderSupport>,
-    mic_devices: Vec<clip_core::InputDevice>,
+    mic_devices: Vec<clip_core::AudioDevice>,
+    output_devices: Vec<clip_core::AudioDevice>,
 }
 
 #[tauri::command]
@@ -162,10 +165,11 @@ async fn get_capabilities(state: State<'_, AppState>) -> CmdResult<Capabilities>
         })
         .await
         .clone();
-    let (display_hz, mic_devices) = tauri::async_runtime::spawn_blocking(|| {
+    let (display_hz, mic_devices, output_devices) = tauri::async_runtime::spawn_blocking(|| {
         (
             clip_core::display::max_refresh_hz().ok().flatten(),
             clip_core::input_devices(),
+            clip_core::output_devices(),
         )
     })
     .await
@@ -174,6 +178,7 @@ async fn get_capabilities(state: State<'_, AppState>) -> CmdResult<Capabilities>
         display_hz,
         encoders,
         mic_devices,
+        output_devices,
     })
 }
 
@@ -197,6 +202,11 @@ async fn get_status(state: State<'_, AppState>) -> CmdResult<Status> {
 #[tauri::command]
 async fn save_clip(state: State<'_, AppState>) -> CmdResult<PathBuf> {
     state.service.save(state.clips_dir()).await
+}
+
+#[tauri::command]
+async fn save_screenshot(state: State<'_, AppState>) -> CmdResult<PathBuf> {
+    state.service.screenshot(state.clips_dir()).await
 }
 
 #[tauri::command]
@@ -287,15 +297,17 @@ async fn set_settings(
     state: State<'_, AppState>,
     settings: Settings,
 ) -> CmdResult<()> {
-    let (old_hotkey, old_autostart) = {
+    let (old_bindings, old_autostart) = {
         let s = state.settings.lock().unwrap();
-        (s.hotkey.clone(), s.launch_at_login)
+        (s.hotkey_bindings(), s.launch_at_login)
     };
     if settings.launch_at_login != old_autostart {
         system::set_autostart(settings.launch_at_login).map_err(|e| format!("{e:#}"))?;
     }
-    if settings.hotkey != old_hotkey {
-        state.hotkeys.set_keys(&app, &settings.hotkey).await?;
+    for b in settings.hotkey_bindings() {
+        if !old_bindings.contains(&b) {
+            state.hotkeys.set_keys(&app, b.action, &b.keys).await?;
+        }
     }
     settings.save().map_err(|e| format!("{e:#}"))?;
     allow_clips_dir(&app, &settings.clips_dir);
@@ -427,8 +439,15 @@ pub(crate) fn show_main(app: &AppHandle) {
     }
 }
 
-/// Notification + sound for a newly saved clip, as configured.
-fn announce_saved(app: &AppHandle, path: &std::path::Path) {
+/// Notification, sound and overlay for a newly saved clip or screenshot,
+/// as configured. `popup` is the overlay to show over the game (none for
+/// edits rendered in the app).
+fn announce_saved(
+    app: &AppHandle,
+    summary: &'static str,
+    popup: Option<overlay::Kind>,
+    path: &std::path::Path,
+) {
     let (notify, sound) = {
         let state = app.state::<AppState>();
         let s = state.settings.lock().unwrap();
@@ -437,17 +456,17 @@ fn announce_saved(app: &AppHandle, path: &std::path::Path) {
     if sound {
         system::play_save_sound();
     }
+    let game = path
+        .parent()
+        .and_then(std::path::Path::file_name)
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    if let Some(kind) = popup
+        && overlay::enabled(app)
+    {
+        overlay::show(app, overlay::Popup::saved(kind, &game));
+    }
     if notify {
-        let game = path
-            .parent()
-            .and_then(std::path::Path::file_name)
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        let summary = if library::is_edit(path) {
-            "Edit rendered"
-        } else {
-            "Clip saved"
-        };
         let app = app.clone();
         tauri::async_runtime::spawn(async move {
             if let Err(e) = system::notify(&app, summary, &game).await {
@@ -460,8 +479,9 @@ fn announce_saved(app: &AppHandle, path: &std::path::Path) {
 fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, "open", "Open clip.sh", true, None::<&str>)?;
     let save = MenuItem::with_id(app, "save", "Save clip", true, None::<&str>)?;
+    let shot = MenuItem::with_id(app, "screenshot", "Save screenshot", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open, &save, &quit])?;
+    let menu = Menu::with_items(app, &[&open, &save, &shot, &quit])?;
     TrayIconBuilder::with_id("main")
         .icon(app.default_window_icon().unwrap().clone())
         .tooltip("clip.sh")
@@ -469,14 +489,14 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "open" => show_main(app),
-            "save" => {
-                let state = app.state::<AppState>();
-                let (service, dir) = (state.service.clone(), state.clips_dir());
-                tauri::async_runtime::spawn(async move {
-                    if let Err(e) = service.save(dir).await {
-                        tracing::warn!("save failed: {e}");
-                    }
-                });
+            "save" | "screenshot" => {
+                let action = if event.id.as_ref() == "save" {
+                    clip_core::Action::SaveClip
+                } else {
+                    clip_core::Action::Screenshot
+                };
+                let app = app.clone();
+                tauri::async_runtime::spawn(async move { hotkeys::fire(&app, action).await });
             }
             "quit" => app.exit(0),
             _ => {}
@@ -518,11 +538,12 @@ fn point_gstreamer_at_bundled_plugins() {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
-        )
-        .init();
+    logging::init();
+    tracing::info!(
+        version = env!("CARGO_PKG_VERSION"),
+        log = %logging::log_path().display(),
+        "clip.sh starting"
+    );
     if ipc_server::hand_off_to_running_instance() {
         tracing::info!("clip.sh is already running; showed its window");
         return;
@@ -530,7 +551,7 @@ pub fn run() {
     #[cfg(windows)]
     point_gstreamer_at_bundled_plugins();
     if let Err(e) = clip_core::init() {
-        panic!("GStreamer failed to initialise: {e}");
+        logging::fatal(&format!("GStreamer failed to initialise: {e:#}"));
     }
 
     let builder = tauri::Builder::default()
@@ -550,6 +571,8 @@ pub fn run() {
                     tauri_plugin_window_state::StateFlags::all()
                         - tauri_plugin_window_state::StateFlags::VISIBLE,
                 )
+                // The overlay is placed over the game each time it shows.
+                .with_denylist(&["overlay"])
                 .build(),
         )
         .setup(|app| {
@@ -564,7 +587,7 @@ pub fn run() {
                 settings.capture_backend,
                 token_path,
             );
-            let hotkey = settings.hotkey.clone();
+            let bindings = settings.hotkey_bindings();
             app.manage(AppState {
                 service,
                 settings: Mutex::new(settings),
@@ -582,7 +605,7 @@ pub fn run() {
                 let handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
                     let state = handle.state::<AppState>();
-                    state.hotkeys.start(handle.clone(), hotkey).await;
+                    state.hotkeys.start(handle.clone(), bindings).await;
                 });
             }
             {
@@ -590,8 +613,44 @@ pub fn run() {
                 app.listen_any(service::CLIP_SAVED, move |event| {
                     enforce_storage(&handle);
                     let path: PathBuf = serde_json::from_str(event.payload()).unwrap_or_default();
-                    announce_saved(&handle, &path);
+                    if library::is_edit(&path) {
+                        announce_saved(&handle, "Edit rendered", None, &path);
+                    } else {
+                        announce_saved(&handle, "Clip saved", Some(overlay::Kind::Saved), &path);
+                    }
                 });
+            }
+            {
+                let handle = app.handle().clone();
+                app.listen_any(service::SCREENSHOT_SAVED, move |event| {
+                    let path: PathBuf = serde_json::from_str(event.payload()).unwrap_or_default();
+                    announce_saved(
+                        &handle,
+                        "Screenshot saved",
+                        Some(overlay::Kind::Screenshot),
+                        &path,
+                    );
+                });
+            }
+            {
+                let handle = app.handle().clone();
+                app.listen_any(service::RECORDING_STARTED, move |event| {
+                    if !overlay::enabled(&handle) {
+                        return;
+                    }
+                    let game: String = serde_json::from_str(event.payload()).unwrap_or_default();
+                    let hotkey = handle
+                        .state::<AppState>()
+                        .settings
+                        .lock()
+                        .unwrap()
+                        .hotkey
+                        .clone();
+                    overlay::show(&handle, overlay::Popup::ready(&game, &hotkey));
+                });
+            }
+            if let Err(e) = overlay::create(app.handle()) {
+                tracing::warn!("in-game overlay unavailable: {e}");
             }
             // The window starts hidden (tauri.conf.json) so a login launch
             // can stay in the tray without flashing.
@@ -634,6 +693,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_status,
             save_clip,
+            save_screenshot,
             list_clips,
             delete_clip,
             update_clip,

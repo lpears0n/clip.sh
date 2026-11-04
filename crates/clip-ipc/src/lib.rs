@@ -14,6 +14,8 @@ use serde::{Deserialize, Serialize};
 pub enum Request {
     /// Save the replay buffer as a clip.
     Save,
+    /// Save the newest frame as a PNG.
+    Screenshot,
     /// Recorder status.
     Status,
     /// Bring the window to the front.
@@ -25,7 +27,7 @@ pub struct Response {
     pub ok: bool,
     /// Human-readable result or error.
     pub message: String,
-    /// Saved clip, for `save`.
+    /// Saved file, for `save` and `screenshot`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
     /// Full status, for `status`.

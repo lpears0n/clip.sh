@@ -92,12 +92,21 @@ fn add_track(
 
 /// `<root>/<folder>/<YYYY-MM-DD_HH-MM-SS>.mp4`, adding a suffix if taken.
 pub fn clip_path(root: &Path, folder: &str) -> PathBuf {
+    media_path(root, folder, "mp4")
+}
+
+/// `<root>/<folder>/<YYYY-MM-DD_HH-MM-SS>.png`, next to the folder's clips.
+pub fn screenshot_path(root: &Path, folder: &str) -> PathBuf {
+    media_path(root, folder, "png")
+}
+
+fn media_path(root: &Path, folder: &str, ext: &str) -> PathBuf {
     let dir = root.join(sanitize(folder));
     let stamp = chrono::Local::now().format("%Y-%m-%d_%H-%M-%S").to_string();
-    let mut path = dir.join(format!("{stamp}.mp4"));
+    let mut path = dir.join(format!("{stamp}.{ext}"));
     let mut n = 2;
     while path.exists() {
-        path = dir.join(format!("{stamp}_{n}.mp4"));
+        path = dir.join(format!("{stamp}_{n}.{ext}"));
         n += 1;
     }
     path

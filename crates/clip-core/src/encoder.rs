@@ -84,17 +84,79 @@ pub enum Encoder {
     X264,
 }
 
-/// Set a property if the element has one by that name.
-fn set<V: Into<gst::glib::Value> + Clone>(el: &gst::Element, name: &str, value: V) {
-    if el.has_property(name) {
-        el.set_property(name, value);
+/// Set a property if the element has one by that name and takes the value.
+/// Property names, types, ranges and enum values drift between GStreamer
+/// versions and vendors; a miss costs one setting (logged), never the
+/// recording, where `set_property` would panic.
+fn set<V: Into<gst::glib::Value>>(el: &gst::Element, name: &str, value: V) {
+    use gst::glib::{ParamFlags, ParamSpecInt, ParamSpecInt64, ParamSpecUInt, ParamSpecUInt64};
+
+    let Some(pspec) = el.find_property(name) else {
+        tracing::debug!(element = %factory_name(el), property = name, "no such property; skipped");
+        return;
+    };
+    if !pspec.flags().contains(ParamFlags::WRITABLE)
+        || pspec.flags().contains(ParamFlags::CONSTRUCT_ONLY)
+    {
+        tracing::debug!(element = %factory_name(el), property = name, "not writable; skipped");
+        return;
+    }
+    let mut v: gst::glib::Value = value.into();
+    if !v.type_().is_a(pspec.value_type()) {
+        match v.transform_with_type(pspec.value_type()) {
+            Ok(t) => v = t,
+            Err(e) => {
+                tracing::warn!(element = %factory_name(el), property = name, "not set: {e}");
+                return;
+            }
+        }
+    }
+    // Out-of-range numbers are clamped (GLib would, but the Rust binding
+    // treats a changed value as a programming error).
+    if let Some(p) = pspec.downcast_ref::<ParamSpecInt>()
+        && let Ok(n) = v.get::<i32>()
+    {
+        v = n.clamp(p.minimum(), p.maximum()).into();
+    } else if let Some(p) = pspec.downcast_ref::<ParamSpecUInt>()
+        && let Ok(n) = v.get::<u32>()
+    {
+        v = n.clamp(p.minimum(), p.maximum()).into();
+    } else if let Some(p) = pspec.downcast_ref::<ParamSpecInt64>()
+        && let Ok(n) = v.get::<i64>()
+    {
+        v = n.clamp(p.minimum(), p.maximum()).into();
+    } else if let Some(p) = pspec.downcast_ref::<ParamSpecUInt64>()
+        && let Ok(n) = v.get::<u64>()
+    {
+        v = n.clamp(p.minimum(), p.maximum()).into();
+    }
+    el.set_property_from_value(name, &v);
+}
+
+/// Like [`set`], for enum (and other string-parsed) values: an unknown value
+/// name is skipped, where `set_property_from_str` would panic.
+fn set_str(el: &gst::Element, name: &str, value: &str) {
+    use gst::prelude::GstValueExt;
+
+    let Some(pspec) = el.find_property(name) else {
+        tracing::debug!(element = %factory_name(el), property = name, "no such property; skipped");
+        return;
+    };
+    match gst::glib::Value::deserialize(value, pspec.value_type()) {
+        Ok(v) => set(el, name, v),
+        Err(e) => tracing::warn!(
+            element = %factory_name(el),
+            property = name,
+            value,
+            "not set: {e}"
+        ),
     }
 }
 
-fn set_str(el: &gst::Element, name: &str, value: &str) {
-    if el.has_property(name) {
-        el.set_property_from_str(name, value);
-    }
+fn factory_name(el: &gst::Element) -> String {
+    el.factory()
+        .map(|f| f.name().to_string())
+        .unwrap_or_default()
 }
 
 impl Encoder {
@@ -149,11 +211,21 @@ impl Encoder {
     /// Whether the element exists *and* can encode a test frame. Factories can
     /// be registered even when the driver fails at runtime.
     pub fn works(self, codec: Codec) -> bool {
-        match self.element(codec) {
-            Some(name) if gst::ElementFactory::find(name).is_some() => {
-                self.encode_test_frame(codec).is_ok()
+        let Some(name) = self.element(codec) else {
+            return false;
+        };
+        if gst::ElementFactory::find(name).is_none() {
+            tracing::debug!(element = name, "encoder not available here");
+            return false;
+        }
+        match self.encode_test_frame(codec) {
+            Ok(()) => true,
+            Err(e) => {
+                // Worth a line at info: an encoder that exists but can't run
+                // is how a broken driver or install shows itself.
+                tracing::info!(element = name, "encoder failed the probe: {e:#}");
+                false
             }
-            _ => false,
         }
     }
 
@@ -276,37 +348,39 @@ impl Encoder {
         let el = gst::ElementFactory::make(name)
             .build()
             .with_context(|| format!("creating {name}"))?;
+        // Names and values follow GStreamer 1.26; anything an element lacks
+        // or spells differently is skipped (and logged) rather than guessed.
         match self {
             Encoder::Nvenc => {
-                el.set_property_from_str("rc-mode", "vbr");
-                el.set_property_from_str("preset", "p4");
-                el.set_property_from_str("tune", "high-quality");
-                el.set_property("bitrate", cfg.bitrate_kbps);
-                el.set_property("max-bitrate", cfg.bitrate_kbps * 3 / 2);
-                el.set_property("gop-size", gop as i32);
-                el.set_property("bframes", 0u32);
-                el.set_property("zerolatency", true);
+                set_str(&el, "rc-mode", "vbr");
+                set_str(&el, "preset", "p4");
+                set_str(&el, "tune", "high-quality");
+                set(&el, "bitrate", cfg.bitrate_kbps);
+                set(&el, "max-bitrate", cfg.bitrate_kbps * 3 / 2);
+                set(&el, "gop-size", gop as i32);
+                set(&el, "bframes", 0u32);
+                set(&el, "zerolatency", true);
             }
             Encoder::Vaapi => {
-                el.set_property_from_str("rate-control", "vbr");
-                el.set_property("bitrate", cfg.bitrate_kbps);
-                el.set_property("key-int-max", gop);
-                el.set_property("b-frames", 0u32);
+                set_str(&el, "rate-control", "vbr");
+                set(&el, "bitrate", cfg.bitrate_kbps);
+                set(&el, "key-int-max", gop);
+                set(&el, "b-frames", 0u32);
             }
             Encoder::X264 => {
-                el.set_property_from_str("tune", "zerolatency");
-                el.set_property_from_str("speed-preset", "veryfast");
-                el.set_property("bitrate", cfg.bitrate_kbps);
-                el.set_property("key-int-max", gop);
+                set_str(&el, "tune", "zerolatency");
+                set_str(&el, "speed-preset", "veryfast");
+                set(&el, "bitrate", cfg.bitrate_kbps);
+                set(&el, "key-int-max", gop);
             }
-            // The Windows encoders share names for the essentials; anything
-            // a particular element lacks is skipped rather than guessed.
             Encoder::Amf => {
-                set_str(&el, "rate-control", "vbr-latency");
+                // Latency-constrained VBR; "usage" picks the AMF defaults.
+                set_str(&el, "rate-control", "lcvbr");
                 set_str(&el, "usage", "low-latency");
                 set(&el, "bitrate", cfg.bitrate_kbps);
                 set(&el, "max-bitrate", cfg.bitrate_kbps * 3 / 2);
                 set(&el, "gop-size", gop as i32);
+                set(&el, "b-frames", 0u32);
             }
             Encoder::Qsv => {
                 set_str(&el, "rate-control", "vbr");
@@ -325,5 +399,39 @@ impl Encoder {
             }
         }
         Ok(el)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// x264enc stands in for every encoder: the setters must survive a
+    /// property the element lacks, a value name it doesn't know, a value
+    /// of another numeric type and one outside the allowed range.
+    #[test]
+    fn property_setters_never_panic() {
+        gst::init().unwrap();
+        let Ok(el) = gst::ElementFactory::make("x264enc").build() else {
+            eprintln!("x264enc missing; skipping");
+            return;
+        };
+        set(&el, "no-such-property", 1u32);
+        set_str(&el, "no-such-property", "x");
+        set_str(&el, "tune", "not-a-tune");
+        set_str(&el, "speed-preset", "veryfast");
+        set(&el, "key-int-max", 60u32);
+        set(&el, "bitrate", 5000i32); // property is uint
+        set(&el, "bitrate", u32::MAX); // above the maximum: clamped
+        set(&el, "threads", -5i32); // uint property given a negative: clamped
+
+        assert_eq!(el.property::<u32>("key-int-max"), 60);
+        let preset: String = el
+            .property_value("speed-preset")
+            .serialize()
+            .unwrap()
+            .into();
+        assert_eq!(preset, "veryfast");
+        assert!(el.property::<u32>("bitrate") >= 5000);
     }
 }

@@ -12,6 +12,7 @@
     type GameEntry,
     initMedia,
     onClipSaved,
+    onScreenshotSaved,
     onLibraryChanged,
     onRenderProgress,
     onStatusChanged,
@@ -96,6 +97,12 @@
     view = v
     viewing = null
   }
+
+  // Audio devices come and go (a headset plugged in); re-read them each
+  // time Settings opens. Encoder results are cached, so this is cheap.
+  $effect(() => {
+    if (view === 'settings') api.capabilities().then((c) => (caps = c))
+  })
 
   async function loadLibrary() {
     try {
@@ -310,6 +317,9 @@
         setTimeout(() => (flash = false), 400)
         refreshLibrary()
         refreshUsage()
+      }),
+      onScreenshotSaved((path) => {
+        notify(`Screenshot saved as ${path.split(/[\\/]/).pop()}`)
       }),
       onLibraryChanged(() => {
         refreshLibrary()

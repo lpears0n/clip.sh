@@ -13,6 +13,13 @@ pub async fn notify(app: &AppHandle, summary: &str, body: &str) -> Result<()> {
     imp::notify(app, summary, body).await
 }
 
+/// The "clip saved" sound: 0.72 s, mono 16-bit PCM WAV, embedded so both
+/// platforms play the same file with nothing to install. Made from the
+/// owner's beep with the trailing silence trimmed, a 80 ms fade-out, and
+/// 14.3 dB of gain taken off (about -21 LUFS, peaks at -13.7 dBFS), so it is
+/// heard over a game without being loud.
+const SAVE_SOUND: &[u8] = include_bytes!("../sounds/clip-saved.wav");
+
 /// Play the "clip saved" sound without blocking.
 pub fn play_save_sound() {
     imp::play_save_sound()
@@ -39,7 +46,7 @@ mod imp {
     use tauri::AppHandle;
     use zbus::zvariant::Value;
 
-    use super::{AUTOSTART_ARG, autostart_file};
+    use super::{AUTOSTART_ARG, SAVE_SOUND, autostart_file};
 
     /// Show a desktop notification (org.freedesktop.Notifications).
     pub async fn notify(_app: &AppHandle, summary: &str, body: &str) -> Result<()> {
@@ -69,15 +76,25 @@ mod imp {
         Ok(())
     }
 
-    const SOUNDS: [&str; 3] = [
-        "/usr/share/sounds/freedesktop/stereo/camera-shutter.oga",
-        "/usr/share/sounds/freedesktop/stereo/screen-capture.oga",
-        "/usr/share/sounds/freedesktop/stereo/complete.oga",
-    ];
+    /// The embedded sound written out once per run, for playbin to read.
+    fn sound_file() -> Option<&'static std::path::Path> {
+        static PATH: std::sync::OnceLock<Option<std::path::PathBuf>> = std::sync::OnceLock::new();
+        PATH.get_or_init(|| {
+            let path = dirs::cache_dir()?.join("clip.sh/clip-saved.wav");
+            let current =
+                std::fs::metadata(&path).is_ok_and(|m| m.len() == SAVE_SOUND.len() as u64);
+            if !current {
+                std::fs::create_dir_all(path.parent()?).ok()?;
+                std::fs::write(&path, SAVE_SOUND).ok()?;
+            }
+            Some(path)
+        })
+        .as_deref()
+    }
 
     /// Play the "clip saved" sound without blocking.
     pub fn play_save_sound() {
-        let Some(path) = SOUNDS.iter().find(|p| std::path::Path::new(p).exists()) else {
+        let Some(path) = sound_file() else {
             return;
         };
         let Ok(uri) = gst::glib::filename_to_uri(path, None) else {
@@ -139,7 +156,7 @@ mod imp {
     use tauri::AppHandle;
     use tauri_plugin_notification::NotificationExt;
 
-    use super::AUTOSTART_ARG;
+    use super::{AUTOSTART_ARG, SAVE_SOUND};
 
     pub async fn notify(app: &AppHandle, summary: &str, body: &str) -> Result<()> {
         app.notification()
@@ -150,15 +167,20 @@ mod imp {
             .context("showing notification")
     }
 
-    /// The system notification sound, asynchronously; no file of our own.
+    /// The embedded WAV, played from memory, asynchronously.
     pub fn play_save_sound() {
         use windows::{
-            Win32::Media::Audio::{PlaySoundW, SND_ALIAS, SND_ASYNC},
-            core::w,
+            Win32::Media::Audio::{PlaySoundW, SND_ASYNC, SND_MEMORY, SND_NODEFAULT},
+            core::PCWSTR,
         };
-        // SAFETY: a static alias name and flags; PlaySound copies nothing.
+        // SAFETY: with SND_MEMORY the "name" is a pointer to a whole RIFF
+        // WAVE image. It is static, so it outlives the asynchronous playback.
         unsafe {
-            let _ = PlaySoundW(w!("SystemNotification"), None, SND_ALIAS | SND_ASYNC);
+            let _ = PlaySoundW(
+                PCWSTR(SAVE_SOUND.as_ptr().cast()),
+                None,
+                SND_MEMORY | SND_ASYNC | SND_NODEFAULT,
+            );
         }
     }
 
@@ -178,5 +200,22 @@ mod imp {
                 .context("removing the Run entry")?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SAVE_SOUND;
+
+    /// PlaySound's SND_MEMORY wants a plain PCM RIFF WAVE image.
+    #[test]
+    fn save_sound_is_a_pcm_wav() {
+        assert_eq!(&SAVE_SOUND[0..4], b"RIFF");
+        assert_eq!(&SAVE_SOUND[8..12], b"WAVE");
+        assert_eq!(&SAVE_SOUND[12..16], b"fmt ");
+        let format = u16::from_le_bytes([SAVE_SOUND[20], SAVE_SOUND[21]]);
+        assert_eq!(format, 1, "PCM");
+        let riff_len = u32::from_le_bytes(SAVE_SOUND[4..8].try_into().unwrap()) as usize;
+        assert_eq!(riff_len + 8, SAVE_SOUND.len());
     }
 }

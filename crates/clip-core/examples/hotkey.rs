@@ -11,21 +11,33 @@ fn main() -> anyhow::Result<()> {
 
 #[cfg(target_os = "linux")]
 mod imp {
-    //! Register a KGlobalAccel hotkey and print presses.
+    //! Register KGlobalAccel hotkeys (save clip, screenshot) and print presses.
     //!
-    //!     cargo run -p clip-core --example hotkey -- [keys]   # default Ctrl+Alt+F12
+    //!     cargo run -p clip-core --example hotkey -- [save keys] [screenshot keys]
+    //!     # defaults: Ctrl+Alt+F12 and Ctrl+Alt+F11
 
-    use clip_core::kwin::shortcut::GlobalShortcut;
+    use clip_core::{Action, Binding, kwin::shortcut::GlobalShortcut};
 
     #[tokio::main]
     pub async fn main() -> anyhow::Result<()> {
-        let keys = std::env::args()
-            .nth(1)
-            .unwrap_or_else(|| "Ctrl+Alt+F12".into());
-        let (_shortcut, mut presses) = GlobalShortcut::register(&keys).await?;
-        println!("registered {keys}; press it (Ctrl+C to quit)");
-        while presses.recv().await.is_some() {
-            println!("pressed");
+        let mut args = std::env::args().skip(1);
+        let bindings = [
+            Binding::new(
+                Action::SaveClip,
+                args.next().unwrap_or_else(|| "Ctrl+Alt+F12".into()),
+            ),
+            Binding::new(
+                Action::Screenshot,
+                args.next().unwrap_or_else(|| "Ctrl+Alt+F11".into()),
+            ),
+        ];
+        let (_shortcut, mut presses) = GlobalShortcut::register(&bindings).await?;
+        for b in &bindings {
+            println!("registered {} for {}", b.keys, b.action.id());
+        }
+        println!("press one (Ctrl+C to quit)");
+        while let Some(action) = presses.recv().await {
+            println!("pressed: {}", action.id());
         }
         Ok(())
     }

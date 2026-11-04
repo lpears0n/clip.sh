@@ -23,7 +23,7 @@ use crate::{
     kwin::{Kwin, WindowEvent, WindowInfo},
     portal::ScreenSource,
     recorder::{CaptureSource, Recorder, RecorderConfig, Status},
-    save::clip_path,
+    save::{clip_path, screenshot_path},
 };
 
 /// How often the portal backend scans for running games.
@@ -298,8 +298,14 @@ impl AutoRecorder {
         Ok(Some(a.game))
     }
 
-    /// Replace the recording settings. Takes effect from the next game.
+    /// Replace the recording settings. The replay length applies now, the
+    /// rest from the next game.
     pub fn set_config(&mut self, cfg: RecorderConfig) {
+        // The replay length applies to the running recording right away;
+        // everything else (codec, bitrate, devices) needs a new pipeline.
+        if let Some(a) = &mut self.active {
+            a.recorder.set_replay_seconds(cfg.replay_seconds);
+        }
         self.cfg = cfg;
     }
 
@@ -334,6 +340,12 @@ impl AutoRecorder {
             .or_else(|| self.probed.get(&self.cfg.video.codec).copied())
     }
 
+    /// The recorded game's display, if it is running in HDR. Not detected
+    /// on Linux yet (KWin's HDR state isn't queried).
+    pub fn hdr(&self) -> Option<crate::HdrDisplay> {
+        None
+    }
+
     pub fn current_game(&self) -> Option<&Game> {
         self.active.as_ref().map(|a| &a.game)
     }
@@ -348,6 +360,14 @@ impl AutoRecorder {
         let a = self.active.as_ref().context("no game is being recorded")?;
         a.recorder
             .save(seconds, &clip_path(root, &a.game.name))
+            .await
+    }
+
+    /// Save the newest frame as `<root>/<game name>/<timestamp>.png`.
+    pub async fn screenshot(&self, root: &Path) -> Result<PathBuf> {
+        let a = self.active.as_ref().context("no game is being recorded")?;
+        a.recorder
+            .screenshot(&screenshot_path(root, &a.game.name))
             .await
     }
 

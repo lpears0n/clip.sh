@@ -3,7 +3,9 @@
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
-use clip_core::{AudioSource, Codec, Encoder, RecorderConfig, VideoConfig, auto::Backend};
+use clip_core::{
+    Action, AudioSource, Binding, Codec, Encoder, RecorderConfig, VideoConfig, auto::Backend,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -17,6 +19,8 @@ pub struct Settings {
     pub close_to_tray: bool,
     pub notify_on_save: bool,
     pub sound_on_save: bool,
+    /// Windows: a popup over the game when recording starts and on a save.
+    pub overlay: bool,
 
     // Recording
     pub replay_seconds: u32,
@@ -33,6 +37,9 @@ pub struct Settings {
 
     // Audio
     pub desktop_audio: bool,
+    /// Output whose sound is recorded (PipeWire node name / WASAPI id);
+    /// `None` = the system default output, followed when it changes.
+    pub desktop_device: Option<String>,
     pub mic: bool,
     /// PipeWire node name; `None` = system default input.
     pub mic_device: Option<String>,
@@ -44,6 +51,8 @@ pub struct Settings {
 
     /// Global "save clip" hotkey, e.g. `F8` or `Ctrl+Shift+S`.
     pub hotkey: String,
+    /// Global "save screenshot" hotkey; empty leaves it unbound.
+    pub screenshot_hotkey: String,
     pub clips_dir: PathBuf,
     /// Soft cap on the clips folder in GB; `None` = no limit.
     pub storage_limit_gb: Option<f64>,
@@ -64,6 +73,7 @@ impl Default for Settings {
             close_to_tray: true,
             notify_on_save: true,
             sound_on_save: true,
+            overlay: true,
             replay_seconds: 30,
             fps: 60,
             bitrate_kbps: 20_000,
@@ -72,11 +82,13 @@ impl Default for Settings {
             cursor: true,
             zero_copy: cfg!(windows),
             desktop_audio: true,
+            desktop_device: None,
             mic: false,
             mic_device: None,
             audio_bitrate_kbps: 160,
             capture_backend: None,
             hotkey: "F8".into(),
+            screenshot_hotkey: "F9".into(),
             clips_dir: clip_core::default_clips_dir(),
             storage_limit_gb: None,
             protect_edits: true,
@@ -117,7 +129,7 @@ impl Settings {
     pub fn recorder_config(&self) -> RecorderConfig {
         let mut audio = Vec::new();
         if self.desktop_audio {
-            audio.push(AudioSource::Desktop);
+            audio.push(AudioSource::Desktop(self.desktop_device.clone()));
         }
         if self.mic {
             audio.push(AudioSource::Mic(self.mic_device.clone()));
@@ -131,6 +143,14 @@ impl Settings {
             cursor: self.cursor,
             zero_copy: self.zero_copy,
         }
+    }
+
+    /// Every global hotkey, bound or not.
+    pub fn hotkey_bindings(&self) -> Vec<Binding> {
+        vec![
+            Binding::new(Action::SaveClip, self.hotkey.clone()),
+            Binding::new(Action::Screenshot, self.screenshot_hotkey.clone()),
+        ]
     }
 
     pub fn storage_policy(&self) -> crate::storage::Policy {

@@ -23,6 +23,8 @@ export interface Status {
   backend: 'kwin' | 'portal' | 'windows' | null
   /** Portal capture needs a screen chosen once. */
   needs_screen: boolean
+  /** While recording: the game's display, when it runs in HDR. */
+  hdr: { sdr_white_nits: number; peak_nits: number } | null
 }
 
 export interface Clip {
@@ -58,12 +60,16 @@ export interface Settings {
   mic: boolean
   clips_dir: string
   hotkey: string
+  /** Empty = unbound. */
+  screenshot_hotkey: string
   capture_backend: 'kwin' | 'portal' | 'windows' | null
   launch_at_login: boolean
   start_in_tray: boolean
   close_to_tray: boolean
   notify_on_save: boolean
   sound_on_save: boolean
+  /** Windows: popup over the game when recording starts and on a save. */
+  overlay: boolean
   fps: number
   bitrate_kbps: number
   codec: Codec
@@ -72,6 +78,8 @@ export interface Settings {
   /** Try DMA-BUF capture into GPU memory first; falls back by itself. */
   zero_copy: boolean
   desktop_audio: boolean
+  /** Output whose sound is recorded; null = the system default. */
+  desktop_device: string | null
   mic_device: string | null
   audio_bitrate_kbps: number
   storage_limit_gb: number | null
@@ -87,6 +95,7 @@ export interface Capabilities {
   display_hz: number | null
   encoders: { encoder: Encoder; codecs: Codec[] }[]
   mic_devices: { id: string; name: string }[]
+  output_devices: { id: string; name: string }[]
 }
 
 export interface Session {
@@ -125,6 +134,7 @@ export const api = {
   hotkeyBackend: () => invoke<HotkeyBackend | null>('hotkey_backend'),
   status: () => invoke<Status>('get_status'),
   save: () => invoke<string>('save_clip'),
+  screenshot: () => invoke<string>('save_screenshot'),
   clips: () => invoke<Clip[]>('list_clips'),
   games: () => invoke<GameEntry[]>('list_games'),
   deleteClip: (path: string) => invoke<void>('delete_clip', { path }),
@@ -150,6 +160,9 @@ export const onLibraryChanged = (f: () => void): Promise<UnlistenFn> =>
 
 export const onClipSaved = (f: (path: string) => void): Promise<UnlistenFn> =>
   listen<string>('clip-saved', (e) => f(e.payload))
+
+export const onScreenshotSaved = (f: (path: string) => void): Promise<UnlistenFn> =>
+  listen<string>('screenshot-saved', (e) => f(e.payload))
 
 /** A clip's thumbnail, sprite and duration were generated in the background. */
 export const onThumbnailReady = (f: (c: Clip) => void): Promise<UnlistenFn> =>

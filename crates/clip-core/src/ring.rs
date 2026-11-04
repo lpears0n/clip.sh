@@ -144,6 +144,18 @@ impl ReplayBuffer {
         self.window
     }
 
+    /// Change how much history is kept. A shorter window drops the excess
+    /// at once; a longer one fills as new frames arrive.
+    pub fn set_window(&mut self, window: gst::ClockTime) {
+        self.window = window;
+        self.video.evict(window);
+        if let Some(start) = self.video.oldest_pts() {
+            for t in &mut self.audio {
+                t.evict_before(start);
+            }
+        }
+    }
+
     pub fn push_video(&mut self, buffer: gst::Buffer) {
         self.video.push(buffer);
         self.video.evict(self.window);
@@ -163,12 +175,25 @@ impl ReplayBuffer {
         }
     }
 
+    /// Where the newest buffered video ends (running time), if any.
+    pub fn newest_video_end(&self) -> Option<gst::ClockTime> {
+        self.video.newest_end()
+    }
+
     /// How much video is currently buffered.
     pub fn buffered(&self) -> gst::ClockTime {
         match (self.video.oldest_pts(), self.video.newest_end()) {
             (Some(a), Some(b)) => b.saturating_sub(a),
             _ => gst::ClockTime::ZERO,
         }
+    }
+
+    /// The newest GOP (last keyframe up to the newest packet), video only:
+    /// just enough to decode the most recent frame, for screenshots.
+    pub fn latest_gop(&self) -> Result<Clip> {
+        let mut clip = self.snapshot(gst::ClockTime::ZERO)?;
+        clip.audio.clear();
+        Ok(clip)
     }
 
     /// Copy out the last `duration` (or everything, if less is buffered) as a
@@ -292,6 +317,7 @@ mod tests {
         assert_eq!(buf.video.oldest_pts(), Some(ms(7000)));
         assert!(is_keyframe(buf.video.packets.front().unwrap()));
         assert_eq!(buf.buffered(), ms(3000));
+        assert_eq!(buf.newest_video_end(), Some(ms(10_000)));
     }
 
     #[test]
@@ -404,6 +430,51 @@ mod tests {
         assert_eq!(buf.audio[0].oldest_pts(), Some(ms(7000)));
         let clip = buf.snapshot(gst::ClockTime::from_seconds(60)).unwrap();
         assert_eq!(pts_ms(&clip.audio[0].buffers[0]), 0);
+    }
+
+    #[test]
+    fn latest_gop_is_the_last_keyframe_onwards_without_audio() {
+        let mut buf = new_buf(30, 1);
+        fill_video(&mut buf, 0, 10_500);
+        for t in (0..10_500).step_by(20) {
+            buf.push_audio(0, packet(t, 20, true));
+        }
+        let clip = buf.latest_gop().unwrap();
+        let v = &clip.video.buffers;
+        assert!(is_keyframe(&v[0]));
+        assert_eq!(v.len(), 5, "10.0s keyframe, then 10.1..10.4");
+        assert_eq!(pts_ms(&v[0]), 0);
+        assert_eq!(clip.duration, ms(500));
+        assert!(clip.audio.is_empty());
+    }
+
+    #[test]
+    fn window_changes_apply_to_a_running_buffer() {
+        let mut buf = new_buf(30, 1);
+        for t in (0..20_000).step_by(20) {
+            if t % 100 == 0 {
+                buf.push_video(packet(t, 100, t % 1000 == 0));
+            }
+            buf.push_audio(0, packet(t, 20, true));
+        }
+        assert_eq!(
+            buf.buffered(),
+            ms(20_000),
+            "all 20 s kept under a 30 s window"
+        );
+
+        // Shorter: trimmed right away, audio with it.
+        buf.set_window(gst::ClockTime::from_seconds(5));
+        assert_eq!(buf.video.oldest_pts(), Some(ms(15_000)));
+        assert_eq!(buf.audio[0].oldest_pts(), Some(ms(15_000)));
+        let clip = buf.snapshot(buf.window()).unwrap();
+        assert_eq!(clip.duration, ms(5000));
+
+        // Longer: nothing comes back, and new frames are kept up to it.
+        buf.set_window(gst::ClockTime::from_seconds(60));
+        assert_eq!(buf.buffered(), ms(5000));
+        fill_video(&mut buf, 20_000, 30_000);
+        assert_eq!(buf.buffered(), ms(15_000));
     }
 
     #[test]

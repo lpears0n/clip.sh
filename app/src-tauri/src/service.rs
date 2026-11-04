@@ -16,6 +16,9 @@ use crate::{games, library};
 /// Event names emitted to the frontend.
 pub const STATUS_CHANGED: &str = "status-changed";
 pub const CLIP_SAVED: &str = "clip-saved";
+pub const SCREENSHOT_SAVED: &str = "screenshot-saved";
+/// A game started recording; the payload is its name.
+pub const RECORDING_STARTED: &str = "recording-started";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -44,11 +47,14 @@ pub struct Status {
     pub backend: Option<Backend>,
     /// Portal capture needs a screen chosen once before it can record.
     pub needs_screen: bool,
+    /// While recording: the game's display, if it is running in HDR.
+    pub hdr: Option<clip_core::HdrDisplay>,
 }
 
 enum Cmd {
     Status(oneshot::Sender<Status>),
     Save(PathBuf, oneshot::Sender<Result<PathBuf, String>>),
+    Screenshot(PathBuf, oneshot::Sender<Result<PathBuf, String>>),
     Configure(RecorderConfig),
     ChooseScreen(oneshot::Sender<Result<(), String>>),
 }
@@ -92,6 +98,13 @@ impl Service {
         rx.await.map_err(|_| "recorder stopped".to_string())?
     }
 
+    /// Save the newest frame as a PNG into `clips_dir/<game>/`.
+    pub async fn screenshot(&self, clips_dir: PathBuf) -> Result<PathBuf, String> {
+        let (tx, rx) = oneshot::channel();
+        self.send(Cmd::Screenshot(clips_dir, tx))?;
+        rx.await.map_err(|_| "recorder stopped".to_string())?
+    }
+
     pub fn configure(&self, cfg: RecorderConfig) -> Result<(), String> {
         self.send(Cmd::Configure(cfg))
     }
@@ -127,11 +140,14 @@ async fn run(
                 error: Some(format!("{e:#}")),
                 backend: None,
                 needs_screen: false,
+                hdr: None,
             };
             while let Some(cmd) = cmds.recv().await {
                 match cmd {
                     Cmd::Status(r) => drop(r.send(status.clone())),
-                    Cmd::Save(_, r) => drop(r.send(Err("automatic capture is unavailable".into()))),
+                    Cmd::Save(_, r) | Cmd::Screenshot(_, r) => {
+                        drop(r.send(Err("automatic capture is unavailable".into())))
+                    }
                     Cmd::Configure(_) => {}
                     Cmd::ChooseScreen(r) => {
                         drop(r.send(Err("automatic capture is unavailable".into())))
@@ -151,6 +167,9 @@ async fn run(
                 let Some(ev) = ev else { break };
                 match auto.handle(ev).await {
                     Ok(Some(change)) => {
+                        if let Change::Started(g) = &change {
+                            let _ = app.emit(RECORDING_STARTED, &g.name);
+                        }
                         apply(change, &mut session);
                         let _ = app.emit(STATUS_CHANGED, status(&auto, replay_seconds, session.as_ref()));
                     }
@@ -179,6 +198,13 @@ async fn run(
                         }
                         drop(r.send(res));
                     }
+                    Cmd::Screenshot(dir, r) => {
+                        let res = auto.screenshot(&dir).await.map_err(|e| format!("{e:#}"));
+                        if let Ok(p) = &res {
+                            let _ = app.emit(SCREENSHOT_SAVED, p);
+                        }
+                        drop(r.send(res));
+                    }
                     Cmd::ChooseScreen(r) => {
                         let res = match auto.choose_screen().await {
                             Ok(change) => {
@@ -195,6 +221,8 @@ async fn run(
                     Cmd::Configure(cfg) => {
                         replay_seconds = cfg.replay_seconds;
                         auto.set_config(cfg);
+                        // The status bar shows the replay length.
+                        let _ = app.emit(STATUS_CHANGED, status(&auto, replay_seconds, session.as_ref()));
                     }
                 }
             }
@@ -258,5 +286,6 @@ fn status(
         error: rec.and_then(|s| s.error),
         backend: Some(auto.backend()),
         needs_screen: auto.needs_screen(),
+        hdr: auto.hdr(),
     }
 }

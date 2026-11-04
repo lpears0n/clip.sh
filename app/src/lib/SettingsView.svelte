@@ -6,7 +6,16 @@
 <script lang="ts">
   import { AudioLines, Check, FolderOpen, HardDrive, Keyboard, Palette, SlidersHorizontal, Video } from '@lucide/svelte'
   import { open as openDialog } from '@tauri-apps/plugin-dialog'
-  import { api, type Capabilities, type Codec, type Encoder, type HotkeyBackend, type Settings, type Status, type Usage } from './api'
+  import {
+    api,
+    type Capabilities,
+    type Codec,
+    type Encoder,
+    type HotkeyBackend,
+    type Settings,
+    type Status,
+    type Usage,
+  } from './api'
   import { bytes } from './format'
   import HotkeyBinder from './HotkeyBinder.svelte'
   import { ACCENTS, type Accent, prefs, setPrefs } from './prefs.svelte'
@@ -176,6 +185,14 @@
           <Row title="Play a sound" description="A short shutter sound you can hear in-game.">
             <Toggle label="Play a sound" checked={settings.sound_on_save} onchange={(sound_on_save) => update({ sound_on_save })} />
           </Row>
+          {#if status?.backend === 'windows'}
+            <Row
+              title="In-game popup"
+              description="A small popup over the game says when recording is ready and when a clip saves. It never shows up in clips."
+            >
+              <Toggle label="In-game popup" checked={settings.overlay} onchange={(overlay) => update({ overlay })} />
+            </Row>
+          {/if}
         </div>
       </section>
     {:else if category === 'Recording'}
@@ -267,7 +284,7 @@
       <section class="space-y-2">
         <h3 class="section-title px-1">Capture</h3>
         <div class="card divide-y divide-line">
-          <Row title="Replay length" description="How far back a clip reaches when you press the hotkey.">
+          <Row title="Replay length" description="How far back a clip reaches when you press the hotkey. Applies right away, even mid-game.">
             <select
               class="field w-44"
               value={settings.replay_seconds}
@@ -318,7 +335,16 @@
             </select>
           </Row>
           {:else}
-            <Row title="Capture method" description="The monitor your game is on, through Windows Graphics Capture. Frames stay on the GPU." />
+            <Row
+              title="Capture method"
+              description="Only the game’s own window is recorded, never the rest of your screen. Notifications, Discord and your other monitors stay out of clips."
+            />
+          {/if}
+          {#if status?.hdr}
+            <Row
+              title="HDR display"
+              description={`The game’s display is in HDR (SDR white at ${Math.round(status.hdr.sdr_white_nits)} nits). Clips are recorded in SDR for now, so bright HDR highlights look blown out. Proper HDR support is in progress.`}
+            />
           {/if}
           {#if status?.backend === 'portal'}
             <Row
@@ -334,15 +360,38 @@
           {/if}
         </div>
         <p class="px-1 text-secondary text-muted">
-          Recording changes apply from the next game you launch; a new capture method applies after restarting clip.sh.
+          {status?.backend === 'windows'
+            ? 'Recording changes apply from the next game you launch.'
+            : 'Recording changes apply from the next game you launch; a new capture method applies after restarting clip.sh.'}
         </p>
       </section>
     {:else if category === 'Audio'}
       <section class="space-y-2">
         <h3 class="section-title px-1">Sources</h3>
         <div class="card divide-y divide-line">
-          <Row title="Game and desktop audio" description="Everything playing through your default output.">
+          <Row title="Game and desktop audio" description="Everything playing through the output below.">
             <Toggle label="Game and desktop audio" checked={settings.desktop_audio} onchange={(desktop_audio) => update({ desktop_audio })} />
+          </Row>
+          <Row
+            title="Output device"
+            description="Pick your headset to leave out sound from other outputs."
+            disabled={!settings.desktop_audio}
+          >
+            <select
+              class="field w-64"
+              aria-label="Output device"
+              disabled={!settings.desktop_audio}
+              value={settings.desktop_device ?? ''}
+              onchange={(e) => update({ desktop_device: e.currentTarget.value || null })}
+            >
+              <option value="">System default</option>
+              {#each caps?.output_devices ?? [] as d (d.id)}
+                <option value={d.id}>{d.name}</option>
+              {/each}
+              {#if settings.desktop_device && caps && !caps.output_devices.some((d) => d.id === settings.desktop_device)}
+                <option value={settings.desktop_device}>Not connected</option>
+              {/if}
+            </select>
           </Row>
           <Row title="Microphone" description="Saved as its own track, so you can mix it when trimming.">
             <Toggle label="Microphone" checked={settings.mic} onchange={(mic) => update({ mic })} />
@@ -350,6 +399,7 @@
           <Row title="Input device" disabled={!settings.mic}>
             <select
               class="field w-64"
+              aria-label="Input device"
               disabled={!settings.mic}
               value={settings.mic_device ?? ''}
               onchange={(e) => update({ mic_device: e.currentTarget.value || null })}
@@ -358,9 +408,15 @@
               {#each caps?.mic_devices ?? [] as d (d.id)}
                 <option value={d.id}>{d.name}</option>
               {/each}
+              {#if settings.mic_device && caps && !caps.mic_devices.some((d) => d.id === settings.mic_device)}
+                <option value={settings.mic_device}>Not connected</option>
+              {/if}
             </select>
           </Row>
         </div>
+        <p class="px-1 text-secondary text-muted">
+          A device that isn’t connected when a game starts is swapped for the default until it’s back.
+        </p>
       </section>
       <section class="space-y-2">
         <h3 class="section-title px-1">Quality</h3>
@@ -394,14 +450,20 @@
             >
               <HotkeyBinder value={settings.hotkey} onbind={(hotkey) => update({ hotkey })} />
             </Row>
+            <Row
+              title="Screenshot"
+              description="Saves the newest frame of the game as a PNG, next to its clips."
+            >
+              <HotkeyBinder value={settings.screenshot_hotkey} onbind={(screenshot_hotkey) => update({ screenshot_hotkey })} />
+            </Row>
           {/if}
           <Row
             title="Command"
             description={hotkeyBackend === null
-              ? 'Your desktop has no global shortcut service. Bind this command to a key in its keyboard settings.'
+              ? 'Your desktop has no global shortcut service. Bind this command to a key in its keyboard settings; clipsh screenshot takes a screenshot.'
               : hotkeyBackend === 'native'
-                ? 'Use it from scripts, Stream Deck profiles or AutoHotkey.'
-                : 'Bind this to any key in your desktop’s keyboard settings, or use it from scripts.'}
+                ? 'Use it from scripts, Stream Deck profiles or AutoHotkey. clipsh screenshot takes a screenshot.'
+                : 'Bind this to any key in your desktop’s keyboard settings, or use it from scripts. clipsh screenshot takes a screenshot.'}
           >
             <code class="rounded-ctl border border-line bg-canvas px-2.5 py-1.5 text-secondary text-fg-2">clipsh save</code>
             <button class="btn" onclick={copyCommand}>{copied ? 'Copied' : 'Copy'}</button>

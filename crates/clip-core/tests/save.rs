@@ -123,6 +123,7 @@ fn saves_last_n_seconds_as_mp4() {
     let magic: &[u8] = match info.format {
         clip_core::media::ImageFormat::Webp => b"RIFF",
         clip_core::media::ImageFormat::Jpeg => &[0xFF, 0xD8],
+        clip_core::media::ImageFormat::Png => b"\x89PNG",
     };
     assert!(
         info.thumbnail.starts_with(magic),
@@ -240,4 +241,27 @@ fn saves_every_supported_codec() {
         println!("{codec:?} via {encoder:?}: ok");
         std::fs::remove_file(path).unwrap();
     }
+}
+
+#[test]
+fn screenshot_is_the_newest_frame_as_png() {
+    let ring = fill_ring(3, 5);
+    let gop = ring.latest_gop().unwrap();
+    assert!(gop.audio.is_empty());
+    // 30 fps, 1 s GOPs: the newest GOP is the last whole second.
+    assert_eq!(gop.video.buffers.len(), 30, "newest GOP");
+
+    let dir = std::env::temp_dir().join(format!("clipsh-shot-{}", std::process::id()));
+    let path = dir.join("shot.png");
+    clip_core::write_png(&gop, &path).unwrap();
+
+    let bytes = std::fs::read(&path).unwrap();
+    assert!(bytes.starts_with(b"\x89PNG"), "not a PNG");
+    let probe = ffprobe(&path, "stream=codec_name,width,height");
+    assert_eq!(probe.trim(), "png,320,240", "{probe}");
+
+    // The ring itself is untouched: a clip can still be saved after.
+    let clip = ring.snapshot(gst::ClockTime::from_seconds(2)).unwrap();
+    write_mp4(&clip, &dir.join("after.mp4")).unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
 }

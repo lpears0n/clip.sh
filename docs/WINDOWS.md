@@ -1,7 +1,8 @@
 # clip.sh on Windows
 
-The Windows build captures with **Windows Graphics Capture** and keeps
-every frame on the GPU: `d3d11screencapturesrc` (WGC) hands D3D11
+The Windows build captures the **game's window** with **Windows Graphics
+Capture** and keeps every frame on the GPU: `d3d11screencapturesrc` (WGC
+window capture) hands D3D11
 textures to the encoder (NVENC, AMD AMF, Intel Quick Sync or Media
 Foundation) through `d3d11convert`, and only the encoded packets reach the
 ring buffer. Nothing per frame runs on the CPU. Game detection walks the
@@ -21,12 +22,45 @@ compositor's copy is the only extra work the GPU does.
   `d3d11screencapturesrc` across GStreamer versions, and the AMF/QSV
   property names (unknown ones are skipped, so the worst case is default
   encoder settings).
-- The installer has not been produced and installed on a clean machine
-  yet; the plugin list in `scripts/collect-gstreamer.ps1` is the first
-  thing to check if an element is missing (`GST_DEBUG=2` names it).
+- The plugin list in `scripts/collect-gstreamer.ps1` is the first thing
+  to check if an element is missing. The script now refuses to finish
+  unless every element the app makes by name loads from the bundle alone;
+  the first installer shipped without `videotestsrc`, which the encoder
+  probe uses, so no encoder ever passed and nothing recorded.
 - Zero-copy is the first path tried; if D3D11 negotiation fails, the
   recorder rebuilds on the system-memory path on its own and Settings →
   Recording says which is active.
+- **Only the game's window is captured** (WGC window capture, client
+  area), like Medal: notifications, Discord and other monitors never end
+  up in clips. There is deliberately no fallback to monitor capture. If
+  the game replaces its window (splash screen, fullscreen switch) the
+  recorder follows the new one; with several windows it takes the
+  largest. Whether WGC can capture a given game in exclusive fullscreen,
+  and how it does for frame pacing next to monitor capture (which made
+  Windows compose the game and caused constant hitching in Rainbow Six
+  Siege with G-Sync on), is still to be confirmed on real machines.
+- **In-game popup** ("Ready to record", "Clip saved"): a transparent,
+  click-through, never-focused window kept on top of the game for a few
+  seconds, not a hook into the game (which anti-cheat flags). It is shown
+  with `SW_SHOWNOACTIVATE` so a fullscreen game keeps focus, placed at the
+  game window's top-right, and skipped when clip.sh itself is in front.
+  While visible it makes Windows compose the game, so it stays brief.
+  Untested so far: whether it appears over exclusive-fullscreen games.
+- **Fixed encode size.** A window can change size mid-game (resolution
+  or display-mode switches); passing that on made the pipeline fail to
+  renegotiate ("not-negotiated") on the owner's machine, and with
+  restart-on-failure that became a restart every couple of seconds. The
+  encoder now runs at the size the window had when recording started
+  (its monitor's, if the window was tiny then); every frame is scaled
+  to it on the GPU, letterboxed if the shape changed. Repeated failures
+  back off (at once, 5 s, 15 s, 30 s, then every minute) and a restart
+  keeps the play session (no second "Ready to record").
+- The capture source now runs at the recording frame rate. Left to
+  itself it settled on 30 fps and every clip had each frame twice.
+- The app logs to `%LOCALAPPDATA%\sh.clip.app\logs\clip.sh.log` (there is
+  no terminal to print to). A crash shows a message box with the reason and
+  that path. `RUST_LOG=debug` and `GST_DEBUG=2` in the environment make the
+  log more talkative; `GST_DEBUG` names any element that fails to load.
 
 ## Building
 
