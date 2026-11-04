@@ -53,7 +53,7 @@ function fixtures(scenario) {
     get_settings: {
       replay_seconds: 30, mic: true, clips_dir: '/home/u/Videos/clip.sh', hotkey: 'F8', screenshot_hotkey: 'F9', marker_hotkey: 'F7', capture_backend: null,
       launch_at_login: false, start_in_tray: true, close_to_tray: true, notify_on_save: true, sound_on_save: true, sound_volume: 100, clip_sound: { kind: 'builtin' }, screenshot_sound: null, overlay: true, check_for_updates: true,
-      fps: 60, bitrate_kbps: 20000, codec: 'h264', encoder: null, cursor: true, zero_copy: true, hdr_compatibility: false, ignored_games: [], desktop_audio: true, desktop_device: 'out-headset',
+      fps: 60, bitrate_kbps: 20000, codec: 'h264', encoder: null, cursor: true, zero_copy: true, hdr_compatibility: false, hdr_window_capture: false, ignored_games: [], desktop_audio: true, desktop_device: 'out-headset',
       mic_device: null, audio_bitrate_kbps: 160, storage_limit_gb: 25, protect_edits: true, use_trash: true, ads: false,
     },
     list_clips: empty ? [] : clips,
@@ -290,6 +290,17 @@ async function runScenario(scenario, browser) {
   assert.equal(await page.getByRole('button', { name: 'Detect ELDEN RING again' }).count(), 1, 'ignored app listed')
   await page.getByText('HDR display').waitFor()
   assert.ok(await page.getByText('SDR white at 240 nits').isVisible(), 'HDR row shows the SDR white level')
+  // Windows: HDR compatibility, and the experimental window capture under it.
+  await page.evaluate(
+    (s) => window[`_${window.__listeners['status-changed']}`]({ event: 'status-changed', id: 1, payload: s }),
+    { state: 'recording', game: 'ELDEN RING', steam_app_id: 1245620, session_start_ms: Date.now(), buffered_seconds: 30, replay_seconds: 30, encoder: 'nvenc', capture_path: 'zerocopy', error: null, backend: 'windows', needs_screen: false, hdr: { sdr_white_nits: 240, peak_nits: 1000 }, hdr_tonemapped: true },
+  )
+  await page.getByRole('switch', { name: 'HDR compatibility' }).click()
+  await page.getByRole('switch', { name: 'Capture the window in HDR' }).waitFor()
+  await page.getByRole('switch', { name: 'Capture the window in HDR' }).click()
+  await page.waitForTimeout(250) // let the switch finish moving before the shot
+  assert.equal(await page.getByRole('switch', { name: 'Capture the window in HDR' }).getAttribute('aria-checked'), 'true', 'HDR window capture on')
+  await shot('settings-recording-windows')
   await page.getByRole('button', { name: 'Audio' }).click()
   await page.waitForTimeout(150)
   assert.equal(await page.getByLabel('Output device').inputValue(), 'out-headset', 'chosen output is selected')

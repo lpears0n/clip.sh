@@ -70,6 +70,15 @@ pub enum CaptureTarget {
         monitor: isize,
         cursor: bool,
     },
+    /// HDR window capture (Windows, experimental): the game's window itself
+    /// in 16-bit float, tone-mapped on the GPU for its display. Only the
+    /// window is recorded, as with `Window`.
+    #[cfg(windows)]
+    HdrWindow {
+        hwnd: isize,
+        cursor: bool,
+        hdr: crate::win::HdrWindow,
+    },
 }
 
 /// How frames travel from the compositor to the encoder.
@@ -104,6 +113,10 @@ pub fn add_video_branch(
     } = target
     {
         return add_hdr_branch(pipeline, hwnd, monitor, cursor, encoder, cfg, path);
+    }
+    #[cfg(windows)]
+    if let CaptureTarget::HdrWindow { .. } = target {
+        return add_hdr_window_branch(pipeline, target, encoder, cfg, path);
     }
     let src = make_source(target, cfg, path)?;
 
@@ -346,6 +359,71 @@ fn add_hdr_branch(
     Ok(parse)
 }
 
+/// HDR window capture: the game's window in FP16 through our own Windows
+/// Graphics Capture session, tone-mapped by a shader into D3D11 frames
+/// (see `win::hdr_window`), then the usual GPU chain into the encoder.
+/// The source shares its D3D11 device with every element through the
+/// pipeline's context, so frames go to the encoder without a copy.
+#[cfg(windows)]
+fn add_hdr_window_branch(
+    pipeline: &gst::Pipeline,
+    target: CaptureTarget,
+    encoder: Encoder,
+    cfg: &VideoConfig,
+    path: CapturePath,
+) -> Result<gst::Element> {
+    let CaptureTarget::HdrWindow { hwnd, cursor, hdr } = target else {
+        bail!("not an HDR window target");
+    };
+    if path != CapturePath::ZeroCopy {
+        bail!("HDR window capture only runs on the GPU path");
+    }
+    let memory = encoder
+        .gpu_memory()
+        .with_context(|| format!("{encoder:?} takes no GPU frames"))?;
+    if memory != crate::win::hdr_window::MEMORY {
+        bail!("{encoder:?} doesn't take D3D11 frames");
+    }
+    let (w, h) = fixed_output_size(target).context("can't size the game window")?;
+    tracing::info!(
+        width = w,
+        height = h,
+        "encoding at a fixed size (HDR window)"
+    );
+    let (src, context) = crate::win::hdr_window::source(
+        hwnd,
+        cursor,
+        &hdr.display,
+        hdr.adapter_luid,
+        (w as u32, h as u32),
+    )?;
+    let rate_of = |s: &mut gst::StructureRef| {
+        s.set("framerate", gst::Fraction::new(cfg.fps as i32, 1));
+    };
+    let parse = cfg.codec.make_parser()?;
+    let mut chain = vec![
+        src,
+        make_rate()?,
+        capsfilter(raw_caps(Some(memory), rate_of))?,
+        make_queue()?,
+    ];
+    // BGRA to what the encoder takes, on the GPU.
+    chain.extend(encoder.gpu_chain()?);
+    chain.extend([
+        capsfilter(size_caps(Some(memory), Some((w, h))))?,
+        encoder.build(cfg)?,
+        gst::ElementFactory::make("capsfilter")
+            .property("caps", cfg.codec.caps())
+            .build()?,
+        parse.clone(),
+    ]);
+    pipeline.add_many(&chain)?;
+    gst::Element::link_many(&chain)?;
+    // Every D3D11 element uses the source's device.
+    pipeline.set_context(&context);
+    Ok(parse)
+}
+
 /// The game window's client area in its monitor's coordinates, for the
 /// duplication crop; `None` when it covers the whole monitor (fullscreen)
 /// or can't be read.
@@ -411,7 +489,9 @@ fn fixed_output_size(target: CaptureTarget) -> Option<(i32, i32)> {
         },
         UI::WindowsAndMessaging::GetClientRect,
     };
-    let (CaptureTarget::Window { hwnd, .. } | CaptureTarget::HdrRegion { hwnd, .. }) = target;
+    let (CaptureTarget::Window { hwnd, .. }
+    | CaptureTarget::HdrRegion { hwnd, .. }
+    | CaptureTarget::HdrWindow { hwnd, .. }) = target;
     let hwnd = HWND(hwnd as *mut _);
     let mut r = RECT::default();
     // SAFETY: plain queries on a window handle; a stale one just fails.
@@ -483,7 +563,7 @@ fn make_source(
     _path: CapturePath,
 ) -> Result<gst::Element> {
     let CaptureTarget::Window { hwnd, cursor } = target else {
-        bail!("HDR region capture is built by add_hdr_branch");
+        bail!("HDR capture is built by its own branch");
     };
     // A window handle selects WGC window capture by itself.
     let src = gst::ElementFactory::make("d3d11screencapturesrc")
