@@ -226,6 +226,8 @@
     } else if (e.code === 'End') {
       seek(trimming ? end : duration)
       poke()
+    } else if (e.key === '[' || e.key === ']') {
+      jumpToMarker(e.key === ']' ? 1 : -1)
     } else if (e.key === ',') {
       step(-1)
     } else if (e.key === '.') {
@@ -251,6 +253,19 @@
     }
   }
 
+  /** Seek to the previous (-1) or next (1) marked moment. A small margin
+   *  lets repeated presses walk past the one just reached. */
+  function jumpToMarker(dir: 1 | -1) {
+    const marks = clip.markers ?? []
+    const target =
+      dir > 0
+        ? marks.find((m) => m > time + 0.25)
+        : [...marks].reverse().find((m) => m < time - 0.25)
+    if (target === undefined) return
+    seek(target)
+    poke()
+  }
+
   const SHORTCUTS: [string, string][] = [
     ['Space / K', 'Play or pause'],
     ['J / L', 'Back or forward 10 s'],
@@ -258,6 +273,7 @@
     [', / .', 'Previous or next frame'],
     ['< / >', 'Slower or faster'],
     ['Home / End', 'Jump to start or end'],
+    ['[ / ]', 'Previous or next marked moment'],
     ['R', 'Repeat'],
     ['S', 'Star (favourite)'],
     ['N', 'Rename'],
@@ -428,7 +444,15 @@
         class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 via-black/25 to-transparent px-4 pt-10 pb-2 transition-opacity duration-normal
           {showControls ? 'opacity-100' : 'pointer-events-none opacity-0'}"
       >
-        <Timeline {duration} {time} trim={trimming} bind:start bind:end onseek={seek} />
+        <Timeline
+          {duration}
+          {time}
+          trim={trimming}
+          markers={clip.markers}
+          bind:start
+          bind:end
+          onseek={seek}
+        />
         <div class="mt-1 flex items-center gap-1 text-white">
           <button class="glyph" onclick={toggle} aria-label={paused ? 'Play' : 'Pause'} title="Play/Pause (Space)">
             {#if paused}<Play size={20} fill="currentColor" strokeWidth={0} />{:else}<Pause size={20} fill="currentColor" strokeWidth={0} />{/if}

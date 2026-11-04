@@ -18,16 +18,19 @@ pub enum Action {
     SaveClip,
     /// Save the newest frame as a PNG.
     Screenshot,
+    /// Mark this moment; saved clips show the marks on their timeline.
+    Marker,
 }
 
 impl Action {
-    pub const ALL: [Action; 2] = [Action::SaveClip, Action::Screenshot];
+    pub const ALL: [Action; 3] = [Action::SaveClip, Action::Screenshot, Action::Marker];
 
     /// Stable identifier, as the desktop sees it.
     pub fn id(self) -> &'static str {
         match self {
             Action::SaveClip => "save-clip",
             Action::Screenshot => "screenshot",
+            Action::Marker => "mark",
         }
     }
 
@@ -36,6 +39,7 @@ impl Action {
         match self {
             Action::SaveClip => "Save clip",
             Action::Screenshot => "Save screenshot",
+            Action::Marker => "Mark a moment",
         }
     }
 

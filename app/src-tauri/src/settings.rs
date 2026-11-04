@@ -59,6 +59,8 @@ pub struct Settings {
     pub hotkey: String,
     /// Global "save screenshot" hotkey; empty leaves it unbound.
     pub screenshot_hotkey: String,
+    /// Global "mark a moment" hotkey; empty leaves it unbound.
+    pub marker_hotkey: String,
     pub clips_dir: PathBuf,
     /// Soft cap on the clips folder in GB; `None` = no limit.
     pub storage_limit_gb: Option<f64>,
@@ -97,6 +99,7 @@ impl Default for Settings {
             capture_backend: None,
             hotkey: "F8".into(),
             screenshot_hotkey: "F9".into(),
+            marker_hotkey: "F7".into(),
             clips_dir: clip_core::default_clips_dir(),
             storage_limit_gb: None,
             protect_edits: true,
@@ -160,6 +163,7 @@ impl Settings {
         vec![
             Binding::new(Action::SaveClip, self.hotkey.clone()),
             Binding::new(Action::Screenshot, self.screenshot_hotkey.clone()),
+            Binding::new(Action::Marker, self.marker_hotkey.clone()),
         ]
     }
 

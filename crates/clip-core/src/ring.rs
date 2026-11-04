@@ -230,6 +230,7 @@ impl ReplayBuffer {
             video: video_track,
             audio,
             duration: end - start,
+            start,
         })
     }
 }
@@ -259,6 +260,9 @@ pub struct Clip {
     pub video: ClipTrack,
     pub audio: Vec<ClipTrack>,
     pub duration: gst::ClockTime,
+    /// Where the clip began on the recording's (running-time) timeline,
+    /// before its timestamps were rebased to 0.
+    pub start: gst::ClockTime,
 }
 
 #[derive(Debug)]
@@ -361,6 +365,11 @@ mod tests {
         assert_eq!(pts_ms(v.last().unwrap()), 4900);
         assert_eq!(v.len(), 50);
         assert_eq!(clip.duration, ms(5000));
+        assert_eq!(
+            clip.start,
+            ms(15_000),
+            "the clip began at the 15 s keyframe"
+        );
 
         let a = &clip.audio[0].buffers;
         assert_eq!(pts_ms(&a[0]), 0);

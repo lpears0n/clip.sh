@@ -16,7 +16,7 @@ pub use crate::backend::Backend;
 use crate::{
     encoder::{Codec, Encoder},
     game::Game,
-    recorder::{CaptureSource, Recorder, RecorderConfig, RestartPolicy, Status},
+    recorder::{CaptureSource, Recorder, RecorderConfig, RestartPolicy, SavedClip, Status},
     save::{clip_path, screenshot_path},
     win::{Target, game::RunningGame},
 };
@@ -361,11 +361,21 @@ impl AutoRecorder {
         self.active.as_ref().map(|a| a.recorder.status())
     }
 
-    pub async fn save(&self, root: &Path, seconds: Option<u32>) -> Result<PathBuf> {
+    pub async fn save(&self, root: &Path, seconds: Option<u32>) -> Result<SavedClip> {
         let a = self.active.as_ref().context("no game is being recorded")?;
         a.recorder
             .save(seconds, &clip_path(root, &a.game.name))
             .await
+    }
+
+    /// Mark this moment in the current recording. Returns how far into
+    /// the replay buffer it is, in seconds.
+    pub fn mark(&self) -> Result<f64> {
+        self.active
+            .as_ref()
+            .context("no game is being recorded")?
+            .recorder
+            .mark()
     }
 
     /// Save the newest frame as `<root>/<game name>/<timestamp>.png`.

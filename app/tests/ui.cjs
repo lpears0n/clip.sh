@@ -40,6 +40,7 @@ function fixtures(scenario) {
         steam_app_id: g.steam_app_id, thumbnail: null, sprite: null, sprite_frames: 10,
         title: i === 1 ? 'Malenia no-hit (finally)' : null, favorite: i % 4 === 1,
         labels: i % 3 === 1 ? ['clutch', 'boss'] : i === 4 ? ['funny'] : [],
+        markers: i === 1 ? [1.5, 3.5] : [],
       })
       i++
     }
@@ -50,7 +51,7 @@ function fixtures(scenario) {
       ? { state: 'waiting', game: null, steam_app_id: null, session_start_ms: null, buffered_seconds: 0, replay_seconds: 30, encoder: null, capture_path: null, error: null, backend: 'portal', needs_screen: true, hdr: null, hdr_tonemapped: false }
       : { state: 'recording', game: 'ELDEN RING', steam_app_id: 1245620, session_start_ms: now - h, buffered_seconds: 30, replay_seconds: 30, encoder: 'nvenc', capture_path: 'zerocopy', error: null, backend: 'kwin', needs_screen: false, hdr: { sdr_white_nits: 240, peak_nits: 1000 }, hdr_tonemapped: false },
     get_settings: {
-      replay_seconds: 30, mic: true, clips_dir: '/home/u/Videos/clip.sh', hotkey: 'F8', screenshot_hotkey: 'F9', capture_backend: null,
+      replay_seconds: 30, mic: true, clips_dir: '/home/u/Videos/clip.sh', hotkey: 'F8', screenshot_hotkey: 'F9', marker_hotkey: 'F7', capture_backend: null,
       launch_at_login: false, start_in_tray: true, close_to_tray: true, notify_on_save: true, sound_on_save: true, overlay: true,
       fps: 60, bitrate_kbps: 20000, codec: 'h264', encoder: null, cursor: true, zero_copy: true, hdr_compatibility: false, ignored_games: [], desktop_audio: true, desktop_device: 'out-headset',
       mic_device: null, audio_bitrate_kbps: 160, storage_limit_gb: 25, protect_edits: true, use_trash: true, ads: false,
@@ -199,6 +200,17 @@ async function runScenario(scenario, browser) {
   )
   await page.waitForTimeout(300)
   await shot('viewer')
+  // Marked moments: ticks on the line, [ and ] jump between them.
+  assert.equal(await page.locator('.player .tick').count(), 2, 'two marked moments on the line')
+  const nearTime = (t) =>
+    page.waitForFunction((t) => Math.abs(document.querySelector('video').currentTime - t) < 0.05, t, { timeout: 3000 })
+  await page.keyboard.press(']')
+  await nearTime(3.5)
+  await page.keyboard.press('[')
+  await nearTime(1.5)
+  await page.keyboard.press('[')
+  await page.waitForTimeout(150)
+  await nearTime(1.5)
   await page.keyboard.press('n')
   await page.keyboard.type('Malenia no-hit, take 2')
   await page.keyboard.press('Enter')

@@ -68,8 +68,8 @@ mod imp {
         let stream = kwin.stream_window(&uuid, false).await?;
         let rec = Recorder::start(&cfg, CaptureSource::Kwin(stream)).await?;
         tokio::time::sleep(Duration::from_secs(seconds)).await;
-        let path = rec.save(Some(seconds as u32), out.as_ref()).await?;
-        println!("saved {}", path.display());
+        let saved = rec.save(Some(seconds as u32), out.as_ref()).await?;
+        println!("saved {}", saved.path.display());
         rec.stop().await
     }
 }

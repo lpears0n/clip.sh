@@ -47,6 +47,8 @@ export interface Clip {
   title: string | null
   favorite: boolean
   labels: string[]
+  /** Moments marked while recording, in seconds from the start. */
+  markers: number[]
 }
 
 /** Fields of a clip the user can change; omitted ones are left alone. */
@@ -64,6 +66,8 @@ export interface Settings {
   hotkey: string
   /** Empty = unbound. */
   screenshot_hotkey: string
+  /** Empty = unbound. */
+  marker_hotkey: string
   capture_backend: 'kwin' | 'portal' | 'windows' | null
   launch_at_login: boolean
   start_in_tray: boolean
@@ -170,6 +174,10 @@ export const onClipSaved = (f: (path: string) => void): Promise<UnlistenFn> =>
 
 export const onScreenshotSaved = (f: (path: string) => void): Promise<UnlistenFn> =>
   listen<string>('screenshot-saved', (e) => f(e.payload))
+
+/** A moment was marked in the recording. */
+export const onMarked = (f: (m: { game: string; at: number }) => void): Promise<UnlistenFn> =>
+  listen<{ game: string; at: number }>('moment-marked', (e) => f(e.payload))
 
 /** A clip's thumbnail, sprite and duration were generated in the background. */
 export const onThumbnailReady = (f: (c: Clip) => void): Promise<UnlistenFn> =>

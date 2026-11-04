@@ -104,6 +104,10 @@ async fn respond(app: &AppHandle, req: Request) -> Response {
     match req {
         Request::Save => saved(state.service.save(state.clips_dir()).await),
         Request::Screenshot => saved(state.service.screenshot(state.clips_dir()).await),
+        Request::Mark => match state.service.mark().await {
+            Ok(at) => Response::ok(format!("marked {at:.1}s into the replay")),
+            Err(e) => Response::err(e),
+        },
         Request::Status => match state.service.status().await {
             Ok(s) => Response {
                 status: serde_json::to_value(&s).ok(),

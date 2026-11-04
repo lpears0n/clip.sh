@@ -32,6 +32,8 @@ pub struct Clip {
     pub title: Option<String>,
     pub favorite: bool,
     pub labels: Vec<String>,
+    /// Moments marked while recording, in seconds from the start.
+    pub markers: Vec<f64>,
 }
 
 /// Saved next to each clip as `<clip>.mp4.json`. The folder stays the
@@ -47,6 +49,9 @@ pub struct ClipMeta {
     pub favorite: bool,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub labels: Vec<String>,
+    /// Moments marked with the marker hotkey, in seconds from the start.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub markers: Vec<f64>,
 }
 
 /// What the UI may change on a clip; `None` leaves a field alone.
@@ -128,10 +133,22 @@ pub fn update_meta(clips_dir: &Path, path: &Path, patch: MetaPatch) -> Result<Cl
 }
 
 /// Give a rendered edit the same metadata as its source.
-pub fn copy_meta(from: &Path, to: &Path) {
-    if let Some(m) = read_meta(from) {
+/// Give an edit of `from` covering `start..end` (seconds) the same
+/// metadata, with the markers moved onto the edit's own timeline.
+pub fn copy_meta(from: &Path, to: &Path, start: f64, end: f64) {
+    if let Some(mut m) = read_meta(from) {
+        m.markers = trim_markers(&m.markers, start, end);
         let _ = write_meta(to, &m);
     }
+}
+
+/// The markers inside `start..=end`, relative to `start`.
+fn trim_markers(markers: &[f64], start: f64, end: f64) -> Vec<f64> {
+    markers
+        .iter()
+        .filter(|&&m| m >= start && m <= end)
+        .map(|&m| m - start)
+        .collect()
 }
 
 #[derive(Serialize, Deserialize)]
@@ -289,6 +306,7 @@ pub fn load(path: &Path, game: &str) -> Result<Clip> {
         title: user.title,
         favorite: user.favorite,
         labels: user.labels,
+        markers: user.markers,
     })
 }
 
@@ -408,6 +426,27 @@ mod tests {
         assert_eq!(json, r#"{"game":"Hades","steam_app_id":null}"#);
         let back: ClipMeta = serde_json::from_str(r#"{"game":"Hades"}"#).unwrap();
         assert_eq!(back, m);
+    }
+
+    #[test]
+    fn markers_follow_the_trim() {
+        assert_eq!(trim_markers(&[1.0, 4.5, 9.0, 12.0], 4.0, 10.0), [0.5, 5.0]);
+        assert!(trim_markers(&[1.0], 2.0, 3.0).is_empty());
+
+        let dir = std::env::temp_dir().join(format!("clipsh-markers-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (src, out) = (dir.join("a.mp4"), dir.join("a_edit.mp4"));
+        let m = ClipMeta {
+            game: "Hades".into(),
+            markers: vec![3.0, 8.0],
+            ..Default::default()
+        };
+        write_meta(&src, &m).unwrap();
+        copy_meta(&src, &out, 2.0, 6.0);
+        let copied = read_meta(&out).unwrap();
+        assert_eq!(copied.game, "Hades");
+        assert_eq!(copied.markers, [1.0]);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

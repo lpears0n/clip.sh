@@ -45,7 +45,7 @@ pub use hdr::HdrDisplay;
 pub use hotkey::{Action, Binding};
 #[cfg(target_os = "linux")]
 pub use portal::ScreenSource;
-pub use recorder::{CaptureSource, Recorder, RecorderConfig, Status};
+pub use recorder::{CaptureSource, Recorder, RecorderConfig, SavedClip, Status};
 pub use ring::{Clip, ReplayBuffer};
 pub use save::{clip_path, default_clips_dir, screenshot_path, write_mp4};
 pub use screenshot::write_png;

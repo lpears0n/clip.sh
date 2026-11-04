@@ -77,7 +77,7 @@ mod imp {
                         break;
                     }
                     match auto.save(&root, None).await {
-                        Ok(p) => println!("saved {}", p.display()),
+                        Ok(s) => println!("saved {}", s.path.display()),
                         Err(e) => eprintln!("save failed: {e:#}"),
                     }
                 }

@@ -80,17 +80,20 @@ body {
 }
 
 .popup[data-kind='saved'] .icon,
-.popup[data-kind='screenshot'] .icon {
+.popup[data-kind='screenshot'] .icon,
+.popup[data-kind='marked'] .icon {
   background: color-mix(in oklch, var(--accent) 20%, transparent);
 }
 
 .popup[data-kind='saved'] .dot,
-.popup[data-kind='screenshot'] .dot {
+.popup[data-kind='screenshot'] .dot,
+.popup[data-kind='marked'] .dot {
   display: none;
 }
 
 .popup[data-kind='saved'] .check,
-.popup[data-kind='screenshot'] .check {
+.popup[data-kind='screenshot'] .check,
+.popup[data-kind='marked'] .check {
   display: block;
 }
 
