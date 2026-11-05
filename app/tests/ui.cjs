@@ -112,6 +112,11 @@ function mockBridge(data) {
       }
       if (cmd === 'render_clip') { window.__lastRender = args; return args.path }
       if (cmd === 'copy_clip') { window.__copied = args.path; return null }
+      if (cmd === 'set_settings') { data.get_settings = args.settings; return null }
+      if (cmd === 'list_games') {
+        const ignored = data.get_settings.ignored_games.map((i) => i.name.toLowerCase())
+        return data.list_games.filter((g) => !ignored.includes(g.name.toLowerCase()))
+      }
       if (cmd === 'delete_clip') { data.list_clips = data.list_clips.filter((c) => c.path !== args.path); return null }
       if (cmd === 'plugin:event|listen') {
         // Remember the handler so a test can fire the event at the page.
@@ -161,6 +166,16 @@ async function runScenario(scenario, browser) {
   const cards = () => page.locator('.clip-grid > *').count()
 
   await shot('games')
+  if (scenario === 'full') {
+    // "Not a game" from a Games page card: gone at once, and stays gone.
+    const card = page.getByRole('button', { name: 'Hades II is not a game' })
+    await page.getByText('Hades II').first().hover()
+    await card.click()
+    await page.getByText('Ignoring Hades II').waitFor()
+    await page.waitForTimeout(200)
+    assert.equal(await page.getByRole('button', { name: 'Hades II is not a game' }).count(), 0, 'card removed')
+    assert.equal(await page.getByRole('button', { name: 'Counter-Strike 2 is not a game' }).count(), 1, 'others stay')
+  }
   // The window controls show only where the system frame is off.
   assert.equal(await page.getByRole('button', { name: 'Close', exact: true }).count(), scenario === 'full' ? 1 : 0)
   if (scenario === 'empty') {

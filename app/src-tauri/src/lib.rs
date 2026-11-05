@@ -164,6 +164,7 @@ async fn list_games(
 ) -> CmdResult<Vec<games::GameEntry>> {
     let status = state.service.status().await.ok();
     let dir = state.clips_dir();
+    let ignored = state.settings.lock().unwrap().ignored_games.clone();
     let list = tauri::async_runtime::spawn_blocking(move || {
         let clips = library::list(&dir);
         let playing = status
@@ -172,6 +173,7 @@ async fn list_games(
         games::list(
             &clips,
             playing.as_ref().map(|(n, id, t)| (n.as_str(), *id, *t)),
+            &ignored,
         )
     })
     .await

@@ -159,6 +159,18 @@ pub fn xbox_game(exe: &Path) -> Option<Installed> {
     Some(Installed { dir, name })
 }
 
+/// Part of Windows itself (under the Windows folder, or a built-in
+/// "SystemApps" package such as the emoji panel): never a game, whatever
+/// its windows look like.
+pub fn is_windows_component(exe: &Path, windows_dir: &Path) -> bool {
+    let norm = |p: &Path| p.to_string_lossy().replace('/', "\\").to_lowercase();
+    let exe = norm(exe);
+    let windir = norm(windows_dir);
+    let windir = windir.trim_end_matches('\\');
+    (!windir.is_empty() && exe.starts_with(&format!("{windir}\\")))
+        || exe.contains("\\systemapps\\")
+}
+
 /// The first `attr="value"` in an XML text.
 fn xml_attr(text: &str, attr: &str) -> Option<String> {
     let start = text.find(&format!("{attr}=\""))? + attr.len() + 2;
@@ -188,6 +200,16 @@ pub fn windows_index() -> InstallIndex {
     InstallIndex::new(all)
 }
 
+/// Executables Windows itself counts as games on this PC (its Game Bar /
+/// Game Mode list, `HKCU\System\GameConfigStore\Children`), lower-cased.
+/// Undocumented and incomplete, so it adds games but is never the only
+/// source; marking an app with Game Bar's "Remember this is a game" puts
+/// it here.
+#[cfg(windows)]
+pub fn windows_known_games() -> std::collections::HashSet<String> {
+    registry::known_games()
+}
+
 #[cfg(windows)]
 mod registry {
     use std::path::PathBuf;
@@ -198,6 +220,22 @@ mod registry {
     };
 
     use super::Installed;
+
+    /// `GameConfigStore\Children\*\MatchedExeFullPath`, lower-cased.
+    pub fn known_games() -> std::collections::HashSet<String> {
+        let Ok(children) = RegKey::predef(HKEY_CURRENT_USER)
+            .open_subkey_with_flags("System\\GameConfigStore\\Children", KEY_READ)
+        else {
+            return Default::default();
+        };
+        children
+            .enum_keys()
+            .flatten()
+            .filter_map(|k| children.open_subkey(k).ok())
+            .filter_map(|k| k.get_value::<String, _>("MatchedExeFullPath").ok())
+            .map(|p| p.to_lowercase())
+            .collect()
+    }
 
     fn open(path: &str) -> Option<RegKey> {
         RegKey::predef(HKEY_LOCAL_MACHINE)
@@ -332,6 +370,25 @@ mod registry {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn windows_components_are_never_games() {
+        let windir = Path::new("C:\\Windows");
+        for exe in [
+            "C:\\Windows\\SystemApps\\MicrosoftWindows.Client.CBS_cw5n1h2txyewy\\TextInputHost.exe",
+            "c:\\windows\\system32\\SnippingTool.exe",
+            "C:\\Windows\\explorer.exe",
+        ] {
+            assert!(is_windows_component(Path::new(exe), windir), "{exe}");
+        }
+        for exe in [
+            "D:\\SteamLibrary\\steamapps\\common\\Overwatch\\Overwatch.exe",
+            "C:\\Games\\Windowsill\\game.exe",
+            "C:\\WindowsGames\\x.exe",
+        ] {
+            assert!(!is_windows_component(Path::new(exe), windir), "{exe}");
+        }
+    }
 
     fn tmp(tag: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("reruns-launchers-{tag}-{}", std::process::id()));
