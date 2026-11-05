@@ -297,9 +297,17 @@ Ad slots: AdSlot component, off unless `"ads": true` in settings.json (728×90 u
   (requestAnimationFrame) and moves by transform; it was driven by
   `timeupdate` (~4 Hz) and looked choppy. The UI test asserts ≥12 drawn
   positions in 0.5 s (31 with the fix, 2 before).
-- Deep-dive backlog, not done yet, best first: a live level meter per
-  audio track in Settings → Audio (would have shown the Sonar problem at
-  once); apply recording settings to the running capture instead of
+- Share and edit (branch `share-and-edit`): live level meters in
+  Settings → Audio (`clip_core::meter`, a `level` pipeline per configured
+  source, only while the page is open; `audio-level` events); Copy and
+  drag-out of clips (`arboard` file list kept alive in AppState,
+  `tauri-plugin-drag` 2.1.1 + `@crabnebula/tauri-plugin-drag` 2.1.0);
+  vertical 9:16 export (`Edit::vertical`, `videocrop`) and slow motion
+  (`Edit::slow`, retime probe; audio in the range is dropped via
+  `PadProbeReturn::Handled` — returning Drop there made GStreamer unref a
+  buffer gstreamer-rs had taken). Clipboard and drag need a desktop: not
+  exercised in CI.
+- Deep-dive backlog, not done yet, best first: apply recording settings to the running capture instead of
   "from the next game"; unload the webview while hidden in the tray
   (~100–250 MB during games); make HDR window capture the default once
   it works on real hardware; SignPath signing.

@@ -9,6 +9,7 @@ pub mod game;
 pub mod hdr;
 pub mod launchers;
 pub mod media;
+pub mod meter;
 pub mod recorder;
 pub mod ring;
 pub mod save;

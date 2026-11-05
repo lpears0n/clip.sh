@@ -74,6 +74,12 @@ Releases, updates and Windows code signing: [docs/RELEASING.md](docs/RELEASING.m
 - Star a clip (`S`), rename it (`N`) or add labels in the viewer. Favourites
   and labels are filters on the clips page, and they live in the small
   `.json` file next to each clip, so they survive moving the folder.
+- **Share a clip**: Copy (or Ctrl+C in the viewer) and paste it into
+  Discord, or drag a clip card out of the window. When trimming, Format
+  makes a vertical 9:16 version for TikTok/Shorts (drag the frame to
+  choose what's kept), and Slow-mo slows a range you set on the timeline.
+- **Settings → Audio** shows a live level for each device, so you can see
+  what a recording would hear before you play.
 - **Settings → Appearance** picks the accent colour and card size, and turns
   off hover previews or motion.
 

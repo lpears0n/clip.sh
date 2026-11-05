@@ -84,6 +84,8 @@ function game(name, id, clips, o) {
 // Installed before the page's scripts run; `@tauri-apps/api` talks to this.
 function mockBridge(data) {
   let n = 0
+  // What @tauri-apps/api calls to stop listening (pages that unlisten).
+  window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} }
   window.__TAURI_INTERNALS__ = {
     metadata: { currentWindow: { label: 'main' }, currentWebview: { label: 'main', windowLabel: 'main' } },
     transformCallback: (cb) => { const id = ++n; window[`_${id}`] = cb; return id },
@@ -109,6 +111,7 @@ function mockBridge(data) {
         return { video_kbps: kbps - 128, audio_kbps: 128, max_height: 720, fps: 30 }
       }
       if (cmd === 'render_clip') { window.__lastRender = args; return args.path }
+      if (cmd === 'copy_clip') { window.__copied = args.path; return null }
       if (cmd === 'delete_clip') { data.list_clips = data.list_clips.filter((c) => c.path !== args.path); return null }
       if (cmd === 'plugin:event|listen') {
         // Remember the handler so a test can fire the event at the page.
@@ -240,6 +243,10 @@ async function runScenario(scenario, browser) {
       }),
   )
   assert.ok(positions >= 12, `playhead drew ${positions} positions in 0.5 s (want a smooth ~30)`)
+  // Ctrl+C copies the clip itself, ready to paste into Discord.
+  await page.keyboard.press('Control+c')
+  await page.getByText('Copied. Paste it into Discord').waitFor()
+  assert.match(await page.evaluate(() => window.__copied), /\.mp4$/, 'the clip file went to copy_clip')
   // Marked moments: ticks on the line, [ and ] jump between them.
   assert.equal(await page.locator('.player .tick').count(), 2, 'two marked moments on the line')
   const nearTime = (t) =>
@@ -300,6 +307,24 @@ async function runScenario(scenario, browser) {
   const rendered = await page.evaluate(() => window.__lastRender)
   assert.equal(rendered.maxMb, 10, 'render asks for the 10 MB fit')
   assert.deepEqual([rendered.start, rendered.end], [1, 4.5], 'the trimmed range')
+  assert.equal(rendered.vertical, null, 'original format unless asked')
+  assert.equal(rendered.slow, null, 'no slow motion unless asked')
+  // Vertical 9:16 for Shorts/TikTok, with a slow-motion range.
+  await page.getByLabel('Export format').selectOption('vertical')
+  await page.getByRole('slider', { name: 'Vertical frame position' }).waitFor()
+  await page.getByLabel('Slow motion').selectOption('2')
+  await page.getByRole('slider', { name: 'Slow motion start' }).waitFor()
+  // 3.5 s trimmed, the middle third (~1.17 s) at half speed adds ~1.17 s.
+  await page.getByText('Length 0:04.67').waitFor()
+  await page.waitForTimeout(150)
+  await shot('viewer-vertical-slow')
+  await page.evaluate(() => (window.__lastRender = null))
+  await page.getByRole('button', { name: 'Render clip' }).click()
+  await page.waitForFunction(() => window.__lastRender)
+  const shaped = await page.evaluate(() => window.__lastRender)
+  assert.equal(shaped.vertical, 0.5, 'vertical frame centred by default')
+  assert.equal(shaped.slow.factor, 2, 'half speed')
+  assert.ok(shaped.slow.from > 1 && shaped.slow.to < 4.5 && shaped.slow.from < shaped.slow.to, 'slow range inside the trim')
   await page.keyboard.press('Escape')
   await page.keyboard.press('Escape')
 
@@ -342,6 +367,14 @@ async function runScenario(scenario, browser) {
   await page.waitForTimeout(150)
   assert.equal(await page.getByLabel('Output device').inputValue(), 'out-headset', 'chosen output is selected')
   assert.equal(await page.getByLabel('Output device').locator('option').count(), 3, 'default + two outputs')
+  // Live meters: the page started them; push a reading for each track.
+  await page.waitForFunction(() => window.__listeners && window.__listeners['audio-level'])
+  const level = (l) => page.evaluate((p) => window[`_${window.__listeners['audio-level']}`]({ event: 'audio-level', id: 1, payload: p }), l)
+  await level({ track: 'desktop', peak_db: -14, error: null })
+  await level({ track: 'mic', peak_db: null, error: 'device not found' })
+  await page.getByText('Hearing sound').waitFor()
+  await page.getByText("Can't open: device not found").waitFor()
+  await page.waitForTimeout(150)
   await shot('settings-audio')
   // Save sounds: pick a file for clips; screenshots follow it.
   await page.getByRole('button', { name: 'General' }).click()

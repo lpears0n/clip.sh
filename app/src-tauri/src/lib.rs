@@ -46,6 +46,72 @@ pub(crate) struct AppState {
     thumbs: thumbs::Thumbnailer,
     /// Folder watcher for the current clips folder; replaced when it changes.
     watcher: Mutex<Option<watcher::Handle>>,
+    /// Live audio levels while Settings → Audio is open.
+    meter: Mutex<Option<clip_core::meter::Meter>>,
+    /// Kept open: on Linux the copied file list is served by this process
+    /// for as long as the clipboard object lives.
+    clipboard: Mutex<Option<arboard::Clipboard>>,
+}
+
+/// Put a clip on the clipboard as a file, so pasting into Discord, a chat
+/// or a folder brings the video itself.
+#[tauri::command]
+fn copy_clip(state: State<'_, AppState>, path: PathBuf) -> CmdResult<()> {
+    if !path.is_file() {
+        return Err("that clip isn't there any more".into());
+    }
+    let mut clipboard = state.clipboard.lock().unwrap();
+    if clipboard.is_none() {
+        *clipboard = Some(arboard::Clipboard::new().map_err(|e| format!("no clipboard: {e}"))?);
+    }
+    clipboard
+        .as_mut()
+        .unwrap()
+        .set()
+        .file_list(&[&path])
+        .map_err(|e| format!("couldn't copy the clip: {e}"))
+}
+
+/// One audio meter reading for the page: `track` is "desktop" or "mic";
+/// `peak_db` is dBFS, or `error` says why the device didn't open.
+#[derive(Clone, serde::Serialize)]
+struct AudioLevel {
+    track: &'static str,
+    peak_db: Option<f64>,
+    error: Option<String>,
+}
+
+/// Start (or restart, after a device change) the level meters for the
+/// audio tracks the current settings would record.
+#[tauri::command]
+fn start_audio_meters(app: AppHandle, state: State<'_, AppState>) -> CmdResult<()> {
+    let sources = state.settings.lock().unwrap().recorder_config().audio;
+    let names: Vec<&'static str> = sources.iter().map(|s| s.name()).collect();
+    // The old meters close their devices before the new ones open them.
+    state.meter.lock().unwrap().take();
+    let meter = clip_core::meter::Meter::start(&sources, move |r| {
+        let level = match r {
+            clip_core::meter::Reading::Level { index, peak_db } => AudioLevel {
+                track: names[index],
+                peak_db: Some(peak_db),
+                error: None,
+            },
+            clip_core::meter::Reading::Failed { index, error } => AudioLevel {
+                track: names[index],
+                peak_db: None,
+                error: Some(error),
+            },
+        };
+        let _ = app.emit("audio-level", level);
+    })
+    .map_err(|e| format!("{e:#}"))?;
+    *state.meter.lock().unwrap() = Some(meter);
+    Ok(())
+}
+
+#[tauri::command]
+fn stop_audio_meters(state: State<'_, AppState>) {
+    state.meter.lock().unwrap().take();
 }
 
 /// Emitted a few times a second while an edit renders.
@@ -393,6 +459,16 @@ async fn open_for_edit(
 }
 
 /// Trim `path` to `start..end` seconds, mixing audio tracks at `volumes`.
+/// A slow-motion range from the editor, in seconds; `factor` 2 = half speed.
+#[derive(serde::Deserialize)]
+struct SlowRange {
+    from: f64,
+    to: f64,
+    factor: f64,
+}
+
+// Each argument is a field of the page's request.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 async fn render_clip(
     app: AppHandle,
@@ -402,6 +478,8 @@ async fn render_clip(
     end: f64,
     volumes: Vec<f64>,
     max_mb: Option<f64>,
+    vertical: Option<f64>,
+    slow: Option<SlowRange>,
 ) -> CmdResult<PathBuf> {
     let (out, cfg) = {
         let s = state.settings.lock().unwrap();
@@ -422,6 +500,12 @@ async fn render_clip(
         end: clip_core::gst::ClockTime::from_nseconds((end.max(0.0) * 1e9) as u64),
         volumes,
         max_bytes: max_mb.filter(|mb| *mb > 0.0).map(megabytes),
+        vertical: vertical.map(|x| x.clamp(0.0, 1.0)),
+        slow: slow.map(|s| clip_core::export::Slow {
+            from: clip_core::gst::ClockTime::from_nseconds((s.from.max(0.0) * 1e9) as u64),
+            to: clip_core::gst::ClockTime::from_nseconds((s.to.max(0.0) * 1e9) as u64),
+            factor: s.factor,
+        }),
     };
     let result = out.clone();
     let source = path.clone();
@@ -647,7 +731,8 @@ pub fn run() {
     let context = tauri::generate_context!();
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_dialog::init());
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_drag::init());
     // Only builds made with an update signing key can update themselves.
     let builder = match updates::plugin(context.config()) {
         Some(updater) => builder.plugin(updater),
@@ -696,6 +781,8 @@ pub fn run() {
                 render_cancel: Arc::default(),
                 thumbs: thumbs::Thumbnailer::start(app.handle().clone()),
                 watcher: Mutex::new(None),
+                meter: Mutex::new(None),
+                clipboard: Mutex::new(None),
             });
             // Windows: the app's header is the title bar (its own minimize,
             // maximize and close), so the system frame goes before the
@@ -831,6 +918,9 @@ pub fn run() {
             open_for_edit,
             render_clip,
             cancel_render,
+            start_audio_meters,
+            stop_audio_meters,
+            copy_clip,
         ])
         .run(context)
         .expect("error while running Reruns");

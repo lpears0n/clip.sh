@@ -185,13 +185,24 @@ export const api = {
   settings: () => invoke<Settings>('get_settings'),
   setSettings: (settings: Settings) => invoke<void>('set_settings', { settings }),
   openForEdit: (path: string) => invoke<Clip>('open_for_edit', { path }),
-  /** `maxMb`: fit the file under this size (null = full quality). */
-  render: (path: string, start: number, end: number, volumes: number[], maxMb: number | null) =>
-    invoke<string>('render_clip', { path, start, end, volumes, maxMb }),
+  /** `maxMb`: fit the file under this size (null = full quality); `vertical`:
+   *  crop to 9:16 at this position (0–1); `slow`: play a range slower. */
+  render: (
+    path: string,
+    start: number,
+    end: number,
+    volumes: number[],
+    maxMb: number | null,
+    vertical: number | null = null,
+    slow: { from: number; to: number; factor: number } | null = null,
+  ) => invoke<string>('render_clip', { path, start, end, volumes, maxMb, vertical, slow }),
   /** How a clip of `seconds` would be fitted under `maxMb`; rejects with how long fits. */
   exportPlan: (maxMb: number, seconds: number, audio: boolean) =>
     invoke<ExportPlan>('export_plan', { maxMb, seconds, audio }),
   cancelRender: () => invoke<void>('cancel_render'),
+  copyClip: (path: string) => invoke<void>('copy_clip', { path }),
+  startAudioMeters: () => invoke<void>('start_audio_meters'),
+  stopAudioMeters: () => invoke<void>('stop_audio_meters'),
   /** Check a picked sound file and copy it in; resolves to the sound to store. */
   importSound: (path: string, slot: 'clip' | 'screenshot') => invoke<Sound>('import_sound', { path, slot }),
   previewSound: (sound: Sound, volume: number) => invoke<void>('preview_sound', { sound, volume }),
@@ -204,6 +215,12 @@ export const api = {
 
 export const onRenderProgress = (f: (p: { path: string; fraction: number }) => void): Promise<UnlistenFn> =>
   listen<{ path: string; fraction: number }>('render-progress', (e) => f(e.payload))
+
+/** A live level from Settings → Audio's meters: dBFS, or why the device didn't open. */
+export type AudioLevel = { track: 'desktop' | 'mic'; peak_db: number | null; error: string | null }
+
+export const onAudioLevel = (f: (l: AudioLevel) => void): Promise<UnlistenFn> =>
+  listen<AudioLevel>('audio-level', (e) => f(e.payload))
 
 export const onStatusChanged = (f: (s: Status) => void): Promise<UnlistenFn> =>
   listen<Status>('status-changed', (e) => f(e.payload))
