@@ -293,6 +293,10 @@ Ad slots: AdSlot component, off unless `"ads": true` in settings.json (728×90 u
   runs failed with NVENC "Failed to open session" (shown as
   not-negotiated upstream). Clips have no audio with Sonar's Stream mix
   selected; PR #17 logs why on the next save.
+- Viewer progress line follows the playhead every frame while playing
+  (requestAnimationFrame) and moves by transform; it was driven by
+  `timeupdate` (~4 Hz) and looked choppy. The UI test asserts ≥12 drawn
+  positions in 0.5 s (31 with the fix, 2 before).
 - Deep-dive backlog, not done yet, best first: a live level meter per
   audio track in Settings → Audio (would have shown the Sonar problem at
   once); apply recording settings to the running capture instead of

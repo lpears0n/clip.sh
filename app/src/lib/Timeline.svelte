@@ -31,6 +31,16 @@
 
   const frac = (t: number) => (duration > 0 ? Math.min(1, Math.max(0, t / duration)) : 0)
   const pct = (t: number) => `${frac(t) * 100}%`
+  // Played part and playhead move every frame while playing, so they move
+  // by transform (compositor only, no layout): the bar is scaled across
+  // its span and the dot rides a full-width layer shifted by the fraction.
+  const playedScale = $derived(
+    trim
+      ? frac(end) > frac(start)
+        ? Math.max(0, frac(Math.min(time, end)) - frac(start)) / (frac(end) - frac(start))
+        : 0
+      : frac(time),
+  )
 
   function at(e: PointerEvent) {
     const r = track.getBoundingClientRect()
@@ -81,9 +91,14 @@
   <div class="rail">
     {#if trim}
       <div class="kept" style:left={pct(start)} style:width="{(frac(end) - frac(start)) * 100}%"></div>
-      <div class="played" style:left={pct(start)} style:width="{Math.max(0, frac(Math.min(time, end)) - frac(start)) * 100}%"></div>
+      <div
+        class="played"
+        style:left={pct(start)}
+        style:width="{(frac(end) - frac(start)) * 100}%"
+        style:transform="scaleX({playedScale})"
+      ></div>
     {:else}
-      <div class="played" style:left="0" style:width={pct(time)}></div>
+      <div class="played" style:left="0" style:width="100%" style:transform="scaleX({playedScale})"></div>
     {/if}
   </div>
   {#each markers as m, i (i)}
@@ -123,7 +138,7 @@
       tabindex="-1"
     ></div>
   {/if}
-  <div class="dot" style:left={pct(time)}></div>
+  <div class="head" style:transform="translateX({pct(time)})"><div class="dot"></div></div>
 </div>
 
 <style>
@@ -165,10 +180,21 @@
     bottom: 0;
     border-radius: inherit;
     background: var(--color-accent);
+    transform-origin: left center;
+    will-change: transform;
+  }
+
+  /* Full-width layer, so translateX(n%) moves the dot n% of the track. */
+  .head {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    will-change: transform;
   }
 
   .dot {
     position: absolute;
+    left: 0;
     top: 50%;
     width: 11px;
     height: 11px;
