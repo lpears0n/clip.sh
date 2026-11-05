@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Check, CircleAlert, FolderOpen, Keyboard, MonitorPlay } from '@lucide/svelte'
+  import { Check, CircleAlert, FolderOpen, Keyboard, MonitorPlay, X } from '@lucide/svelte'
   import { type GameEntry, type Settings, type Status, fileUrl } from './api'
   import { ago, playtime } from './format'
   import GameCover from './GameCover.svelte'
@@ -14,6 +14,7 @@
     settings,
     now,
     onopen,
+    onnotgame,
     onchoosescreen,
     onsettings,
   }: {
@@ -25,6 +26,8 @@
     /** Wall clock from the app's local tick, for "playing for". */
     now: number
     onopen: (g: GameEntry) => void
+    /** Remove it from the list and never detect it again. */
+    onnotgame: (g: GameEntry) => void
     onchoosescreen: () => void
     onsettings: (c: Category) => void
   } = $props()
@@ -108,16 +111,26 @@
       <h2 class="section-title mb-4">Recently played</h2>
       <div class="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-x-5 gap-y-6">
         {#each games as g (g.name)}
-          <button class="group min-w-0 text-left" onclick={() => onopen(g)}>
-            <div class="transition-transform duration-normal group-hover:-translate-y-1">
-              <GameCover game={g} />
-            </div>
-            <div class="display-face mt-2 truncate text-body font-semibold">{g.name}</div>
-            <div class="mt-0.5 flex items-center gap-1.5 truncate text-caption text-muted">
-              {#if g.playing}<span class="size-1.5 flex-none rounded-full bg-danger"></span>{/if}
-              {meta(g)}
-            </div>
-          </button>
+          <div class="group relative min-w-0">
+            <button class="w-full min-w-0 text-left" onclick={() => onopen(g)}>
+              <div class="transition-transform duration-normal group-hover:-translate-y-1">
+                <GameCover game={g} />
+              </div>
+              <div class="display-face mt-2 truncate text-body font-semibold">{g.name}</div>
+              <div class="mt-0.5 flex items-center gap-1.5 truncate text-caption text-muted">
+                {#if g.playing}<span class="size-1.5 flex-none rounded-full bg-danger"></span>{/if}
+                {meta(g)}
+              </div>
+            </button>
+            <button
+              class="btn-scrim absolute top-1 right-2 opacity-0 transition-opacity duration-fast group-focus-within:opacity-100 group-hover:opacity-100"
+              onclick={() => onnotgame(g)}
+              title="Not a game"
+              aria-label="{g.name} is not a game"
+            >
+              <X size={14} />
+            </button>
+          </div>
         {/each}
       </div>
     </section>

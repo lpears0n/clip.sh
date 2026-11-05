@@ -318,6 +318,34 @@ Ad slots: AdSlot component, off unless `"ads": true` in settings.json (728×90 u
   in the header with a breathing halo (`::before`, so the button itself
   stays still; off with reduced motion). 1.0.0 still shows its old text
   button: the prompt only exists from 1.1.0 on.
+- Windows game detection is opt-in (branch `strict-game-detection`):
+  a window counts only if its exe is from Steam, a launcher index, Xbox
+  (`XboxGames`), or Windows' own game list (`GameConfigStore\Children`
+  `MatchedExeFullPath`, undocumented and incomplete, so never the only
+  source). The old "fills its monitor" fallback is gone: the emoji panel
+  (TextInputHost), Snipping Tool and Game Bar overlays were recorded as
+  games. Click-through / tool / no-activate windows and anything under
+  the Windows folder or a SystemApps package are skipped. A game no
+  source knows can be added with Game Bar's "Remember this is a game".
+  The Games page has × "Not a game" per card; the list drops ignored
+  names.
+- NVENC "Failed to open session" on the owner's PC (2026-11-05), every
+  path, while the start-up probe passes. The encoder always opens its
+  session on its own NVIDIA device, so this is the driver refusing
+  (session limit / resources), not a foreign device. The 1.1.0 encoder
+  fallback never fired: the bus watch kept the *last* error (a knock-on
+  "not-negotiated" that doesn't name the encoder). It now keeps the
+  first. Window capture also now makes its device on the encoder's GPU
+  (`adapter` from the encoder's `adapter-luid`), avoiding a system-memory
+  hop on PCs whose default adapter is an iGPU. Recording worked again once
+  the owner turned off "Capture the window in HDR" (and restarted), and
+  `nvidia-smi encodersessions` showed no other users: likely GPU memory
+  held by HDR window captures from failed attempts (FP16 WGC pools and
+  textures stay alive until the appsrc is freed). Every recorder teardown
+  now stops that capture explicitly (`hdr_window::stop`). If NVENC fails
+  again, get the NVENCSTATUS with `GST_DEBUG=nvencoder:5` and
+  `GST_DEBUG_FILE` (quit the tray copy first: a second launch only
+  signals the running one).
 - Deep-dive backlog, not done yet, best first: apply recording settings to the running capture instead of
   "from the next game"; unload the webview while hidden in the tray
   (~100–250 MB during games); make HDR window capture the default once

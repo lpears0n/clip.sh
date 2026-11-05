@@ -1,6 +1,11 @@
 //! Find the game that is running: walk the top-level windows, look at the
 //! process behind each, and decide from its executable. Cheap enough to run
 //! every couple of seconds (a few hundred microseconds; no per-frame work).
+//!
+//! Only executables known to be games count: installed by Steam, another
+//! launcher or the Xbox app, or on Windows' own list of games (Game Bar /
+//! Game Mode). Being fullscreen proves nothing: the emoji panel, the
+//! Snipping Tool and Game Bar all put screen-sized overlay windows up.
 
 use std::{
     collections::{HashMap, HashSet},
@@ -11,14 +16,15 @@ use std::{
 use windows::{
     Win32::{
         Foundation::{HWND, LPARAM, RECT},
-        Graphics::Gdi::{HMONITOR, MONITOR_DEFAULTTONEAREST, MonitorFromWindow},
+        Graphics::Gdi::{MONITOR_DEFAULTTONEAREST, MonitorFromWindow},
         System::Threading::{
             OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
             QueryFullProcessImageNameW,
         },
         UI::WindowsAndMessaging::{
-            EnumWindows, GetForegroundWindow, GetWindowRect, GetWindowTextLengthW, GetWindowTextW,
-            GetWindowThreadProcessId, IsWindowVisible,
+            EnumWindows, GWL_EXSTYLE, GetForegroundWindow, GetWindowLongPtrW, GetWindowRect,
+            GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible,
+            WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT,
         },
     },
     core::{BOOL, PWSTR},
@@ -88,6 +94,26 @@ const NOT_GAMES: &[&str] = &[
     "windowsterminal",
     "wt",
     "conhost",
+    // Overlays and capture tools that draw over games.
+    "textinputhost",
+    "screenclippinghost",
+    "snippingtool",
+    "gamebar",
+    "gamebarftserver",
+    "gameoverlayui",
+    "gameoverlayui64",
+    "nvidia overlay",
+    "nvidia share",
+    "nvcontainer",
+    "radeonsoftware",
+    "amdrsserv",
+    "overwolf",
+    "outplayed",
+    "rtss",
+    "msiafterburner",
+    "msedgewebview2",
+    "lockapp",
+    "widgets",
 ];
 
 /// How often the Steam library index is re-read (installs are rare).
@@ -105,6 +131,8 @@ pub struct Scanner {
     launchers: Option<(InstallIndex, Instant)>,
     /// Xbox / Game Pass names by executable (they come from a file).
     xbox: HashMap<PathBuf, Option<String>>,
+    /// Executables Windows lists as games (lower-cased full paths).
+    known: HashSet<String>,
 }
 
 impl Scanner {
@@ -124,9 +152,14 @@ impl Scanner {
             let index = launchers::windows_index();
             tracing::debug!(games = index.len(), "launcher installs indexed");
             self.launchers = Some((index, Instant::now()));
+            self.known = launchers::windows_known_games();
         }
         let steam = &self.steam.as_ref().unwrap().0;
         let installs = &self.launchers.as_ref().unwrap().0;
+        let known = &self.known;
+        let windows_dir = std::env::var_os("SystemRoot")
+            .or_else(|| std::env::var_os("windir"))
+            .map_or_else(|| PathBuf::from("C:\\Windows"), PathBuf::from);
         let me = std::process::id();
 
         let mut seen = HashSet::new();
@@ -139,7 +172,7 @@ impl Scanner {
                 continue;
             }
             let title = window_title(hwnd);
-            if title.is_empty() {
+            if title.is_empty() || is_overlay(hwnd) {
                 continue;
             }
             let mut pid = 0u32;
@@ -177,7 +210,9 @@ impl Scanner {
                 }
             }
             let stem = stem_of(&exe);
-            if NOT_GAMES.contains(&stem.as_str()) {
+            if NOT_GAMES.contains(&stem.as_str())
+                || launchers::is_windows_component(&exe, &windows_dir)
+            {
                 continue;
             }
             let xbox = self
@@ -196,14 +231,14 @@ impl Scanner {
                     name,
                     steam_app_id: None,
                 }
-            } else if fills_monitor(hwnd) {
-                // Unknown: only count it if it fills its monitor, the way
-                // games do and productivity apps rarely do.
+            } else if known.contains(&exe.to_string_lossy().to_lowercase()) {
+                // On Windows' own list of games.
                 Game {
                     name: title_or_stem(&title, &stem),
                     steam_app_id: None,
                 }
             } else {
+                // Not known to be a game: fullscreen or not, it isn't one.
                 continue;
             };
             // SAFETY: plain query on a live window handle.
@@ -315,25 +350,13 @@ fn window_area(hwnd: HWND) -> i64 {
     i64::from(r.right - r.left).max(0) * i64::from(r.bottom - r.top).max(0)
 }
 
-/// Borderless or exclusive fullscreen: the window covers its monitor.
-fn fills_monitor(hwnd: HWND) -> bool {
-    // SAFETY: plain queries.
-    unsafe {
-        let mut r = RECT::default();
-        if GetWindowRect(hwnd, &mut r).is_err() {
-            return false;
-        }
-        let m: HMONITOR = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
-        let mut info = windows::Win32::Graphics::Gdi::MONITORINFO {
-            cbSize: std::mem::size_of::<windows::Win32::Graphics::Gdi::MONITORINFO>() as u32,
-            ..Default::default()
-        };
-        if !windows::Win32::Graphics::Gdi::GetMonitorInfoW(m, &mut info).as_bool() {
-            return false;
-        }
-        let mr = info.rcMonitor;
-        (r.right - r.left) >= (mr.right - mr.left) && (r.bottom - r.top) >= (mr.bottom - mr.top)
-    }
+/// An overlay rather than an app window: click-through, a tool window, or
+/// one that never takes focus. Games draw into ordinary windows; overlays
+/// (the emoji panel, Game Bar, capture tools, FPS counters) use these.
+fn is_overlay(hwnd: HWND) -> bool {
+    // SAFETY: plain query; a stale handle reads as 0.
+    let ex = unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) } as u32;
+    ex & (WS_EX_TRANSPARENT.0 | WS_EX_TOOLWINDOW.0 | WS_EX_NOACTIVATE.0) != 0
 }
 
 fn title_or_stem(title: &str, stem: &str) -> String {

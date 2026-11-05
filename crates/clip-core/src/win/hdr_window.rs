@@ -559,6 +559,17 @@ impl Drop for Capture {
     }
 }
 
+/// Stop the capture behind `src` now (no-op for other elements): closes the
+/// Windows capture session and its frame pool instead of waiting for the
+/// element to be freed.
+pub fn stop(src: &gst::Element) {
+    // SAFETY: the key is only ever set by `source`, with a `Capture`.
+    let capture = unsafe { src.steal_data::<Capture>("reruns-hdr-window-capture") };
+    if capture.is_some() {
+        tracing::info!("HDR window capture stopped");
+    }
+}
+
 /// The WinRT wrapper of our D3D11 device, for the frame handler (which
 /// runs on a capture thread).
 struct AgileDevice(IDirect3DDevice);

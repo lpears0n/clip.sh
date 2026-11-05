@@ -285,9 +285,23 @@
   async function changeSettings(s: Settings) {
     await api.setSettings(s)
     const dirChanged = s.clips_dir !== settings?.clips_dir
+    const ignoredChanged = JSON.stringify(s.ignored_games) !== JSON.stringify(settings?.ignored_games)
     settings = s
     if (dirChanged) refreshLibrary()
+    else if (ignoredChanged) api.games().then((g) => (games = g), () => {})
     refreshUsage()
+  }
+
+  /** From the Games page: hide it and never detect it again. */
+  async function notGame(g: GameEntry) {
+    if (!settings) return
+    try {
+      games = games.filter((x) => x.name !== g.name)
+      await changeSettings({ ...settings, ignored_games: [...settings.ignored_games, { name: g.name }] })
+      notify(`Ignoring ${g.name}. Undo in Settings → Recording.`)
+    } catch (e) {
+      notify(String(e), true)
+    }
   }
 
   /** "Not a game": stops within a scan; undo under Settings → Recording. */
@@ -498,6 +512,7 @@
               gameName = g.name
               go('game')
             }}
+            onnotgame={notGame}
             onchoosescreen={chooseScreen}
             onsettings={openSettings}
           />

@@ -95,6 +95,12 @@ impl GameEntry {
     }
 }
 
+/// Remove entries the user marked "not a game" (by name: sessions and clips
+/// don't record the executable).
+fn drop_ignored(games: &mut Vec<GameEntry>, ignored: &[clip_core::game::IgnoredGame]) {
+    games.retain(|g| !clip_core::game::is_ignored(ignored, &g.name, None));
+}
+
 /// Steam app id for a game name, when the clip predates metadata files.
 fn id_by_name(apps: &[(u32, String)], name: &str) -> Option<u32> {
     let norm = |s: &str| {
@@ -108,8 +114,13 @@ fn id_by_name(apps: &[(u32, String)], name: &str) -> Option<u32> {
 }
 
 /// Build the games list, most recently active first. `playing` is the game
-/// being recorded right now and when its session started.
-pub fn list(clips: &[Clip], playing: Option<(&str, Option<u32>, u64)>) -> Vec<GameEntry> {
+/// being recorded right now and when its session started. Apps marked "not
+/// a game" are left out, history and all.
+pub fn list(
+    clips: &[Clip],
+    playing: Option<(&str, Option<u32>, u64)>,
+    ignored: &[clip_core::game::IgnoredGame],
+) -> Vec<GameEntry> {
     let apps = steam_apps();
     let mut games: HashMap<String, GameEntry> = HashMap::new();
 
@@ -160,6 +171,7 @@ pub fn list(clips: &[Clip], playing: Option<(&str, Option<u32>, u64)>) -> Vec<Ga
             g
         })
         .collect();
+    drop_ignored(&mut out, ignored);
     out.sort_by_key(|g| {
         (
             std::cmp::Reverse(g.playing),
@@ -172,6 +184,31 @@ pub fn list(clips: &[Clip], playing: Option<(&str, Option<u32>, u64)>) -> Vec<Ga
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn leaves_out_apps_marked_not_a_game() {
+        use clip_core::game::IgnoredGame;
+        let mut games = vec![
+            GameEntry::new("Overwatch®"),
+            GameEntry::new("Windows Input Experience"),
+            GameEntry::new("GameOverlay"),
+        ];
+        let ignored = [
+            // Marked from the top bar: has the executable too.
+            IgnoredGame {
+                name: "windows input experience".into(),
+                exe: Some("textinputhost".into()),
+            },
+            // Marked from the Games page: name only.
+            IgnoredGame {
+                name: "GameOverlay".into(),
+                exe: None,
+            },
+        ];
+        drop_ignored(&mut games, &ignored);
+        let names: Vec<_> = games.iter().map(|g| g.name.as_str()).collect();
+        assert_eq!(names, ["Overwatch®"]);
+    }
 
     #[test]
     fn matches_names_loosely() {
