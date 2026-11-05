@@ -178,7 +178,7 @@ Fewest words that work. Every line of text has to earn its place:
   "Draw the mouse pointer into clips."
 - **A description is one short sentence**, for a side effect, a limit or
   a consequence ("Applies immediately.", "Records the screen area, so
-  overlays can show up.") — never how it works inside.
+  overlays can show up."). Never how it works inside.
 - **No reassurance or selling**: no "Nothing downloads until…", "It never
   shows up in clips", "so a moment is never lost".
 - **No "so that / so you can" tails**, no repeating the app's name, no
