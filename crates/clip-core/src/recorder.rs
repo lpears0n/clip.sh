@@ -533,6 +533,7 @@ impl Recorder {
             );
         }
         self.pipeline.set_state(gst::State::Null)?;
+        release_capture(&self.pipeline);
         self.stop.store(true, Ordering::Relaxed);
         if let Some(t) = self.bus_thread.take() {
             let _ = tokio::task::spawn_blocking(move || t.join()).await;
@@ -547,8 +548,24 @@ impl Recorder {
 impl Drop for Recorder {
     fn drop(&mut self) {
         let _ = self.pipeline.set_state(gst::State::Null);
+        release_capture(&self.pipeline);
         self.stop.store(true, Ordering::Relaxed);
     }
+}
+
+/// Stop capture that lives outside GStreamer's own elements (Windows' HDR
+/// window capture runs a Windows Graphics Capture session with FP16 frames
+/// on the GPU) as soon as the pipeline stops, rather than whenever the last
+/// reference to its element goes: a failed attempt that left one running
+/// kept costing GPU memory, and after a few retries NVENC couldn't open a
+/// session at all.
+fn release_capture(pipeline: &gst::Pipeline) {
+    #[cfg(windows)]
+    if let Some(src) = pipeline.by_name("screen") {
+        crate::win::hdr_window::stop(&src);
+    }
+    #[cfg(not(windows))]
+    let _ = pipeline;
 }
 
 /// A built capture pipeline that hasn't proven itself yet.
@@ -634,6 +651,7 @@ impl Pipeline {
 
     async fn teardown(self) {
         let _ = self.pipeline.set_state(gst::State::Null);
+        release_capture(&self.pipeline);
         self.stop.store(true, Ordering::Relaxed);
         let _ = tokio::task::spawn_blocking(move || self.bus_thread.join()).await;
     }
