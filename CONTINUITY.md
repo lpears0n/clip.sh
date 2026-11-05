@@ -346,6 +346,10 @@ Ad slots: AdSlot component, off unless `"ads": true` in settings.json (728×90 u
   again, get the NVENCSTATUS with `GST_DEBUG=nvencoder:5` and
   `GST_DEBUG_FILE` (quit the tray copy first: a second launch only
   signals the running one).
+- 1.1.1 (branch `release-1.1.1`): #25 plus one change: with "Capture the
+  window in HDR" on, a failed HDR window capture falls back to plain
+  window capture, never the screen area (the owner wants game-only clips;
+  HDR compatibility alone still records the screen area by design).
 - Deep-dive backlog, not done yet, best first: apply recording settings to the running capture instead of
   "from the next game"; unload the webview while hidden in the tray
   (~100–250 MB during games); make HDR window capture the default once

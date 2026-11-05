@@ -311,6 +311,16 @@ impl AutoRecorder {
                     tonemapped = true;
                     r
                 }
+                // Asking for the window in HDR means "only the game": when
+                // that can't run, record the plain window rather than the
+                // screen area (which would bring overlays and other windows
+                // into clips).
+                None if cfg.hdr_window => {
+                    tracing::info!(
+                        "HDR window capture unavailable; recording the game window without tone mapping"
+                    );
+                    Self::start_window(&cfg, window, &running.game).await?
+                }
                 None => match Recorder::start(&cfg, CaptureSource::Screen(region)).await {
                     Ok(r) => {
                         tonemapped = true;
