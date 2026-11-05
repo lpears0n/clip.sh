@@ -24,6 +24,7 @@
     type UpdateInfo,
     type Usage,
   } from './lib/api'
+  import { retryFailedArt } from './lib/Art.svelte'
   import { readLibraryCache, writeLibraryCache } from './lib/cache'
   import ClipsView from './lib/ClipsView.svelte'
   import { coalesce } from './lib/coalesce'
@@ -143,6 +144,7 @@
     try {
       allClips = await api.clips()
       games = await api.games()
+      retryFailedArt()
       libraryError = null
       writeLibraryCache(allClips, games)
     } catch (e) {

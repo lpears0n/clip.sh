@@ -2,6 +2,7 @@
   import { Check, CircleAlert, FolderOpen, Keyboard, MonitorPlay, X } from '@lucide/svelte'
   import { type GameEntry, type Settings, type Status, fileUrl } from './api'
   import { ago, playtime } from './format'
+  import Art from './Art.svelte'
   import GameCover from './GameCover.svelte'
   import SkeletonGrid from './SkeletonGrid.svelte'
   import type { Category } from './SettingsView.svelte'
@@ -33,7 +34,6 @@
   } = $props()
 
   const hero = $derived(games[0] ?? null)
-  const heroImage = $derived(hero ? (hero.art.hero ?? hero.fallback_image) : null)
   const session = $derived(hero?.sessions[0])
 
   const clipCount = (n: number) => `${n} clip${n === 1 ? '' : 's'}`
@@ -81,22 +81,27 @@
       class="group relative block h-(--height-hero) w-full overflow-hidden rounded-surface bg-panel text-left"
       onclick={() => onopen(hero)}
     >
-      {#if heroImage}
-        <img
-          src={fileUrl(heroImage)}
-          alt=""
-          draggable="false"
-          class="absolute inset-0 size-full object-cover object-[center_30%] {hero.art.hero ? '' : 'brightness-75'}"
-        />
+      {#snippet frame()}
+        {#if hero.fallback_image}
+          <img src={fileUrl(hero.fallback_image)} alt="" draggable="false" class="absolute inset-0 size-full object-cover object-[center_30%] brightness-75" />
+        {/if}
+      {/snippet}
+      {#if hero.art.hero}
+        <Art path={hero.art.hero} class="absolute inset-0 size-full object-cover object-[center_30%]" fallback={frame} />
+      {:else}
+        {@render frame()}
       {/if}
       <!-- Legibility for the text over the art. -->
       <div class="absolute inset-0 bg-gradient-to-t from-black/85 via-black/25 to-transparent"></div>
       <div class="absolute inset-x-8 bottom-7 flex items-end justify-between gap-6">
         <div class="min-w-0">
-          {#if hero.art.logo}
-            <img src={fileUrl(hero.art.logo)} alt={hero.name} draggable="false" class="max-h-24 max-w-96 object-contain object-left-bottom" />
-          {:else}
+          {#snippet title()}
             <h1 class="display-face text-display leading-none font-bold">{hero.name}</h1>
+          {/snippet}
+          {#if hero.art.logo}
+            <Art path={hero.art.logo} alt={hero.name} class="max-h-24 max-w-96 object-contain object-left-bottom" fallback={title} />
+          {:else}
+            {@render title()}
           {/if}
           <p class="mt-3 flex items-center gap-2 text-body text-fg-2">
             {#if hero.playing}<span class="size-2 rounded-full bg-danger"></span>{/if}

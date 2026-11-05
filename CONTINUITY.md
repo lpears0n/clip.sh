@@ -350,6 +350,26 @@ Ad slots: AdSlot component, off unless `"ads": true` in settings.json (728×90 u
   window in HDR" on, a failed HDR window capture falls back to plain
   window capture, never the screen area (the owner wants game-only clips;
   HDR compatibility alone still records the screen area by design).
+- 1.1.1 tag: first push was on a commit before #26 and the version
+  check stopped it; the owner re-tags on `main` (780c83d).
+- Taskbar icon showing Tauri's placeholder on Windows: the bundle's
+  icons are right; it's Windows' icon cache from the old install
+  (`ie4uinit.exe -show`, or unpin/re-pin).
+- Broken Steam art after coming back to the window (branch
+  `fix-art-images`). Three causes, all handled:
+  - The asset scope allowed each art file only after `list_games`
+    returned, but the window paints its cached library first: those
+    requests were refused, and a broken `<img>` never retries the same
+    src. Now Steam's `appcache/librarycache` folders are allowed at
+    setup (and again per listing, for a Steam installed later).
+  - Steam swaps in a new hashed folder when a game's art changes and
+    deletes the old one; `steam_art` took whichever copy `read_dir`
+    listed first. Now the newest copy wins (`art_in`, tested).
+  - `Art.svelte` wraps every Steam image: a failed load shows the
+    fallback (title, clip frame or title cover) and tries again with
+    `?retry=n` when the next listing arrives (App calls
+    `retryFailedArt()`). The asset protocol reads only the path, so
+    the query just forces a new request; loaded art isn't refetched.
 - Deep-dive backlog, not done yet, best first: apply recording settings to the running capture instead of
   "from the next game"; unload the webview while hidden in the tray
   (~100–250 MB during games); make HDR window capture the default once
