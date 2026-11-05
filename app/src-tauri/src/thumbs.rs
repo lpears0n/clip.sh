@@ -3,9 +3,10 @@
 //! announcing each finished clip to the UI.
 
 use std::{
-    collections::HashSet,
-    path::PathBuf,
+    collections::HashMap,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex, mpsc},
+    time::{Duration, SystemTime},
 };
 
 use tauri::{AppHandle, Emitter};
@@ -24,21 +25,35 @@ struct Job {
     game: String,
 }
 
+/// How long to wait before trying a file again that changed while an
+/// attempt on it failed (it was still being copied in).
+const RETRY_CHANGED: Duration = Duration::from_secs(2);
+
+/// A file's size and modification time: whether it changed since.
+type Stamp = (u64, Option<SystemTime>);
+
+fn stamp(path: &Path) -> Stamp {
+    std::fs::metadata(path).map_or((0, None), |m| (m.len(), m.modified().ok()))
+}
+
 #[derive(Clone)]
 pub struct Thumbnailer {
     tx: mpsc::Sender<Job>,
-    /// Queued or running, so a clip is never generated twice at once; failed,
-    /// so a broken file isn't retried every refresh.
-    seen: Arc<Mutex<HashSet<PathBuf>>>,
+    /// `None`: queued or running, so a clip is never generated twice at
+    /// once. `Some`: failed with the file as stamped, so a broken file isn't
+    /// retried every refresh, but one that has changed since (still being
+    /// copied in when it failed) is.
+    seen: Arc<Mutex<HashMap<PathBuf, Option<Stamp>>>>,
 }
 
 impl Thumbnailer {
     pub fn start(app: AppHandle) -> Self {
         let (tx, rx) = mpsc::channel::<Job>();
         let rx = Arc::new(Mutex::new(rx));
-        let seen: Arc<Mutex<HashSet<PathBuf>>> = Arc::default();
+        let seen: Arc<Mutex<HashMap<PathBuf, Option<Stamp>>>> = Arc::default();
         for _ in 0..WORKERS {
             let rx = rx.clone();
+            let tx = tx.clone();
             let app = app.clone();
             let seen = seen.clone();
             std::thread::Builder::new()
@@ -49,6 +64,10 @@ impl Thumbnailer {
                             Ok(j) => j,
                             Err(_) => return,
                         };
+                        // Stamped before: a file that finishes copying while
+                        // this attempt fails must not be recorded as failed
+                        // in its finished state.
+                        let before = stamp(&job.path);
                         match library::generate(&job.path) {
                             Ok(()) => {
                                 // Done: allow regeneration if the file changes later.
@@ -60,8 +79,23 @@ impl Thumbnailer {
                                     Err(e) => tracing::warn!("{}: {e:#}", job.path.display()),
                                 }
                             }
+                            Err(e) if stamp(&job.path) != before => {
+                                // Changed during the attempt: still queued, so
+                                // try again shortly rather than wait for a
+                                // refresh that may have come and gone.
+                                tracing::debug!(
+                                    "thumbnail for {}: {e:#}; the file changed, retrying",
+                                    job.path.display()
+                                );
+                                let tx = tx.clone();
+                                std::thread::spawn(move || {
+                                    std::thread::sleep(RETRY_CHANGED);
+                                    let _ = tx.send(job);
+                                });
+                            }
                             Err(e) => {
                                 tracing::warn!("thumbnail for {}: {e:#}", job.path.display());
+                                seen.lock().unwrap().insert(job.path, Some(before));
                             }
                         }
                     }
@@ -71,10 +105,17 @@ impl Thumbnailer {
         Self { tx, seen }
     }
 
-    /// Queue a clip whose images are missing. Duplicates are ignored.
+    /// Queue a clip whose images are missing. Duplicates are ignored, and
+    /// so is a file that failed and hasn't changed since.
     pub fn request(&self, path: PathBuf, game: String) {
-        if self.seen.lock().unwrap().insert(path.clone()) {
-            let _ = self.tx.send(Job { path, game });
+        let mut seen = self.seen.lock().unwrap();
+        match seen.get(&path) {
+            Some(None) => return,
+            Some(Some(failed)) if *failed == stamp(&path) => return,
+            _ => {}
         }
+        seen.insert(path.clone(), None);
+        drop(seen);
+        let _ = self.tx.send(Job { path, game });
     }
 }

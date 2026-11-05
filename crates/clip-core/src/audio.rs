@@ -184,9 +184,6 @@ fn present(source: &AudioSource) -> AudioSource {
 #[cfg(target_os = "linux")]
 fn make_source(source: &AudioSource) -> Result<gst::Element> {
     let mut src = gst::ElementFactory::make("pipewiresrc").name(source.name());
-    if let Some(device) = source.device() {
-        src = src.property("target-object", device);
-    }
     if let AudioSource::Desktop(_) = source {
         // Capture an output's monitor: the targeted sink, or without a
         // target the default sink, following it when the default changes.
@@ -197,7 +194,12 @@ fn make_source(source: &AudioSource) -> Result<gst::Element> {
                 .build(),
         );
     }
-    Ok(src.build()?)
+    let src = src.build()?;
+    // After the stream properties: on an older pipewiresrc the target joins them.
+    if let Some(device) = source.device() {
+        crate::capture::set_pipewire_target(&src, device);
+    }
+    Ok(src)
 }
 
 #[cfg(not(target_os = "linux"))]

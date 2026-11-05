@@ -88,7 +88,7 @@ pub enum Encoder {
 /// Property names, types, ranges and enum values drift between GStreamer
 /// versions and vendors; a miss costs one setting (logged), never the
 /// recording, where `set_property` would panic.
-fn set<V: Into<gst::glib::Value>>(el: &gst::Element, name: &str, value: V) {
+pub(crate) fn set<V: Into<gst::glib::Value>>(el: &gst::Element, name: &str, value: V) {
     use gst::glib::{ParamFlags, ParamSpecInt, ParamSpecInt64, ParamSpecUInt, ParamSpecUInt64};
 
     let Some(pspec) = el.find_property(name) else {

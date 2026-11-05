@@ -319,10 +319,13 @@ pub fn render_with(
     if let Some(dir) = output.parent() {
         std::fs::create_dir_all(dir)?;
     }
+    // Every pass renders under a temporary name; the edit only appears
+    // once it is done (and, with a size limit, fits).
+    let partial = crate::save::partial_path(output);
     let Some(max_bytes) = edit.max_bytes else {
-        return render_once(
+        let result = render_once(
             input,
-            output,
+            &partial,
             edit,
             encoder,
             &cfg,
@@ -330,6 +333,7 @@ pub fn render_with(
             None,
             &control,
         );
+        return crate::save::finish_partial(output, result);
     };
     let seconds = edit.output_duration().seconds_f64();
     let mut plan = plan_size(max_bytes, seconds, audio_tracks > 0)?;
@@ -342,9 +346,11 @@ pub fn render_with(
             fps: plan.fps.map_or(cfg.fps, |f| f.min(cfg.fps)),
             ..cfg.clone()
         };
+        // A failed or cancelled pass removes its file; a too-big one from
+        // before was only ever the temporary file, so nothing is left.
         render_once(
             input,
-            output,
+            &partial,
             edit,
             encoder,
             &cfg,
@@ -352,10 +358,13 @@ pub fn render_with(
             Some(plan),
             &control,
         )?;
-        let size = std::fs::metadata(output)?.len();
+        let size = match std::fs::metadata(&partial) {
+            Ok(m) => m.len(),
+            Err(e) => return crate::save::finish_partial(output, Err(e.into())),
+        };
         if size <= max_bytes {
             tracing::info!(size, max_bytes, ?plan, "fitted export");
-            return Ok(());
+            return crate::save::finish_partial(output, Ok(()));
         }
         let scaled = plan.video_kbps as f64 * max_bytes as f64 / size as f64 * 0.95;
         tracing::info!(
@@ -369,11 +378,12 @@ pub fn render_with(
         }
         plan.video_kbps = scaled as u32;
     }
-    let _ = std::fs::remove_file(output);
+    let _ = std::fs::remove_file(&partial);
     bail!("couldn't fit in {}; trim it shorter", mb(max_bytes))
 }
 
-/// One render; `plan` scales the picture and sets the audio rate.
+/// One render into `output` (removed if it fails); `plan` scales the
+/// picture and sets the audio rate.
 #[allow(clippy::too_many_arguments)]
 fn render_once(
     input: &Path,
@@ -577,11 +587,20 @@ fn render_once(
     result
 }
 
+/// How long a render may take before it is taken for stuck: ten minutes,
+/// or ten times the output's length for long ones (a ten-minute replay
+/// encoded in software, or in slow motion, takes a good while longer than
+/// ten minutes on a slower PC).
+fn render_time_limit(output: gst::ClockTime) -> Duration {
+    Duration::from_secs(600).max(Duration::from_nanos(output.nseconds()) * 10)
+}
+
 /// Play to EOS, reporting position as progress and stopping on cancel.
 fn run(pipeline: &gst::Pipeline, edit: &Edit, control: &Control) -> Result<()> {
     let bus = pipeline.bus().context("no bus")?;
     let span = edit.output_duration().nseconds().max(1) as f64;
     let started = std::time::Instant::now();
+    let limit = render_time_limit(edit.output_duration());
     loop {
         if control
             .cancel
@@ -609,7 +628,7 @@ fn run(pipeline: &gst::Pipeline, edit: &Edit, control: &Control) -> Result<()> {
                 }
             },
             None => {
-                if started.elapsed() > Duration::from_secs(600) {
+                if started.elapsed() > limit {
                     bail!("timed out rendering");
                 }
                 if let Some(f) = &control.on_progress
@@ -657,6 +676,14 @@ mod tests {
     use super::*;
 
     const MB: u64 = 1_000_000;
+
+    #[test]
+    fn long_renders_get_time_in_proportion() {
+        let secs = |s: u64| gst::ClockTime::from_seconds(s);
+        assert_eq!(render_time_limit(secs(30)), Duration::from_secs(600));
+        // A 10-minute replay at quarter speed: 40 minutes of output.
+        assert_eq!(render_time_limit(secs(2400)), Duration::from_secs(24_000));
+    }
 
     #[test]
     fn short_clips_keep_a_high_class() {

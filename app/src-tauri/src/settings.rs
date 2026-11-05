@@ -1,6 +1,6 @@
 //! User settings, stored as JSON in `$XDG_CONFIG_HOME/reruns/settings.json`.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use clip_core::{
@@ -8,6 +8,7 @@ use clip_core::{
     game::IgnoredGame,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -77,6 +78,8 @@ pub struct Settings {
     pub storage_limit_gb: Option<f64>,
     /// When enforcing the limit, never delete clips made in the trimmer.
     pub protect_edits: bool,
+    /// When enforcing the limit, never delete starred clips.
+    pub protect_favorites: bool,
     /// Deleted clips go to the desktop trash instead of being erased.
     pub use_trash: bool,
     /// Show the reserved ad slots. Not exposed in the UI; set it by hand to
@@ -134,6 +137,7 @@ impl Default for Settings {
             clips_dir: clip_core::default_clips_dir(),
             storage_limit_gb: None,
             protect_edits: true,
+            protect_favorites: true,
             use_trash: true,
             ads: false,
         }
@@ -147,25 +151,61 @@ impl Settings {
             .join("reruns/settings.json")
     }
 
-    /// Load settings, falling back to defaults if the file is missing or bad.
+    /// Load settings, falling back to defaults if the file is missing.
     pub fn load() -> Self {
         let path = Self::path();
         match std::fs::read_to_string(&path) {
-            Ok(s) => serde_json::from_str(&s).unwrap_or_else(|e| {
-                tracing::warn!("ignoring invalid {}: {e}", path.display());
-                Self::default()
-            }),
+            Ok(text) => Self::parse(&text, &path),
             Err(_) => Self::default(),
         }
     }
 
-    pub fn save(&self) -> Result<()> {
-        let path = Self::path();
-        if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir)?;
+    /// Read `text` (the contents of `path`) leniently: a field that doesn't
+    /// parse (a value another version wrote, a hand edit) falls back to its
+    /// default and every other field is kept, rather than all of them
+    /// going back to defaults and the next save overwriting the file. Text
+    /// that isn't a JSON object at all is copied aside to
+    /// `settings.json.bad` first, so it can still be recovered by hand.
+    fn parse(text: &str, path: &Path) -> Self {
+        let file = match serde_json::from_str::<Map<String, Value>>(text) {
+            Ok(file) => file,
+            Err(e) => {
+                let bad = path.with_extension("json.bad");
+                tracing::warn!(
+                    "{} is unreadable ({e}); using defaults, the old file is kept as {}",
+                    path.display(),
+                    bad.display()
+                );
+                let _ = std::fs::copy(path, &bad);
+                return Self::default();
+            }
+        };
+        if let Ok(settings) = serde_json::from_value(Value::Object(file.clone())) {
+            return settings;
         }
-        std::fs::write(&path, serde_json::to_string_pretty(self)?)
-            .with_context(|| format!("writing {}", path.display()))
+        let Ok(Value::Object(mut merged)) = serde_json::to_value(Self::default()) else {
+            return Self::default();
+        };
+        // Field by field over the defaults; one that breaks parsing is
+        // dropped again.
+        for (key, value) in file {
+            let previous = merged.insert(key.clone(), value);
+            if serde_json::from_value::<Self>(Value::Object(merged.clone())).is_err() {
+                tracing::warn!("settings: ignoring an invalid {key:?}; using its default");
+                match previous {
+                    Some(p) => merged.insert(key, p),
+                    None => merged.remove(&key),
+                };
+            }
+        }
+        serde_json::from_value(Value::Object(merged)).unwrap_or_default()
+    }
+
+    /// Write the settings atomically: to a temporary file next to them,
+    /// then moved over the old ones, so a crash or power cut mid-write
+    /// can't leave a truncated file behind.
+    pub fn save(&self) -> Result<()> {
+        save_to(self, &Self::path())
     }
 
     pub fn recorder_config(&self) -> RecorderConfig {
@@ -208,6 +248,7 @@ impl Settings {
         crate::storage::Policy {
             limit_bytes: self.storage_limit_gb.map(crate::storage::gb),
             protect_edits: self.protect_edits,
+            protect_favorites: self.protect_favorites,
             use_trash: self.use_trash,
         }
     }
@@ -218,5 +259,92 @@ impl Settings {
             bitrate_kbps: self.bitrate_kbps.clamp(2_000, 100_000),
             codec: self.codec,
         }
+    }
+}
+
+fn save_to(settings: &Settings, path: &Path) -> Result<()> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    clip_core::save::write_atomic(path, serde_json::to_string_pretty(settings)?.as_bytes())
+        .with_context(|| format!("writing {}", path.display()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("reruns-settings-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn defaults_round_trip() {
+        let text = serde_json::to_string(&Settings::default()).unwrap();
+        let back = Settings::parse(&text, Path::new("unused.json"));
+        assert_eq!(
+            serde_json::to_value(back).unwrap(),
+            serde_json::to_value(Settings::default()).unwrap()
+        );
+    }
+
+    #[test]
+    fn a_bad_field_keeps_the_others() {
+        let text = r#"{
+            "hotkey": "F10",
+            "fps": "sixty",
+            "codec": "h999",
+            "replay_seconds": 120,
+            "clips_dir": "/clips",
+            "storage_limit_gb": 50.0,
+            "some_future_setting": true
+        }"#;
+        let s = Settings::parse(text, Path::new("unused.json"));
+        assert_eq!(s.hotkey, "F10");
+        assert_eq!(s.replay_seconds, 120);
+        assert_eq!(s.clips_dir, PathBuf::from("/clips"));
+        assert_eq!(s.storage_limit_gb, Some(50.0));
+        // The broken ones fall back to their defaults.
+        assert_eq!(s.fps, Settings::default().fps);
+        assert_eq!(s.codec, Settings::default().codec);
+    }
+
+    #[test]
+    fn unreadable_file_is_kept_aside() {
+        let dir = temp_dir("bad");
+        let path = dir.join("settings.json");
+        std::fs::write(&path, "{\"hotkey\": \"F1").unwrap();
+        let s = Settings::parse(&std::fs::read_to_string(&path).unwrap(), &path);
+        assert_eq!(s.hotkey, Settings::default().hotkey);
+        assert_eq!(
+            std::fs::read_to_string(dir.join("settings.json.bad")).unwrap(),
+            "{\"hotkey\": \"F1"
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn saves_replace_the_file_whole() {
+        let dir = temp_dir("save");
+        let path = dir.join("settings.json");
+        std::fs::write(&path, "old").unwrap();
+        let settings = Settings {
+            hotkey: "F12".into(),
+            ..Default::default()
+        };
+        save_to(&settings, &path).unwrap();
+        let back = Settings::parse(&std::fs::read_to_string(&path).unwrap(), &path);
+        assert_eq!(back.hotkey, "F12");
+        // Only the settings file is left: no temporary files.
+        let names: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(names, ["settings.json"]);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

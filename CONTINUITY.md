@@ -370,6 +370,79 @@ Ad slots: AdSlot component, off unless `"ads": true` in settings.json (728×90 u
     `?retry=n` when the next listing arrives (App calls
     `retryFailedArt()`). The asset protocol reads only the path, so
     the query just forces a new request; loaded art isn't refetched.
+- **Windows bundle was missing `level` and `audiorate`** (user report:
+  Settings → Audio meters showed "Can't open: level element missing").
+  `scripts/collect-gstreamer.ps1` bundles an allow-list of plugins, and
+  #21 (meters, slow motion) added two elements without adding their
+  plugins: `level` (meters) and `audiorate` (every audio track in an
+  export, so exports with audio also failed on Windows). Both are now
+  bundled and in the script's required list. Checked against the
+  1.26.9 MSVC runtime MSI that the release installs: `gstlevel.dll` is
+  in the effects module (with `gstvideocrop.dll`) and `gstaudiorate.dll`
+  in the core module; both install by default. That runtime has no
+  `webp` or `fdkaac` plugin; thumbnails already fall back to JPEG and
+  audio to `avenc_aac`. Rule: a new `ElementFactory::make("x")` needs
+  its plugin in `$plugins` and the element in `$required`.
+- **Bug sweep (2026-11-05), fixed:**
+  - Windows: the viewer's rename/star/labels were disabled for every
+    clip (`inLibrary` compared against `clips_dir + '/'`); the "Saved"
+    toast showed the whole path. Both now take either separator.
+  - Starring, renaming or labelling a clip mid-trim, or its thumbnail
+    arriving, reset the trim: the viewer's reset effect re-ran on every
+    new clip object. It now resets only when the path changes
+    (`tests/ui.cjs` stars mid-trim).
+  - Clips and edits are written to `<file>.mp4.part` and renamed when
+    complete (`save::partial_path`/`finish_partial`). With faststart
+    the file sat at 0 bytes until the end, so the watcher's refresh had
+    the thumbnailer fail on it and never retry: edits (long encodes)
+    showed no thumbnail or duration until restart. The thumbnailer now
+    also retries a failed file once its size or mtime changes.
+  - The page only heard status on start/stop: a capture failure
+    (Retrying) or recovery wasn't shown until the window was refocused.
+    `service.rs` now emits whenever state/game/encoder/error/path change.
+  - Windows hotkeys: binding a key Windows refused unregistered the old
+    one first, leaving the action with no hotkey until restart.
+  - Storage limit: one clip that couldn't be removed stopped the rest
+    (and was first in line again after every save).
+  - Renders had a flat 10-minute timeout; now max(10 min, 10× output).
+  - `update_clip` answered with the canonical path (`\\?\C:\…`), which
+    the page didn't match, so its tidied title/labels were dropped.
+  - Stale HDR log lines (window capture falls back to the plain window
+    since 1.1.1, not the screen area).
+- **Follow-ups, also fixed:**
+  - Storage limit keeps starred clips (`protect_favorites`, on by
+    default, Settings → Storage), read from each clip's sidecar.
+  - settings.json is saved through a temp file + rename, and read
+    field by field over the defaults: one bad field keeps its default
+    instead of resetting everything; text that isn't JSON is copied to
+    `settings.json.bad` first.
+  - Audio meters start/stop as async commands (device work in
+    `spawn_blocking`), serialized by a tokio mutex so old meters close
+    before new ones open and a stop during a start still wins.
+  - pipewiresrc: `target-object` only where the element has it (else
+    `target.object`/`node.target` in `stream-properties`), and
+    `keepalive-time` through `encoder::set`. The element builder panics
+    on a property the element lacks; never set optional ones through it.
+- **Windows CI on PR #28**: `fits_an_export_under_a_size_limit` failed
+  moving the finished `.part` into place (os error 32, sharing
+  violation). A file just closed is often held open for a moment by
+  Defender or the indexer; that blocks a rename but not a write, which is
+  why the old write-in-place code never hit it. Renames now go through
+  `save::rename_retrying` (retries errors 5/32/33 for up to 5 s, Windows
+  only), and a finished file that still can't be moved is kept as
+  `.part` instead of deleted.
+- **Review fixes on PR #28:** sidecars (`.mp4.json`) and settings are
+  written with `save::write_atomic`, and the storage limit treats a
+  sidecar that exists but can't be read as starred
+  (`library::is_favorite` → `None`), so a clip mid-rename is never taken
+  for unstarred. Size-limited exports keep every pass under the `.part`
+  name until one fits (a failed later pass used to leave the earlier,
+  too-big file at the final path). The thumbnailer stamps a file before
+  each attempt; if it changed during a failed attempt it is retried in 2 s
+  instead of being recorded as failed in its finished state.
+- Left alone: seeking the export pipeline logs a harmless
+  GStreamer-CRITICAL (mp4mux's output segment is in bytes; the seek
+  still reaches the decoder).
 - Deep-dive backlog, not done yet, best first: apply recording settings to the running capture instead of
   "from the next game"; unload the webview while hidden in the tray
   (~100–250 MB during games); make HDR window capture the default once
@@ -386,6 +459,12 @@ Ad slots: AdSlot component, off unless `"ads": true` in settings.json (728×90 u
   tauri.conf.json and the two `clip-ipc` version pins; add
   `docs/release-notes/v<version>.md`; merge; tag on `main`; publish the
   draft.
+- **v1.1.2 prepared** (2026-11-05): the Windows bundle fix and the bug
+  sweep above, notes in `docs/release-notes/v1.1.2.md`. After the PR
+  merges: tag `v1.1.2` on `main`, then check the Windows build log says
+  "all 39 required elements load from the bundle" before publishing.
+  Not yet seen working on Windows: the meters, the hotkey change and the
+  HDR log text (CI builds them; nothing here runs Windows).
 
 ## Next, in order
 1. v1.0.0: owner adds the updater key secrets (`docs/RELEASING.md`), then

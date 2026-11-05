@@ -108,6 +108,11 @@ fn saves_last_n_seconds_as_mp4() {
     let dir = std::env::temp_dir().join(format!("reruns-test-{}", std::process::id()));
     let path = dir.join("clip.mp4");
     write_mp4(&clip, &path).unwrap();
+    // Written under a temporary name and moved into place when complete.
+    assert!(
+        !clip_core::save::partial_path(&path).exists(),
+        "no .part left behind"
+    );
 
     let streams = ffprobe(&path, "stream=codec_type,codec_name,profile,start_time");
     let lines: Vec<_> = streams.lines().collect();
@@ -154,6 +159,10 @@ fn saves_last_n_seconds_as_mp4() {
         ..Default::default()
     };
     clip_core::export::render(&path, &edited, &edit, Encoder::X264, &cfg).unwrap();
+    assert!(
+        !clip_core::save::partial_path(&edited).exists(),
+        "no .part left behind"
+    );
     let streams = ffprobe(&edited, "stream=codec_name,codec_type");
     assert_eq!(
         streams.lines().collect::<Vec<_>>(),
@@ -227,6 +236,24 @@ fn fits_an_export_under_a_size_limit() {
     assert_eq!(video.lines().next().unwrap(), "854,480,30/1", "{video}");
     let duration: f64 = ffprobe(&out, "format=duration").trim().parse().unwrap();
     assert!((2.9..=3.1).contains(&duration), "duration {duration}");
+
+    // Cancelled (here before the first pass is done): neither the edit nor
+    // its temporary file is left; every pass renders under the temporary
+    // name, so a failure on a later pass can't leave an earlier one either.
+    let cancelled = dir.join("cancelled.mp4");
+    let control = clip_core::export::Control {
+        on_progress: None,
+        cancel: Some(std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
+            true,
+        ))),
+    };
+    let err =
+        clip_core::export::render_with(&source, &cancelled, &edit, Encoder::X264, &cfg, control)
+            .unwrap_err()
+            .to_string();
+    assert!(err.contains("cancelled"), "{err}");
+    assert!(!cancelled.exists());
+    assert!(!clip_core::save::partial_path(&cancelled).exists());
 
     // Far too small: refused up front, with how long would fit.
     let edit = clip_core::export::Edit {

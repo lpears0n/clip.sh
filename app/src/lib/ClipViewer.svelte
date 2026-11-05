@@ -4,6 +4,7 @@
 -->
 <script lang="ts">
   import { ArrowLeft, CircleHelp, Maximize, Minimize, Pause, Pencil, Play, Plus, Repeat, Star, Volume2, VolumeX, X } from '@lucide/svelte'
+  import { untrack } from 'svelte'
   import { getCurrentWindow } from '@tauri-apps/api/window'
   import { api, type Clip, type ClipPatch, type ExportPlan, videoUrl } from './api'
   import { size, timecode, trackName, when } from './format'
@@ -156,12 +157,17 @@
     idleTimer = setTimeout(() => (active = false), 2200)
   }
 
+  // Reset when a different clip is loaded, and only then: the parent swaps
+  // in a new clip object whenever this one is starred, renamed, labelled
+  // or its thumbnail arrives, which mustn't throw away a trim in progress.
+  let shownPath: string | null = null
   $effect(() => {
-    // Reset when a different clip is loaded.
-    clip.path
+    const path = clip.path
+    if (path === shownPath) return
+    shownPath = path
     trimming = false
     start = 0
-    end = clip.duration ?? 0
+    end = untrack(() => clip.duration) ?? 0
   })
 
   // Track count can arrive later (thumbnail pool); keep one level per track.

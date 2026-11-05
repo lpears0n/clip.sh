@@ -29,7 +29,7 @@ pub struct Marked {
     pub at: f64,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum State {
     /// Automatic capture isn't possible (e.g. not KDE); see `error`.
@@ -195,21 +195,35 @@ async fn run(
     let mut replay_seconds = replay_seconds;
     // The game being played and when its session started.
     let mut session: Option<(clip_core::game::Game, u64)> = None;
+    // What the page was last told, so a change it would show gets sent.
+    let mut shown: Option<Shown> = None;
 
     loop {
         tokio::select! {
             ev = events.recv() => {
                 let Some(ev) = ev else { break };
-                match auto.handle(ev).await {
+                let changed = match auto.handle(ev).await {
                     Ok(Some(change)) => {
                         if let Change::Started(g) = &change {
                             let _ = app.emit(RECORDING_STARTED, &g.name);
                         }
                         apply(change, &mut session);
-                        let _ = app.emit(STATUS_CHANGED, status(&auto, replay_seconds, session.as_ref()));
+                        true
                     }
-                    Ok(None) => {}
-                    Err(e) => tracing::error!("{e:#}"),
+                    Ok(None) => false,
+                    Err(e) => {
+                        tracing::error!("{e:#}");
+                        false
+                    }
+                };
+                // Also when nothing started or stopped: a capture that failed
+                // and is being retried (or came back) changes what the page
+                // shows, and it hears only through this event.
+                let now = status(&auto, replay_seconds, session.as_ref());
+                let key = Shown::of(&now);
+                if changed || shown.as_ref() != Some(&key) {
+                    shown = Some(key);
+                    let _ = app.emit(STATUS_CHANGED, now);
                 }
             }
             cmd = cmds.recv() => {
@@ -275,6 +289,32 @@ async fn run(
     }
     end_session(session.take());
     let _ = auto.shutdown().await;
+}
+
+/// The parts of [`Status`] the page shows that change without a game
+/// starting or stopping (the buffered length changes all the time and is
+/// left out).
+#[derive(PartialEq)]
+struct Shown {
+    state: State,
+    game: Option<String>,
+    encoder: Option<String>,
+    capture_path: Option<clip_core::CapturePath>,
+    error: Option<String>,
+    hdr_tonemapped: bool,
+}
+
+impl Shown {
+    fn of(s: &Status) -> Self {
+        Self {
+            state: s.state.clone(),
+            game: s.game.clone(),
+            encoder: s.encoder.clone(),
+            capture_path: s.capture_path,
+            error: s.error.clone(),
+            hdr_tonemapped: s.hdr_tonemapped,
+        }
+    }
 }
 
 /// Track play sessions as recording starts and stops.

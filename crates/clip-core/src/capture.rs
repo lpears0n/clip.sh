@@ -545,22 +545,55 @@ fn make_source(
     let CaptureTarget::Pipewire(target) = target;
     let src = gst::ElementFactory::make("pipewiresrc")
         .name("screen")
-        .property("do-timestamp", true)
-        // Compositors only send frames on damage; resend so static scenes
-        // still produce video.
-        .property("keepalive-time", 1000 / cfg.fps as i32);
+        .property("do-timestamp", true);
     let src = match target {
         PipewireTarget::Remote { fd, node_id } => {
             src.property("fd", fd).property("path", node_id.to_string())
         }
-        PipewireTarget::Serial(serial) => src.property("target-object", serial.to_string()),
+        PipewireTarget::Serial(_) => src,
     }
     .build()?;
+    if let PipewireTarget::Serial(serial) = target {
+        set_pipewire_target(&src, &serial.to_string());
+    }
+    // Compositors only send frames on damage; resend so static scenes
+    // still produce video. Newer pipewiresrc only (videorate covers the
+    // gaps without it), so set only where it exists.
+    crate::encoder::set(&src, "keepalive-time", 1000 / cfg.fps as i32);
     if path == CapturePath::ZeroCopy && src.has_property("always-copy") {
         // Copying can't map a DMA-BUF; it would hand out empty buffers.
         src.set_property("always-copy", false);
     }
     Ok(src)
+}
+
+/// Point a `pipewiresrc` at `target` (a node name, or an object serial).
+/// `target-object` is a newer property; a pipewiresrc without it gets the
+/// target in the stream's own properties instead (`target.object`, and
+/// `node.target`, which older session managers read). Never set blindly:
+/// the element builder panics on a property the element lacks.
+#[cfg(target_os = "linux")]
+pub(crate) fn set_pipewire_target(src: &gst::Element, target: &str) {
+    if src.has_property("target-object") {
+        src.set_property("target-object", target);
+    } else if src.has_property("stream-properties") {
+        let props = src.property::<Option<gst::Structure>>("stream-properties");
+        src.set_property("stream-properties", with_target(props, target));
+    } else {
+        tracing::warn!(
+            target,
+            "this pipewiresrc can't be pointed at a device; recording the default"
+        );
+    }
+}
+
+/// `props` (or empty ones) plus the stream properties that pick `target`.
+#[cfg(target_os = "linux")]
+fn with_target(props: Option<gst::Structure>, target: &str) -> gst::Structure {
+    let mut props = props.unwrap_or_else(|| gst::Structure::new_empty("props"));
+    props.set("target.object", target);
+    props.set("node.target", target);
+    props
 }
 
 /// `d3d11screencapturesrc` on the game's window, through Windows Graphics
@@ -640,6 +673,53 @@ mod tests {
     use gstreamer_video as gst_video;
 
     use super::*;
+
+    /// Without `target-object`, the target joins the stream properties
+    /// already set (desktop audio's `stream.capture.sink`).
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn older_pipewiresrc_gets_the_target_as_stream_properties() {
+        crate::init().unwrap();
+        let existing = gst::Structure::builder("props")
+            .field("stream.capture.sink", "true")
+            .build();
+        let props = with_target(Some(existing), "alsa_output.usb-headset");
+        assert_eq!(props.get::<&str>("stream.capture.sink").unwrap(), "true");
+        assert_eq!(
+            props.get::<&str>("target.object").unwrap(),
+            "alsa_output.usb-headset"
+        );
+        assert_eq!(
+            props.get::<&str>("node.target").unwrap(),
+            "alsa_output.usb-headset"
+        );
+        assert!(with_target(None, "42").has_field("target.object"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn newer_pipewiresrc_gets_target_object() {
+        crate::init().unwrap();
+        let Ok(src) = gst::ElementFactory::make("pipewiresrc").build() else {
+            eprintln!("no pipewiresrc here; skipped");
+            return;
+        };
+        set_pipewire_target(&src, "alsa_input.usb-mic");
+        if src.has_property("target-object") {
+            assert_eq!(
+                src.property::<Option<String>>("target-object").as_deref(),
+                Some("alsa_input.usb-mic")
+            );
+        } else {
+            let props = src
+                .property::<Option<gst::Structure>>("stream-properties")
+                .unwrap();
+            assert_eq!(
+                props.get::<&str>("target.object").unwrap(),
+                "alsa_input.usb-mic"
+            );
+        }
+    }
 
     /// 1 s of 30 fps frames, a 3 s pause, 1 s more: the pause must not come
     /// out as ~90 filler frames.

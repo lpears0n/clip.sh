@@ -258,8 +258,13 @@
     refreshUsage()
   }
 
-  /** Only library clips carry user metadata; opened files are read-only. */
-  const inLibrary = (c: Clip) => !!settings && c.path.startsWith(settings.clips_dir + '/')
+  /** Only library clips carry user metadata; opened files are read-only.
+   *  Either separator: Windows paths use backslashes. */
+  const inLibrary = (c: Clip) => {
+    if (!settings) return false
+    const dir = settings.clips_dir.replace(/[\\/]+$/, '')
+    return c.path.startsWith(dir) && /[\\/]/.test(c.path.charAt(dir.length))
+  }
 
   /** Title, favourite or labels. Applies optimistically, then takes the
    *  server's tidied version. */
@@ -381,7 +386,7 @@
         refreshLibrary()
       }),
       onClipSaved((path) => {
-        notify(`Saved ${path.split('/').pop()}`)
+        notify(`Saved ${path.split(/[\\/]/).pop()}`)
         flash = true
         setTimeout(() => (flash = false), 400)
         refreshLibrary()

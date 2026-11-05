@@ -75,12 +75,15 @@ pub struct Policy {
     pub limit_bytes: Option<u64>,
     /// Never auto-delete clips made in the trimmer.
     pub protect_edits: bool,
+    /// Never auto-delete starred clips.
+    pub protect_favorites: bool,
     /// Move to the desktop trash instead of deleting outright.
     pub use_trash: bool,
 }
 
 /// Remove the oldest clips until the library fits the limit. The newest clip
-/// is never removed, even if it alone exceeds the limit. Returns what was
+/// is never removed, even if it alone exceeds the limit, and neither are
+/// the edits and starred clips the policy protects. Returns what was
 /// removed.
 pub fn enforce(clips_dir: &Path, policy: Policy) -> Result<Vec<PathBuf>> {
     let Some(limit) = policy.limit_bytes else {
@@ -101,7 +104,18 @@ pub fn enforce(clips_dir: &Path, policy: Policy) -> Result<Vec<PathBuf>> {
         if Some(&f.path) == newest.as_ref() || (policy.protect_edits && f.is_edit) {
             continue;
         }
-        remove(clips_dir, &f, policy.use_trash)?;
+        // A sidecar that can't be read right now might say "starred":
+        // only a clip known not to be starred may go.
+        if policy.protect_favorites && library::is_favorite(&f.path) != Some(false) {
+            continue;
+        }
+        // One clip that can't go (open in another app, read-only) mustn't
+        // stop the rest: it would be first in line again after every save,
+        // and the limit would never be kept.
+        if let Err(e) = remove(clips_dir, &f, policy.use_trash) {
+            tracing::warn!("storage limit: can't remove {}: {e:#}", f.path.display());
+            continue;
+        }
         total -= f.size;
         removed.push(f.path);
     }
@@ -158,6 +172,7 @@ mod tests {
         Policy {
             limit_bytes: limit,
             protect_edits,
+            protect_favorites: true,
             use_trash: false,
         }
     }
@@ -200,6 +215,38 @@ mod tests {
         let root = library();
         let removed = enforce(&root, policy(Some(500), false)).unwrap();
         assert_eq!(names(&removed), ["a", "b_edit"], "newest is always kept");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn keeps_starred_clips_unless_told_not_to() {
+        let star = |root: &Path, name: &str| {
+            let meta = library::ClipMeta {
+                game: "Game".into(),
+                favorite: true,
+                ..Default::default()
+            };
+            library::write_meta(&root.join("Game").join(format!("{name}.mp4")), &meta).unwrap();
+        };
+        // The oldest is starred: the next oldest goes instead.
+        let root = library();
+        star(&root, "a");
+        let removed = enforce(&root, policy(Some(2000), false)).unwrap();
+        assert_eq!(names(&removed), ["b_edit"]);
+
+        let root = library();
+        star(&root, "a");
+        let unprotected = Policy {
+            protect_favorites: false,
+            ..policy(Some(2000), false)
+        };
+        assert_eq!(names(&enforce(&root, unprotected).unwrap()), ["a"]);
+
+        // A sidecar that can't be read might say starred: the clip stays.
+        let root = library();
+        std::fs::write(root.join("Game").join("a.mp4.json"), "{\"favo").unwrap();
+        let removed = enforce(&root, policy(Some(2000), false)).unwrap();
+        assert_eq!(names(&removed), ["b_edit"]);
         std::fs::remove_dir_all(root).unwrap();
     }
 }
