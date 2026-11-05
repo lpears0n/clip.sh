@@ -320,8 +320,10 @@ Ad slots: AdSlot component, off unless `"ads": true` in settings.json (728×90 u
 - **v1.0.0 is published** (2026-11-04), tagged on `1a8c275` (the #15
   merge), with the updater: `latest.json` plus `.sig` for every bundle.
   It predates #16–#19, so installed 1.0.0 still shows the clip.sh
-  wordmark, Tauri's icon and the system frame. v1.1.0 (branch
-  `release-1.1.0`) ships those and is the first test of self-update.
+  wordmark, Tauri's icon and the system frame. v1.1.0 (never tagged
+  until now) ships those plus #19–#22 (share/edit features, meters,
+  copy cleanup) and is the first test of self-update. No 1.1.1: patch
+  numbers are for fixes on top of a released version.
   Release steps: bump the version in Cargo.toml, app/package.json,
   tauri.conf.json and the two `clip-ipc` version pins; add
   `docs/release-notes/v<version>.md`; merge; tag on `main`; publish the
