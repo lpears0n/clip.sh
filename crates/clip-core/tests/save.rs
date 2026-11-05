@@ -108,6 +108,11 @@ fn saves_last_n_seconds_as_mp4() {
     let dir = std::env::temp_dir().join(format!("reruns-test-{}", std::process::id()));
     let path = dir.join("clip.mp4");
     write_mp4(&clip, &path).unwrap();
+    // Written under a temporary name and moved into place when complete.
+    assert!(
+        !clip_core::save::partial_path(&path).exists(),
+        "no .part left behind"
+    );
 
     let streams = ffprobe(&path, "stream=codec_type,codec_name,profile,start_time");
     let lines: Vec<_> = streams.lines().collect();
@@ -154,6 +159,10 @@ fn saves_last_n_seconds_as_mp4() {
         ..Default::default()
     };
     clip_core::export::render(&path, &edited, &edit, Encoder::X264, &cfg).unwrap();
+    assert!(
+        !clip_core::save::partial_path(&edited).exists(),
+        "no .part left behind"
+    );
     let streams = ffprobe(&edited, "stream=codec_name,codec_type");
     assert_eq!(
         streams.lines().collect::<Vec<_>>(),

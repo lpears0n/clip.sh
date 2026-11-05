@@ -329,6 +329,9 @@ async function runScenario(scenario, browser) {
   await page.keyboard.press('i')
   await seekTo(4.5)
   await page.keyboard.press('o')
+  // Starring mid-trim (a new clip object from the page) keeps the trim.
+  await page.keyboard.press('s')
+  await page.waitForTimeout(200)
   await seekTo(2.5)
   await page.waitForTimeout(200)
   await shot('viewer-trim')

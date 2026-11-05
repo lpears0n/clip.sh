@@ -129,7 +129,10 @@ pub fn update_meta(clips_dir: &Path, path: &Path, patch: MetaPatch) -> Result<Cl
     meta.apply(patch);
     write_meta(&target, &meta)?;
     let game = meta.game.clone();
-    load(&target, &game)
+    // Under the path the page knows it by: the canonical one can differ
+    // (`\\?\C:\…` on Windows, a resolved symlink), and the page matches
+    // clips by path.
+    load(path, &game)
 }
 
 /// Give a rendered edit the same metadata as its source.
@@ -355,7 +358,7 @@ pub fn edit_path(clips_dir: &Path, source: &Path) -> PathBuf {
             format!("edit{n}")
         };
         let p = dir.join(format!("{stem}_{suffix}.mp4"));
-        if !p.exists() {
+        if !p.exists() && !clip_core::save::partial_path(&p).exists() {
             return p;
         }
         n += 1;

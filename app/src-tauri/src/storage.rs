@@ -101,7 +101,13 @@ pub fn enforce(clips_dir: &Path, policy: Policy) -> Result<Vec<PathBuf>> {
         if Some(&f.path) == newest.as_ref() || (policy.protect_edits && f.is_edit) {
             continue;
         }
-        remove(clips_dir, &f, policy.use_trash)?;
+        // One clip that can't go (open in another app, read-only) mustn't
+        // stop the rest: it would be first in line again after every save,
+        // and the limit would never be kept.
+        if let Err(e) = remove(clips_dir, &f, policy.use_trash) {
+            tracing::warn!("storage limit: can't remove {}: {e:#}", f.path.display());
+            continue;
+        }
         total -= f.size;
         removed.push(f.path);
     }

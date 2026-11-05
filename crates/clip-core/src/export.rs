@@ -393,7 +393,7 @@ fn render_once(
         .property("faststart", true)
         .build()?;
     let sink = gst::ElementFactory::make("filesink")
-        .property("location", output)
+        .property("location", crate::save::partial_path(output))
         .build()?;
     pipeline.add_many([&dec, &mux, &sink])?;
     mux.link(&sink)?;
@@ -571,10 +571,16 @@ fn render_once(
         Some(e) => result.and(Err(anyhow::anyhow!(e))),
         None => result,
     };
-    if result.is_err() {
-        let _ = std::fs::remove_file(output);
-    }
-    result
+    // Written under a temporary name: the edit only appears once complete.
+    crate::save::finish_partial(output, result)
+}
+
+/// How long a render may take before it is taken for stuck: ten minutes,
+/// or ten times the output's length for long ones (a ten-minute replay
+/// encoded in software, or in slow motion, takes a good while longer than
+/// ten minutes on a slower PC).
+fn render_time_limit(output: gst::ClockTime) -> Duration {
+    Duration::from_secs(600).max(Duration::from_nanos(output.nseconds()) * 10)
 }
 
 /// Play to EOS, reporting position as progress and stopping on cancel.
@@ -582,6 +588,7 @@ fn run(pipeline: &gst::Pipeline, edit: &Edit, control: &Control) -> Result<()> {
     let bus = pipeline.bus().context("no bus")?;
     let span = edit.output_duration().nseconds().max(1) as f64;
     let started = std::time::Instant::now();
+    let limit = render_time_limit(edit.output_duration());
     loop {
         if control
             .cancel
@@ -609,7 +616,7 @@ fn run(pipeline: &gst::Pipeline, edit: &Edit, control: &Control) -> Result<()> {
                 }
             },
             None => {
-                if started.elapsed() > Duration::from_secs(600) {
+                if started.elapsed() > limit {
                     bail!("timed out rendering");
                 }
                 if let Some(f) = &control.on_progress
@@ -657,6 +664,14 @@ mod tests {
     use super::*;
 
     const MB: u64 = 1_000_000;
+
+    #[test]
+    fn long_renders_get_time_in_proportion() {
+        let secs = |s: u64| gst::ClockTime::from_seconds(s);
+        assert_eq!(render_time_limit(secs(30)), Duration::from_secs(600));
+        // A 10-minute replay at quarter speed: 40 minutes of output.
+        assert_eq!(render_time_limit(secs(2400)), Duration::from_secs(24_000));
+    }
 
     #[test]
     fn short_clips_keep_a_high_class() {

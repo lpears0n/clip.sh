@@ -12,7 +12,33 @@ use crate::{
     ring::{Clip, ClipTrack},
 };
 
-/// Write `clip` to `path` as MP4 (faststart). Blocks until the file is done.
+/// Where a file is written until it is complete: `<file>.part`, next to
+/// it. With faststart the muxer writes nothing until the very end, so the
+/// final name would otherwise sit there empty for the whole save or render,
+/// and the library, folder watcher, thumbnailer and storage limit (which
+/// all look for `.mp4`) would pick up a clip that isn't there yet.
+pub fn partial_path(path: &Path) -> PathBuf {
+    let mut p = path.as_os_str().to_owned();
+    p.push(".part");
+    PathBuf::from(p)
+}
+
+/// Finish a file written to [`partial_path`]`(path)`: on success move it
+/// into place (replacing what was there), otherwise remove it.
+pub fn finish_partial(path: &Path, result: Result<()>) -> Result<()> {
+    let partial = partial_path(path);
+    let result = result.and_then(|()| {
+        std::fs::rename(&partial, path)
+            .with_context(|| format!("moving {} into place", path.display()))
+    });
+    if result.is_err() {
+        let _ = std::fs::remove_file(&partial);
+    }
+    result
+}
+
+/// Write `clip` to `path` as MP4 (faststart). Blocks until the file is done;
+/// `path` only appears once it is complete.
 pub fn write_mp4(clip: &Clip, path: &Path) -> Result<()> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
@@ -23,7 +49,7 @@ pub fn write_mp4(clip: &Clip, path: &Path) -> Result<()> {
         .property("faststart", true)
         .build()?;
     let sink = gst::ElementFactory::make("filesink")
-        .property("location", path)
+        .property("location", partial_path(path))
         .build()?;
     pipeline.add_many([&mux, &sink])?;
     mux.link(&sink)?;
@@ -62,11 +88,10 @@ pub fn write_mp4(clip: &Clip, path: &Path) -> Result<()> {
         },
         None => Err(anyhow::anyhow!("timed out writing {}", path.display())),
     };
-    pipeline.set_state(gst::State::Null)?;
-    if result.is_err() {
-        let _ = std::fs::remove_file(path);
-    }
-    result
+    // Stopped before the rename: the sink closes the file (Windows can't
+    // move a file that is still open).
+    let stopped = pipeline.set_state(gst::State::Null).map(drop);
+    finish_partial(path, result.and(stopped.map_err(Into::into)))
 }
 
 fn add_track(
@@ -105,7 +130,7 @@ fn media_path(root: &Path, folder: &str, ext: &str) -> PathBuf {
     let stamp = chrono::Local::now().format("%Y-%m-%d_%H-%M-%S").to_string();
     let mut path = dir.join(format!("{stamp}.{ext}"));
     let mut n = 2;
-    while path.exists() {
+    while path.exists() || partial_path(&path).exists() {
         path = dir.join(format!("{stamp}_{n}.{ext}"));
         n += 1;
     }

@@ -64,8 +64,9 @@ pub struct AutoRecorder {
     /// The game whose recording is being restarted (after a failure or a
     /// new window): starting it again continues its play session.
     resume: Option<Game>,
-    /// HDR window capture failed while recording; the screen-area HDR
-    /// capture is used instead until the app restarts.
+    /// HDR window capture failed; until the app restarts the game window
+    /// is recorded without tone mapping (never the screen area, which would
+    /// bring overlays and other windows into clips).
     hdr_window_broken: bool,
     /// Encoders that passed the probe but kept failing while recording
     /// (NVENC refusing a session, say); skipped until the app restarts.
@@ -168,7 +169,8 @@ impl AutoRecorder {
                 self.blame_encoder(encoder, &failure);
                 if hdr_window && !self.hdr_window_broken {
                     tracing::warn!(
-                        "HDR window capture failed; using the screen-area HDR capture from now on"
+                        "HDR window capture failed; recording the game window without tone \
+                         mapping until Reruns restarts"
                     );
                     self.hdr_window_broken = true;
                 }
@@ -280,8 +282,9 @@ impl AutoRecorder {
                 peak_nits = h.peak_nits,
                 "the game's display is in HDR; capturing with tone mapping (HDR compatibility)"
             );
-            // The window itself in HDR first (experimental), then the
-            // window's area of the screen, then plain window capture.
+            // With HDR window capture on: the window in HDR (experimental),
+            // else the plain window. Otherwise the window's area of the
+            // screen, tone-mapped, else the plain window.
             let mut started = None;
             if cfg.hdr_window && !self.hdr_window_broken {
                 let target = Target {
@@ -297,7 +300,9 @@ impl AutoRecorder {
                         started = Some(r);
                     }
                     Err(e) => {
-                        tracing::warn!("HDR window capture failed, using the screen area: {e:#}");
+                        tracing::warn!(
+                            "HDR window capture failed; recording the window without tone mapping: {e:#}"
+                        );
                         self.hdr_window_broken = true;
                     }
                 }

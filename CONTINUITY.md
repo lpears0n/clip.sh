@@ -383,6 +383,41 @@ Ad slots: AdSlot component, off unless `"ads": true` in settings.json (728×90 u
   `webp` or `fdkaac` plugin; thumbnails already fall back to JPEG and
   audio to `avenc_aac`. Rule: a new `ElementFactory::make("x")` needs
   its plugin in `$plugins` and the element in `$required`.
+- **Bug sweep (2026-11-05), fixed:**
+  - Windows: the viewer's rename/star/labels were disabled for every
+    clip (`inLibrary` compared against `clips_dir + '/'`); the "Saved"
+    toast showed the whole path. Both now take either separator.
+  - Starring, renaming or labelling a clip mid-trim, or its thumbnail
+    arriving, reset the trim: the viewer's reset effect re-ran on every
+    new clip object. It now resets only when the path changes
+    (`tests/ui.cjs` stars mid-trim).
+  - Clips and edits are written to `<file>.mp4.part` and renamed when
+    complete (`save::partial_path`/`finish_partial`). With faststart
+    the file sat at 0 bytes until the end, so the watcher's refresh had
+    the thumbnailer fail on it and never retry: edits (long encodes)
+    showed no thumbnail or duration until restart. The thumbnailer now
+    also retries a failed file once its size or mtime changes.
+  - The page only heard status on start/stop: a capture failure
+    (Retrying) or recovery wasn't shown until the window was refocused.
+    `service.rs` now emits whenever state/game/encoder/error/path change.
+  - Windows hotkeys: binding a key Windows refused unregistered the old
+    one first, leaving the action with no hotkey until restart.
+  - Storage limit: one clip that couldn't be removed stopped the rest
+    (and was first in line again after every save).
+  - Renders had a flat 10-minute timeout; now max(10 min, 10× output).
+  - `update_clip` answered with the canonical path (`\\?\C:\…`), which
+    the page didn't match, so its tidied title/labels were dropped.
+  - Stale HDR log lines (window capture falls back to the plain window
+    since 1.1.1, not the screen area).
+- **Found, not changed (decisions or low value):** the storage limit
+  deletes starred clips too ("Oldest clips go first"); settings.json is
+  written in place and parsed all-or-nothing (one bad field resets
+  everything); `start_audio_meters` is a sync command, so device
+  enumeration runs on the main thread; KWin capture and a picked
+  Linux audio device set pipewiresrc `target-object`, a newer
+  property (unverified which PipeWire added it; the element builder
+  panics on a missing property, `encoder::set` doesn't); seeking the export pipeline
+  logs a harmless GStreamer-CRITICAL from mp4mux's byte segment.
 - Deep-dive backlog, not done yet, best first: apply recording settings to the running capture instead of
   "from the next game"; unload the webview while hidden in the tray
   (~100–250 MB during games); make HDR window capture the default once

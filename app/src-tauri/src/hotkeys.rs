@@ -144,7 +144,10 @@ mod imp {
             (!self.registered.lock().unwrap().is_empty()).then_some(Backend::Native)
         }
 
-        /// Bind `action` to `keys` (empty unbinds it).
+        /// Bind `action` to `keys` (empty unbinds it). On failure the old
+        /// binding stays: the new key is checked and registered before the
+        /// old one is let go, so a key Windows refuses doesn't leave the
+        /// action with none.
         pub async fn set_keys(
             &self,
             app: &AppHandle,
@@ -153,6 +156,23 @@ mod imp {
         ) -> Result<(), String> {
             let gs = app.global_shortcut();
             let mut current = self.registered.lock().unwrap();
+            let new: Option<Shortcut> = if keys.trim().is_empty() {
+                None
+            } else {
+                let shortcut: Shortcut = super::to_plugin_syntax(keys)
+                    .parse()
+                    .map_err(|e| format!("can't use {keys}: {e}"))?;
+                match current.get(&shortcut) {
+                    Some(a) if *a == action => return Ok(()),
+                    Some(_) => {
+                        return Err(format!("{keys} is already used by another Reruns hotkey"));
+                    }
+                    None => {}
+                }
+                gs.register(shortcut)
+                    .map_err(|e| format!("Windows refused {keys}: {e} (another app may own it)"))?;
+                Some(shortcut)
+            };
             let old: Vec<Shortcut> = current
                 .iter()
                 .filter(|(_, a)| **a == action)
@@ -162,18 +182,9 @@ mod imp {
                 let _ = gs.unregister(s);
                 current.remove(&s);
             }
-            if keys.trim().is_empty() {
-                return Ok(());
+            if let Some(shortcut) = new {
+                current.insert(shortcut, action);
             }
-            let shortcut: Shortcut = super::to_plugin_syntax(keys)
-                .parse()
-                .map_err(|e| format!("can't use {keys}: {e}"))?;
-            if current.contains_key(&shortcut) {
-                return Err(format!("{keys} is already used by another Reruns hotkey"));
-            }
-            gs.register(shortcut)
-                .map_err(|e| format!("Windows refused {keys}: {e} (another app may own it)"))?;
-            current.insert(shortcut, action);
             Ok(())
         }
     }
