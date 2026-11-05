@@ -3,9 +3,8 @@
 //! Detection itself is per platform (`/proc` here, window walking in
 //! `win::game`); the Steam library lookups are shared.
 
-#[cfg(target_os = "linux")]
-use std::path::Path;
-use std::{fs, path::PathBuf};
+use std::fs;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct Game {
