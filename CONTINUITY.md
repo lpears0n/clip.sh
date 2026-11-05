@@ -370,6 +370,19 @@ Ad slots: AdSlot component, off unless `"ads": true` in settings.json (728×90 u
     `?retry=n` when the next listing arrives (App calls
     `retryFailedArt()`). The asset protocol reads only the path, so
     the query just forces a new request; loaded art isn't refetched.
+- **Windows bundle was missing `level` and `audiorate`** (user report:
+  Settings → Audio meters showed "Can't open: level element missing").
+  `scripts/collect-gstreamer.ps1` bundles an allow-list of plugins, and
+  #21 (meters, slow motion) added two elements without adding their
+  plugins: `level` (meters) and `audiorate` (every audio track in an
+  export, so exports with audio also failed on Windows). Both are now
+  bundled and in the script's required list. Checked against the
+  1.26.9 MSVC runtime MSI that the release installs: `gstlevel.dll` is
+  in the effects module (with `gstvideocrop.dll`) and `gstaudiorate.dll`
+  in the core module; both install by default. That runtime has no
+  `webp` or `fdkaac` plugin; thumbnails already fall back to JPEG and
+  audio to `avenc_aac`. Rule: a new `ElementFactory::make("x")` needs
+  its plugin in `$plugins` and the element in `$required`.
 - Deep-dive backlog, not done yet, best first: apply recording settings to the running capture instead of
   "from the next game"; unload the webview while hidden in the tray
   (~100–250 MB during games); make HDR window capture the default once
