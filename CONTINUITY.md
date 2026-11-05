@@ -442,6 +442,12 @@ Ad slots: AdSlot component, off unless `"ads": true` in settings.json (728×90 u
   tauri.conf.json and the two `clip-ipc` version pins; add
   `docs/release-notes/v<version>.md`; merge; tag on `main`; publish the
   draft.
+- **v1.1.2 prepared** (2026-11-05): the Windows bundle fix and the bug
+  sweep above, notes in `docs/release-notes/v1.1.2.md`. After the PR
+  merges: tag `v1.1.2` on `main`, then check the Windows build log says
+  "all 39 required elements load from the bundle" before publishing.
+  Not yet seen working on Windows: the meters, the hotkey change and the
+  HDR log text (CI builds them; nothing here runs Windows).
 
 ## Next, in order
 1. v1.0.0: owner adds the updater key secrets (`docs/RELEASING.md`), then
