@@ -60,7 +60,7 @@ function fixtures(scenario) {
       replay_seconds: 30, mic: true, clips_dir: '/home/u/Videos/Reruns', hotkey: 'F8', screenshot_hotkey: 'F9', marker_hotkey: 'F7', capture_backend: null,
       launch_at_login: false, start_in_tray: true, close_to_tray: true, notify_on_save: true, sound_on_save: true, sound_volume: 100, clip_sound: { kind: 'builtin' }, screenshot_sound: null, overlay: true, check_for_updates: true,
       fps: 60, bitrate_kbps: 20000, codec: 'h264', encoder: null, cursor: true, zero_copy: true, hdr_compatibility: false, hdr_window_capture: false, ignored_games: [], desktop_audio: true, desktop_device: 'out-headset',
-      mic_device: null, audio_bitrate_kbps: 160, storage_limit_gb: 25, protect_edits: true, use_trash: true, ads: false,
+      mic_device: null, audio_bitrate_kbps: 160, storage_limit_gb: 25, protect_edits: true, protect_favorites: true, use_trash: true, ads: false,
     },
     list_clips: empty ? [] : clips,
     list_games: empty ? [] : games,
@@ -398,6 +398,15 @@ async function runScenario(scenario, browser) {
   await page.waitForTimeout(250) // let the switch finish moving before the shot
   assert.equal(await page.getByRole('switch', { name: 'Capture the window in HDR' }).getAttribute('aria-checked'), 'true', 'HDR window capture on')
   await shot('settings-recording-windows')
+  // Storage: starred clips are kept by the limit unless turned off.
+  await page.getByRole('button', { name: 'Storage', exact: true }).click()
+  const starred = page.getByRole('switch', { name: 'Protect starred clips' })
+  assert.equal(await starred.getAttribute('aria-checked'), 'true', 'starred clips protected by default')
+  await starred.click()
+  await page.waitForFunction(
+    () => document.querySelector('[role="switch"][aria-label="Protect starred clips"]').getAttribute('aria-checked') === 'false',
+  )
+  await starred.click()
   // Capture failing mid-game: the header says so instead of "waiting".
   await page.evaluate(
     (s) => window[`_${window.__listeners['status-changed']}`]({ event: 'status-changed', id: 1, payload: s }),

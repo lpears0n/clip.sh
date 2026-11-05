@@ -409,15 +409,23 @@ Ad slots: AdSlot component, off unless `"ads": true` in settings.json (728×90 u
     the page didn't match, so its tidied title/labels were dropped.
   - Stale HDR log lines (window capture falls back to the plain window
     since 1.1.1, not the screen area).
-- **Found, not changed (decisions or low value):** the storage limit
-  deletes starred clips too ("Oldest clips go first"); settings.json is
-  written in place and parsed all-or-nothing (one bad field resets
-  everything); `start_audio_meters` is a sync command, so device
-  enumeration runs on the main thread; KWin capture and a picked
-  Linux audio device set pipewiresrc `target-object`, a newer
-  property (unverified which PipeWire added it; the element builder
-  panics on a missing property, `encoder::set` doesn't); seeking the export pipeline
-  logs a harmless GStreamer-CRITICAL from mp4mux's byte segment.
+- **Follow-ups, also fixed:**
+  - Storage limit keeps starred clips (`protect_favorites`, on by
+    default, Settings → Storage), read from each clip's sidecar.
+  - settings.json is saved through a temp file + rename, and read
+    field by field over the defaults: one bad field keeps its default
+    instead of resetting everything; text that isn't JSON is copied to
+    `settings.json.bad` first.
+  - Audio meters start/stop as async commands (device work in
+    `spawn_blocking`), serialized by a tokio mutex so old meters close
+    before new ones open and a stop during a start still wins.
+  - pipewiresrc: `target-object` only where the element has it (else
+    `target.object`/`node.target` in `stream-properties`), and
+    `keepalive-time` through `encoder::set`. The element builder panics
+    on a property the element lacks; never set optional ones through it.
+- Left alone: seeking the export pipeline logs a harmless
+  GStreamer-CRITICAL (mp4mux's output segment is in bytes; the seek
+  still reaches the decoder).
 - Deep-dive backlog, not done yet, best first: apply recording settings to the running capture instead of
   "from the next game"; unload the webview while hidden in the tray
   (~100–250 MB during games); make HDR window capture the default once

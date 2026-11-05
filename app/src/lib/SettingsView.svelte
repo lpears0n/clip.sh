@@ -775,6 +775,18 @@
               onchange={(protect_edits) => update({ protect_edits })}
             />
           </Row>
+          <Row
+            title="Protect starred clips"
+            description="Never remove clips you starred."
+            disabled={settings.storage_limit_gb == null}
+          >
+            <Toggle
+              label="Protect starred clips"
+              disabled={settings.storage_limit_gb == null}
+              checked={settings.protect_favorites}
+              onchange={(protect_favorites) => update({ protect_favorites })}
+            />
+          </Row>
           <Row title="Move deleted clips to Trash">
             <Toggle label="Move deleted clips to Trash" checked={settings.use_trash} onchange={(use_trash) => update({ use_trash })} />
           </Row>

@@ -126,6 +126,7 @@ export interface Settings {
   audio_bitrate_kbps: number
   storage_limit_gb: number | null
   protect_edits: boolean
+  protect_favorites: boolean
   use_trash: boolean
   ads: boolean
 }

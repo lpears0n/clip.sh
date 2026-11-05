@@ -46,8 +46,11 @@ pub(crate) struct AppState {
     thumbs: thumbs::Thumbnailer,
     /// Folder watcher for the current clips folder; replaced when it changes.
     watcher: Mutex<Option<watcher::Handle>>,
-    /// Live audio levels while Settings → Audio is open.
-    meter: Mutex<Option<clip_core::meter::Meter>>,
+    /// Live audio levels while Settings → Audio is open. Starts and stops
+    /// take turns (an async lock, held across the device work): old meters
+    /// close their devices before new ones open them, and a stop that
+    /// arrives while meters are starting removes them once they have.
+    meter: tokio::sync::Mutex<Option<clip_core::meter::Meter>>,
     /// Kept open: on Linux the copied file list is served by this process
     /// for as long as the clipboard object lives.
     clipboard: Mutex<Option<arboard::Clipboard>>,
@@ -82,36 +85,49 @@ struct AudioLevel {
 }
 
 /// Start (or restart, after a device change) the level meters for the
-/// audio tracks the current settings would record.
+/// audio tracks the current settings would record. Off the main thread:
+/// listing and opening audio devices can take a moment, which froze the
+/// window as the Audio page opened.
 #[tauri::command]
-fn start_audio_meters(app: AppHandle, state: State<'_, AppState>) -> CmdResult<()> {
+async fn start_audio_meters(app: AppHandle, state: State<'_, AppState>) -> CmdResult<()> {
+    let mut slot = state.meter.lock().await;
     let sources = state.settings.lock().unwrap().recorder_config().audio;
     let names: Vec<&'static str> = sources.iter().map(|s| s.name()).collect();
-    // The old meters close their devices before the new ones open them.
-    state.meter.lock().unwrap().take();
-    let meter = clip_core::meter::Meter::start(&sources, move |r| {
-        let level = match r {
-            clip_core::meter::Reading::Level { index, peak_db } => AudioLevel {
-                track: names[index],
-                peak_db: Some(peak_db),
-                error: None,
-            },
-            clip_core::meter::Reading::Failed { index, error } => AudioLevel {
-                track: names[index],
-                peak_db: None,
-                error: Some(error),
-            },
-        };
-        let _ = app.emit("audio-level", level);
+    let old = slot.take();
+    let meter = tauri::async_runtime::spawn_blocking(move || {
+        // The old meters close their devices before the new ones open them.
+        drop(old);
+        clip_core::meter::Meter::start(&sources, move |r| {
+            let level = match r {
+                clip_core::meter::Reading::Level { index, peak_db } => AudioLevel {
+                    track: names[index],
+                    peak_db: Some(peak_db),
+                    error: None,
+                },
+                clip_core::meter::Reading::Failed { index, error } => AudioLevel {
+                    track: names[index],
+                    peak_db: None,
+                    error: Some(error),
+                },
+            };
+            let _ = app.emit("audio-level", level);
+        })
     })
+    .await
+    .map_err(err)?
     .map_err(|e| format!("{e:#}"))?;
-    *state.meter.lock().unwrap() = Some(meter);
+    *slot = Some(meter);
     Ok(())
 }
 
 #[tauri::command]
-fn stop_audio_meters(state: State<'_, AppState>) {
-    state.meter.lock().unwrap().take();
+async fn stop_audio_meters(state: State<'_, AppState>) -> CmdResult<()> {
+    let mut slot = state.meter.lock().await;
+    if let Some(m) = slot.take() {
+        // Off the async runtime: closing devices can block.
+        let _ = tauri::async_runtime::spawn_blocking(move || drop(m)).await;
+    }
+    Ok(())
 }
 
 /// Emitted a few times a second while an edit renders.
@@ -788,7 +804,7 @@ pub fn run() {
                 render_cancel: Arc::default(),
                 thumbs: thumbs::Thumbnailer::start(app.handle().clone()),
                 watcher: Mutex::new(None),
-                meter: Mutex::new(None),
+                meter: tokio::sync::Mutex::new(None),
                 clipboard: Mutex::new(None),
             });
             // Windows: the app's header is the title bar (its own minimize,
