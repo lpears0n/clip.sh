@@ -58,7 +58,7 @@ pub(crate) struct AppState {
 #[tauri::command]
 fn copy_clip(state: State<'_, AppState>, path: PathBuf) -> CmdResult<()> {
     if !path.is_file() {
-        return Err("that clip isn't there any more".into());
+        return Err("clip not found".into());
     }
     let mut clipboard = state.clipboard.lock().unwrap();
     if clipboard.is_none() {

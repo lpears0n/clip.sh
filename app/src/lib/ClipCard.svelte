@@ -179,7 +179,7 @@
             e.stopPropagation()
             oncopy()
           }}
-          title="Copy, then paste into Discord or a folder"
+          title="Copy"
           aria-label="Copy clip"
         >
           <Copy size={16} />

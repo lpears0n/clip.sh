@@ -81,7 +81,7 @@ pub fn duration(path: &Path) -> Result<gst::ClockTime> {
         ) {
             Some(msg) => {
                 if let gst::MessageView::Error(e) = msg.view() {
-                    bail!("not a sound Reruns can play ({})", e.error());
+                    bail!("not a playable sound ({})", e.error());
                 }
             }
             None => bail!("timed out reading the file"),
@@ -98,10 +98,7 @@ pub fn duration(path: &Path) -> Result<gst::ClockTime> {
 pub fn validate(path: &Path) -> Result<gst::ClockTime> {
     let d = duration(path)?;
     if d > gst::ClockTime::from_seconds(MAX_SECONDS) {
-        bail!(
-            "that sound is {:.0} seconds long; pick one of {MAX_SECONDS} seconds or less",
-            d.seconds_f64()
-        );
+        bail!("too long ({:.0} s); {MAX_SECONDS} s max", d.seconds_f64());
     }
     Ok(d)
 }
@@ -171,7 +168,7 @@ mod tests {
         assert!(validate(&text).is_err());
         let long = tone(&dir, "long.wav", "wavenc", MAX_SECONDS as f64 + 1.0);
         let err = validate(&long).unwrap_err().to_string();
-        assert!(err.contains("seconds or less"), "{err}");
+        assert!(err.contains("s max"), "{err}");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

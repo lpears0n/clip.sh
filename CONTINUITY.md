@@ -307,6 +307,11 @@ Ad slots: AdSlot component, off unless `"ads": true` in settings.json (728×90 u
   `PadProbeReturn::Handled` — returning Drop there made GStreamer unref a
   buffer gstreamer-rs had taken). Clipboard and drag need a desktop: not
   exercised in CI.
+- Copy cleanup (branch `plain-copy`): every visible string cut to the
+  rules in `docs/DESIGN.md` §2.8 (no description where the label says it,
+  one short sentence for side effects only, no reassurance or "so that"
+  tails, toasts say what happened). Settings descriptions went from ~820
+  words to ~217. Follow §2.8 for any new text.
 - Deep-dive backlog, not done yet, best first: apply recording settings to the running capture instead of
   "from the next game"; unload the webview while hidden in the tray
   (~100–250 MB during games); make HDR window capture the default once

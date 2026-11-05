@@ -228,7 +228,7 @@ pub fn plan_size(max_bytes: u64, seconds: f64, audio: bool) -> Result<SizePlan> 
         let floor = MIN_VIDEO_KBPS + if audio { MIN_AUDIO_KBPS } else { 0 };
         let longest = max_bytes as f64 * 8.0 * SIZE_MARGIN / (floor as f64 * 1000.0);
         bail!(
-            "too long to fit in {}: trim it to under {}",
+            "too long for {}; trim to under {}",
             mb(max_bytes),
             minutes(longest)
         );
@@ -370,10 +370,7 @@ pub fn render_with(
         plan.video_kbps = scaled as u32;
     }
     let _ = std::fs::remove_file(output);
-    bail!(
-        "couldn't fit the clip in {}; trim it shorter",
-        mb(max_bytes)
-    )
+    bail!("couldn't fit in {}; trim it shorter", mb(max_bytes))
 }
 
 /// One render; `plan` scales the picture and sets the audio rate.
@@ -696,7 +693,7 @@ mod tests {
     #[test]
     fn too_long_says_how_long_fits() {
         let e = plan_size(10 * MB, 600.0, true).unwrap_err().to_string();
-        assert_eq!(e, "too long to fit in 10 MB: trim it to under 4:38");
+        assert_eq!(e, "too long for 10 MB; trim to under 4:38");
         // Without audio, all of it goes to the picture.
         assert_eq!(plan_size(10 * MB, 300.0, false).unwrap().audio_kbps, 0);
     }

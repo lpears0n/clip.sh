@@ -226,7 +226,7 @@
         {/snippet}
       </VirtualGrid>
     {:else}
-      <StateMessage title="Nothing matches" body="Try another search or clear the filters.">
+      <StateMessage title="Nothing matches">
         <button
           class="btn"
           onclick={() => {

@@ -35,9 +35,9 @@
     {:else if peakDb == null}
       Listening…
     {:else if silent}
-      Silent. Play some sound to test.
+      Silent
     {:else if clipping}
-      Clipping: too loud
+      Clipping
     {:else}
       Hearing sound
     {/if}

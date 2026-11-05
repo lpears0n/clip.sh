@@ -172,6 +172,26 @@ complete sentences do. Verbs on buttons ("Choose screen", not "Screen").
 Numbers with units and a thin space: `3.4 GB`, `0:31`, `144 Hz`. Dates
 relative when under a week ("Yesterday 19:20"), absolute otherwise.
 
+Fewest words that work. Every line of text has to earn its place:
+
+- **No description when the label says it.** "Record cursor" needs no
+  "Draw the mouse pointer into clips."
+- **A description is one short sentence**, for a side effect, a limit or
+  a consequence ("Applies immediately.", "Records the screen area, so
+  overlays can show up."). Never how it works inside.
+- **No reassurance or selling**: no "Nothing downloads until…", "It never
+  shows up in clips", "so a moment is never lost".
+- **No "so that / so you can" tails**, no repeating the app's name, no
+  "Your…" openers, no restating the label in other words.
+- **Toasts say what happened** ("Clip copied"), not what to do next.
+- Detail that a few people need goes in a tooltip (`title`), not on the
+  page. Screen-reader labels (`aria-label`) stay fully descriptive.
+
+These rules follow common UX-writing guidance (cut until only what's
+needed is left; describe a setting only for side effects or delayed
+consequences) and avoid the usual tells of generated text: groups of
+three, "not just X but Y", summaries that restate, even sentence lengths.
+
 ---
 
 ## 3. Frontend performance
