@@ -329,6 +329,16 @@ Ad slots: AdSlot component, off unless `"ads": true` in settings.json (728×90 u
   source knows can be added with Game Bar's "Remember this is a game".
   The Games page has × "Not a game" per card; the list drops ignored
   names.
+- NVENC "Failed to open session" on the owner's PC (2026-11-05), every
+  path, while the start-up probe passes. The encoder always opens its
+  session on its own NVIDIA device, so this is the driver refusing
+  (session limit / resources), not a foreign device. The 1.1.0 encoder
+  fallback never fired: the bus watch kept the *last* error (a knock-on
+  "not-negotiated" that doesn't name the encoder). It now keeps the
+  first. Window capture also now makes its device on the encoder's GPU
+  (`adapter` from the encoder's `adapter-luid`), avoiding a system-memory
+  hop on PCs whose default adapter is an iGPU. Next: the NVENCSTATUS from
+  `GST_DEBUG=nvencoder:5` with `GST_DEBUG_FILE`.
 - Deep-dive backlog, not done yet, best first: apply recording settings to the running capture instead of
   "from the next game"; unload the webview while hidden in the tray
   (~100–250 MB during games); make HDR window capture the default once

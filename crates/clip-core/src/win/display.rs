@@ -117,6 +117,27 @@ pub fn adapter_luid(monitor: isize) -> Option<i64> {
     None
 }
 
+/// The DXGI index of the adapter with this LUID (as GStreamer's D3D11
+/// elements report it in `adapter-luid`).
+pub fn adapter_index(luid: i64) -> Option<u32> {
+    use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory1, IDXGIFactory1};
+
+    // SAFETY: COM calls on interfaces DXGI hands out.
+    unsafe {
+        let factory: IDXGIFactory1 = CreateDXGIFactory1().ok()?;
+        for i in 0.. {
+            let Ok(adapter) = factory.EnumAdapters1(i) else {
+                break;
+            };
+            let l = adapter.GetDesc1().ok()?.AdapterLuid;
+            if ((l.HighPart as i64) << 32) | l.LowPart as i64 == luid {
+                return Some(i);
+            }
+        }
+    }
+    None
+}
+
 /// Windows' "SDR content brightness" for the display whose GDI name is
 /// `device` (`\\.\DISPLAY1`), in nits.
 fn sdr_white_nits(device: &[u16; 32]) -> Option<f32> {

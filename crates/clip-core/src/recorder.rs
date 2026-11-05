@@ -758,7 +758,11 @@ fn spawn_bus_watch(
                             e.debug()
                         );
                         tracing::error!("{text}");
-                        *error.lock().unwrap() = Some(text);
+                        // Keep the first: later errors are knock-ons (an
+                        // encoder that won't open shows up again as a
+                        // "not-negotiated" upstream), and the restart logic
+                        // needs the cause to know what to blame.
+                        error.lock().unwrap().get_or_insert(text);
                     }
                     gst::MessageView::Warning(w) => {
                         tracing::warn!(

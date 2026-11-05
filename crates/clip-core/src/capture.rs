@@ -123,6 +123,20 @@ pub fn add_video_branch(
     let rate = make_rate()?;
     let queue = make_queue()?;
     let enc = encoder.build(cfg)?;
+    // Windows: capture on the encoder's own GPU. Window capture otherwise
+    // makes its device on the system's default adapter, which on a PC with
+    // integrated graphics can be the other GPU: every frame would then go
+    // through system memory to reach the encoder.
+    #[cfg(windows)]
+    if let Some(index) = enc
+        .find_property("adapter-luid")
+        .and_then(|_| enc.property_value("adapter-luid").get::<i64>().ok())
+        .and_then(crate::win::display::adapter_index)
+        && src.has_property("adapter")
+    {
+        tracing::info!(adapter = index, "capturing on the encoder's GPU");
+        src.set_property("adapter", index as i32);
+    }
     let enc_caps = gst::ElementFactory::make("capsfilter")
         .property("caps", cfg.codec.caps())
         .build()?;
