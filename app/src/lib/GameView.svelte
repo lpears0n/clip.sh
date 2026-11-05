@@ -11,6 +11,7 @@
     onopen,
     ondelete,
     onshare,
+    oncopy,
     onfavorite,
   }: {
     game: GameEntry
@@ -19,6 +20,7 @@
     onopen: (c: Clip) => void
     ondelete: (c: Clip) => void
     onshare: (c: Clip) => void
+    oncopy: (c: Clip) => void
     onfavorite: (c: Clip) => void
   } = $props()
 
@@ -84,6 +86,7 @@
             onopen={() => onopen(c)}
             ondelete={() => ondelete(c)}
             onshare={() => onshare(c)}
+            oncopy={() => oncopy(c)}
             onfavorite={() => onfavorite(c)}
           />
         {/each}

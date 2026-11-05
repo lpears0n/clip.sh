@@ -19,6 +19,7 @@
     oncancel,
     ondelete,
     onshare,
+    oncopy,
     onupdate,
   }: {
     clip: Clip
@@ -26,11 +27,22 @@
     /** Fraction of the render done, while `rendering`. */
     progress?: number
     onback: () => void
-    /** `maxMb`: fit the file under this size; null keeps full quality. */
-    onrender: (start: number, end: number, volumes: number[], maxMb: number | null) => void
+    /** `maxMb`: fit the file under this size; null keeps full quality.
+     *  `vertical`: crop to 9:16 at this position (0 left, 1 right).
+     *  `slow`: play this range slower (factor 2 = half speed). */
+    onrender: (
+      start: number,
+      end: number,
+      volumes: number[],
+      maxMb: number | null,
+      vertical: number | null,
+      slow: { from: number; to: number; factor: number } | null,
+    ) => void
     oncancel: () => void
     ondelete: () => void
     onshare: () => void
+    /** Put the clip on the clipboard as a file. */
+    oncopy: () => void
     /** Absent for videos opened from outside the library. */
     onupdate?: (patch: ClipPatch) => void
   } = $props()
@@ -92,6 +104,41 @@
   let levels = $state<number[]>([])
   let armed = $state(false)
   let speed = $state(1)
+  // Export shape: a 9:16 window (its position across the picture) for
+  // TikTok, Shorts and Reels, and a slow-motion range inside the trim.
+  let vertical = $state<number | null>(null)
+  let slowFactor = $state(1)
+  let slowFrom = $state(0)
+  let slowTo = $state(0)
+  const slowAdds = $derived(
+    slowFactor > 1 ? Math.max(0, Math.min(slowTo, end) - Math.max(slowFrom, start)) * (slowFactor - 1) : 0,
+  )
+  /** How long the rendered file will be. */
+  const outLength = $derived(end - start + slowAdds)
+
+  function setSlow(factor: number) {
+    // First time on: the middle third of the trim.
+    if (factor > 1 && (slowFactor === 1 || slowTo <= slowFrom)) {
+      const third = (end - start) / 3
+      slowFrom = start + third
+      slowTo = end - third
+    }
+    slowFactor = factor
+  }
+
+  // Width of the 9:16 frame as a share of the picture's width.
+  const frameWidth = $derived(Math.min(1, 9 / 16 / aspect))
+  let cropDrag: { x: number; at: number; width: number } | null = null
+  function cropDown(e: PointerEvent) {
+    e.stopPropagation()
+    const box = (e.currentTarget as HTMLElement).parentElement!.getBoundingClientRect()
+    cropDrag = { x: e.clientX, at: vertical ?? 0.5, width: box.width * (1 - frameWidth) }
+    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+  }
+  function cropMove(e: PointerEvent) {
+    if (!cropDrag || cropDrag.width <= 0) return
+    vertical = Math.min(1, Math.max(0, cropDrag.at + (e.clientX - cropDrag.x) / cropDrag.width))
+  }
   let loop = $state(false)
   let help = $state(false)
   const SPEEDS = [0.25, 0.5, 1, 1.5, 2]
@@ -130,6 +177,8 @@
 
   function tick() {
     time = video.currentTime
+    const rate = trimming && slowFactor > 1 && time >= slowFrom && time < slowTo ? speed / slowFactor : speed
+    if (video.playbackRate !== rate) video.playbackRate = rate
     // While trimming, preview only the selection.
     if (trimming && !paused && time >= end) {
       if (loop) seek(start)
@@ -207,6 +256,13 @@
   function onkeydown(e: KeyboardEvent) {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return
     if (help && e.code !== 'Escape' && e.key !== '?') return
+    if ((e.ctrlKey || e.metaKey) && e.code === 'KeyC') {
+      // Text selected on the page copies as text, as usual.
+      if (window.getSelection()?.toString()) return
+      e.preventDefault()
+      oncopy()
+      return
+    }
     if (e.code === 'Space' || e.code === 'KeyK') {
       e.preventDefault()
       toggle()
@@ -311,7 +367,7 @@
 
   $effect(() => {
     const mb = sizeMb
-    const seconds = end - start
+    const seconds = outLength
     const audio = clip.audio_tracks > 0
     if (!trimming || mb === 0 || seconds < 0.1) {
       plan = null
@@ -354,6 +410,7 @@
     ['M', 'Mute'],
     ['F', 'Fullscreen'],
     ['T', 'Trim'],
+    ['Ctrl+C', 'Copy the clip (paste it into Discord)'],
     ['I / O', 'Set trim start / end'],
     ['Esc', 'Back'],
     ['?', 'This list'],
@@ -473,6 +530,7 @@
       <button class="action {trimming ? 'text-accent' : ''}" onclick={() => (trimming = !trimming)} title="Trim (T)">
         {trimming ? 'Done' : 'Trim'}
       </button>
+      <button class="action" onclick={oncopy} title="Copy the clip, then paste it into Discord or a folder (Ctrl+C)">Copy</button>
       <button class="action" onclick={onshare}>Show in folder</button>
       <button
         class="action {armed ? 'text-danger' : ''}"
@@ -513,6 +571,28 @@
         class="size-full object-contain"
       ></video>
 
+      {#if trimming && vertical !== null}
+        <!-- The 9:16 window that will be kept; drag it sideways. -->
+        <div class="pointer-events-none absolute inset-0">
+          <div class="absolute inset-y-0 left-0 bg-black/60" style:width="{vertical * (1 - frameWidth) * 100}%"></div>
+          <div class="absolute inset-y-0 right-0 bg-black/60" style:width="{(1 - vertical) * (1 - frameWidth) * 100}%"></div>
+          <div
+            class="crop-frame pointer-events-auto absolute inset-y-0"
+            style:left="{vertical * (1 - frameWidth) * 100}%"
+            style:width="{frameWidth * 100}%"
+            onpointerdown={cropDown}
+            onpointermove={cropMove}
+            onpointerup={() => (cropDrag = null)}
+            role="slider"
+            aria-label="Vertical frame position"
+            aria-valuemin={0}
+            aria-valuemax={1}
+            aria-valuenow={vertical}
+            tabindex="-1"
+          ></div>
+        </div>
+      {/if}
+
       <!-- Controls and the progress line, over the video's bottom edge. -->
       <div
         class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 via-black/25 to-transparent px-4 pt-10 pb-2 transition-opacity duration-normal
@@ -525,6 +605,9 @@
           markers={clip.markers}
           bind:start
           bind:end
+          slow={slowFactor > 1}
+          bind:slowFrom
+          bind:slowTo
           onseek={seek}
         />
         <div class="mt-1 flex items-center gap-1 text-white">
@@ -589,6 +672,26 @@
       <!-- The export half; it moves to its own line when the row is full. -->
       <div class="ml-auto flex items-center gap-5 whitespace-nowrap">
       <label class="flex items-center gap-2.5">
+        <span class="text-muted">Format</span>
+        <select
+          class="field w-36 flex-none"
+          value={vertical === null ? 'original' : 'vertical'}
+          onchange={(e) => (vertical = e.currentTarget.value === 'vertical' ? (vertical ?? 0.5) : null)}
+          aria-label="Export format"
+        >
+          <option value="original">Original</option>
+          <option value="vertical">Vertical 9:16</option>
+        </select>
+      </label>
+      <label class="flex items-center gap-2.5" title="Plays the striped range slower; its sound is muted">
+        <span class="text-muted">Slow-mo</span>
+        <select class="field w-24 flex-none" value={slowFactor} onchange={(e) => setSlow(Number(e.currentTarget.value))} aria-label="Slow motion">
+          <option value={1}>Off</option>
+          <option value={2}>½×</option>
+          <option value={4}>¼×</option>
+        </select>
+      </label>
+      <label class="flex items-center gap-2.5">
         <span class="text-muted">Size</span>
         <select class="field w-44 flex-none" value={sizeMb} onchange={(e) => setSize(Number(e.currentTarget.value))} aria-label="Export size">
           {#each SIZES as [mb, label] (mb)}
@@ -601,7 +704,7 @@
       {:else if planLabel}
         <span class="text-muted tabular-nums" role="status" title="How the clip will be fitted">{planLabel}</span>
       {/if}
-      <span class="text-muted">Length <span class="font-semibold text-fg tabular-nums">{timecode(end - start)}</span></span>
+      <span class="text-muted">Length <span class="font-semibold text-fg tabular-nums">{timecode(outLength)}</span></span>
       {#if rendering}
         <div class="flex items-center gap-3">
           <div class="h-1.5 w-32 overflow-hidden rounded-full bg-line-strong" role="progressbar" aria-valuenow={Math.round(progress * 100)} aria-valuemin={0} aria-valuemax={100}>
@@ -614,7 +717,15 @@
         <button
           class="btn-primary"
           disabled={end - start < 0.1 || planError !== null}
-          onclick={() => onrender(start, end, levels.map((l) => l / 100), sizeMb || null)}
+          onclick={() =>
+            onrender(
+              start,
+              end,
+              levels.map((l) => l / 100),
+              sizeMb || null,
+              vertical,
+              slowFactor > 1 ? { from: slowFrom, to: slowTo, factor: slowFactor } : null,
+            )}
         >
           Render clip
         </button>
@@ -693,6 +804,14 @@
   }
 
   /* Seek bar on the video: lighter rail. */
+  .crop-frame {
+    cursor: ew-resize;
+    box-shadow:
+      inset 0 0 0 2px var(--color-accent),
+      0 0 0 1px rgb(0 0 0 / 40%);
+    touch-action: none;
+  }
+
   .player :global(.rail) {
     background: rgba(255, 255, 255, 0.25);
   }

@@ -123,8 +123,12 @@ ship on its own.
 
 - **Multi-clip export / "montage".** Select clips, order them, render one
   file. GStreamer `concat` over the existing `export::render`.
-- **Slow motion and speed ramps** per selected range (`videorate` + audio
-  `pitch`/`scaletempo`). Medal's most-used effect.
+- ~~**Slow motion**~~ Done: a range inside the trim at ½× or ¼× (striped
+  on the timeline, its own handles; the preview slows there too). Export
+  retimes the decoded streams with a pad probe (frames spread out, the
+  segment end moved) and drops the range's audio, filled with silence by
+  `audiorate`. Still to do: speed ramps, and slowed audio
+  (`scaletempo`) as an option.
 - **Crop / zoom** with a draggable rectangle on the preview (`videocrop`
   + `videoscale`).
 - ~~**Export size presets.**~~ Done: Full quality, 10 MB (Discord), 50 MB
@@ -133,8 +137,9 @@ ship on its own.
   full picture it steps down (1080p → 720p → 720p30 → 480p30 → 360p30,
   same pixel count for ultrawide) and audio drops to 96/64 kb/s. A file
   that still comes out over is redone at a rate scaled by the miss. Too
-  long to fit says how long would. Still to do: 9:16 vertical with the
-  crop below, GIF (`gifenc` via libav).
+  long to fit says how long would. ~~9:16 vertical~~ done: a draggable
+  9:16 frame over the preview, `videocrop` before the size plan scales
+  it. Still to do: GIF (`gifenc` via libav).
 - **Audio**: per-track mute buttons on the timeline, waveform strip under
   the trim track (`level` element at inspect time, cached next to the
   thumbnail).
@@ -176,8 +181,11 @@ ship on its own.
 
 ### Phase 4 — Share
 
-- **Copy to clipboard** as a file (`text/uri-list`) so a clip can be pasted
-  into Discord/Slack/Matrix.
+- ~~**Copy to clipboard**~~ Done: Copy on cards and in the viewer
+  (Ctrl+C) puts the clip on the clipboard as a file (`arboard` file list:
+  CF_HDROP on Windows, uri-list on Linux), so pasting into Discord
+  uploads it. Cards can also be dragged out of the window as files
+  (`tauri-plugin-drag`).
 - **"Share to…"** sheet using the desktop's share portal when available.
 - **Optional uploads** to a user-chosen destination (S3-compatible, Nextcloud
   WebDAV, a self-hosted Reruns server later). No Reruns cloud; users bring

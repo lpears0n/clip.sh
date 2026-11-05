@@ -33,6 +33,147 @@ pub struct Edit {
     /// length, and the picture is scaled down (and to 30 fps) when the
     /// budget is too small for the full size. `None` keeps full quality.
     pub max_bytes: Option<u64>,
+    /// Crop to a vertical 9:16 frame (TikTok, Shorts, Reels): where the
+    /// frame sits across a wider source, 0 = left edge, 1 = right edge.
+    pub vertical: Option<f64>,
+    /// Play a range slower, inside `start..end`.
+    pub slow: Option<Slow>,
+}
+
+/// A slow-motion range: `from..to` (source time) plays `factor` times
+/// slower. Frames keep their order and are spread out; the source's frame
+/// rate sets how smooth it is (a 120 fps recording at 2× still shows 60).
+/// Its audio is left out (silent) rather than dragged down in pitch.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Slow {
+    pub from: gst::ClockTime,
+    pub to: gst::ClockTime,
+    pub factor: f64,
+}
+
+impl Slow {
+    /// Slowest allowed: a quarter speed.
+    pub const MAX_FACTOR: f64 = 4.0;
+
+    /// The range clamped to `start..end` and the factor to 1–4; `None` if
+    /// nothing is left to slow.
+    pub fn within(self, start: gst::ClockTime, end: gst::ClockTime) -> Option<Self> {
+        let from = self.from.clamp(start, end);
+        let to = self.to.clamp(start, end);
+        let factor = self.factor.clamp(1.0, Self::MAX_FACTOR);
+        (to > from && factor > 1.0).then_some(Self { from, to, factor })
+    }
+
+    pub fn contains(&self, t: gst::ClockTime) -> bool {
+        t >= self.from && t < self.to
+    }
+
+    /// How much longer the output gets.
+    pub fn added(&self) -> gst::ClockTime {
+        scale(self.to - self.from, self.factor - 1.0)
+    }
+
+    /// Where source time `t` lands in the output (same timeline, stretched).
+    pub fn map(&self, t: gst::ClockTime) -> gst::ClockTime {
+        if t < self.from {
+            t
+        } else if t < self.to {
+            self.from + scale(t - self.from, self.factor)
+        } else {
+            t + self.added()
+        }
+    }
+}
+
+fn scale(t: gst::ClockTime, by: f64) -> gst::ClockTime {
+    gst::ClockTime::from_nseconds((t.nseconds() as f64 * by).round() as u64)
+}
+
+impl Edit {
+    /// The slow range, if any, clamped to the trim.
+    fn slow_range(&self) -> Option<Slow> {
+        self.slow.and_then(|s| s.within(self.start, self.end))
+    }
+
+    /// How long the rendered file is: the trim, plus what slow motion adds.
+    pub fn output_duration(&self) -> gst::ClockTime {
+        (self.end - self.start)
+            + self
+                .slow_range()
+                .map_or(gst::ClockTime::ZERO, |s| s.added())
+    }
+}
+
+/// The 9:16 window of a `w`×`h` picture at `x` (0 = left, 1 = right):
+/// `(left, right, top, bottom)` pixels to crop, all even. A picture already
+/// narrower than 9:16 loses top and bottom instead, centred.
+pub fn vertical_crop(w: u32, h: u32, x: f64) -> (u32, u32, u32, u32) {
+    let even = |v: f64| ((v / 2.0).floor() as u32) * 2;
+    if w as u64 * 16 >= h as u64 * 9 {
+        let cw = even(h as f64 * 9.0 / 16.0).max(2);
+        let left = even((w - cw) as f64 * x.clamp(0.0, 1.0));
+        (left, w - cw - left, 0, 0)
+    } else {
+        let ch = even(w as f64 * 16.0 / 9.0).max(2);
+        let top = even((h - ch) as f64 / 2.0);
+        (0, 0, top, h - ch - top)
+    }
+}
+
+/// Retime one decoded stream for `slow`: buffers move to their place on the
+/// stretched timeline (video frames also last longer in the slow range,
+/// audio there is dropped), and the segment's end moves with them so
+/// nothing downstream clips the extra length.
+fn retime(pad: &gst::Pad, slow: Slow, audio: bool) {
+    pad.add_probe(
+        gst::PadProbeType::BUFFER | gst::PadProbeType::EVENT_DOWNSTREAM,
+        move |_, info| {
+            // Audio inside the slow range is left out. Taken out of the probe
+            // here (rather than returning Drop, which made GStreamer release
+            // a buffer gstreamer-rs had already taken).
+            let skip = audio
+                && matches!(&info.data, Some(gst::PadProbeData::Buffer(b))
+                    if b.pts().is_some_and(|pts| slow.contains(pts)));
+            if skip {
+                info.data = None;
+                info.flow_res = Ok(gst::FlowSuccess::Ok);
+                return gst::PadProbeReturn::Handled;
+            }
+            match &mut info.data {
+                Some(gst::PadProbeData::Buffer(buffer)) => {
+                    let Some(pts) = buffer.pts() else {
+                        return gst::PadProbeReturn::Ok;
+                    };
+                    let b = buffer.make_mut();
+                    b.set_pts(slow.map(pts));
+                    b.set_dts(gst::ClockTime::NONE);
+                    if slow.contains(pts)
+                        && let Some(d) = b.duration()
+                    {
+                        b.set_duration(scale(d, slow.factor));
+                    }
+                }
+                Some(gst::PadProbeData::Event(event))
+                    if event.type_() == gst::EventType::Segment =>
+                {
+                    if let gst::EventView::Segment(e) = event.view()
+                        && let Ok(segment) = e.segment().clone().downcast::<gst::ClockTime>()
+                    {
+                        let mut segment = segment;
+                        if let Some(stop) = segment.stop() {
+                            segment.set_stop(slow.map(stop));
+                        }
+                        if let Some(d) = segment.duration() {
+                            segment.set_duration(d + slow.added());
+                        }
+                        *event = gst::event::Segment::new(&segment);
+                    }
+                }
+                _ => {}
+            }
+            gst::PadProbeReturn::Ok
+        },
+    );
 }
 
 const AAC_BITRATE: i32 = 192_000;
@@ -190,7 +331,7 @@ pub fn render_with(
             &control,
         );
     };
-    let seconds = (edit.end - edit.start).seconds_f64();
+    let seconds = edit.output_duration().seconds_f64();
     let mut plan = plan_size(max_bytes, seconds, audio_tracks > 0)?;
     // One pass with a rate from the length usually lands under; encoders
     // can overshoot on busy footage, so a file that came out too big is
@@ -266,6 +407,20 @@ fn render_once(
         vqueue.clone(),
         gst::ElementFactory::make("videoconvert").build()?,
     ];
+    // Vertical: the 9:16 window is cut first, so the size plan below scales
+    // the cropped picture. Its edges are set once the source size is known.
+    let crop = match edit.vertical {
+        Some(_) => {
+            let crop = gst::ElementFactory::make("videocrop").build()?;
+            vchain.push(crop.clone());
+            Some(crop)
+        }
+        None => None,
+    };
+    let slow = edit.slow_range();
+    if let Some(slow) = slow {
+        retime(&vqueue.static_pad("sink").unwrap(), slow, false);
+    }
     // The size is set once the decoder says how big the source is.
     let scale_caps = match plan {
         Some(plan) => {
@@ -323,6 +478,7 @@ fn render_once(
     {
         let pipeline = pipeline.downgrade();
         let volumes = edit.volumes.clone();
+        let vertical = edit.vertical;
         let link_error = link_error.clone();
         let next_audio = Mutex::new(0usize);
         dec.connect_pad_added(move |_, pad| {
@@ -335,10 +491,21 @@ fn render_once(
             };
             let result = (|| -> Result<()> {
                 if name.starts_with("video/") {
+                    let s = caps.structure(0).context("video caps")?;
+                    let (mut w, mut h) = (
+                        s.get::<i32>("width")? as u32,
+                        s.get::<i32>("height")? as u32,
+                    );
+                    if let (Some(crop), Some(x)) = (&crop, vertical) {
+                        let (l, r, t, b) = vertical_crop(w, h, x);
+                        crop.set_property("left", l as i32);
+                        crop.set_property("right", r as i32);
+                        crop.set_property("top", t as i32);
+                        crop.set_property("bottom", b as i32);
+                        (w, h) = (w - l - r, h - t - b);
+                    }
                     if let Some((filter, plan)) = &scale_caps {
-                        let s = caps.structure(0).context("video caps")?;
-                        let (w, h) = (s.get::<i32>("width")?, s.get::<i32>("height")?);
-                        let (w, h) = scaled_size(w as u32, h as u32, plan.max_height);
+                        let (w, h) = scaled_size(w, h, plan.max_height);
                         let mut out = gst::Caps::builder("video/x-raw")
                             .field("width", w as i32)
                             .field("height", h as i32)
@@ -358,17 +525,22 @@ fn render_once(
                         *n - 1
                     };
                     let gain = volumes.get(i).copied().unwrap_or(1.0).clamp(0.0, 4.0);
+                    // audiorate fills what slow motion leaves out with silence.
                     let chain = [
                         gst::ElementFactory::make("queue").build()?,
                         gst::ElementFactory::make("audioconvert").build()?,
                         gst::ElementFactory::make("audioresample").build()?,
+                        gst::ElementFactory::make("audiorate").build()?,
                         gst::ElementFactory::make("volume")
                             .property("volume", gain)
                             .build()?,
                     ];
                     pipeline.add_many(&chain)?;
                     gst::Element::link_many(&chain)?;
-                    chain[3].link(mixer)?;
+                    chain[4].link(mixer)?;
+                    if let Some(slow) = slow {
+                        retime(&chain[0].static_pad("sink").unwrap(), slow, true);
+                    }
                     for e in &chain {
                         e.sync_state_with_parent()?;
                     }
@@ -411,7 +583,7 @@ fn render_once(
 /// Play to EOS, reporting position as progress and stopping on cancel.
 fn run(pipeline: &gst::Pipeline, edit: &Edit, control: &Control) -> Result<()> {
     let bus = pipeline.bus().context("no bus")?;
-    let span = (edit.end - edit.start).nseconds().max(1) as f64;
+    let span = edit.output_duration().nseconds().max(1) as f64;
     let started = std::time::Instant::now();
     loop {
         if control
@@ -527,6 +699,61 @@ mod tests {
         assert_eq!(e, "too long to fit in 10 MB: trim it to under 4:38");
         // Without audio, all of it goes to the picture.
         assert_eq!(plan_size(10 * MB, 300.0, false).unwrap().audio_kbps, 0);
+    }
+
+    #[test]
+    fn vertical_crop_takes_a_9_16_window() {
+        // 1920x1080: a 606x1080 window (even), sliding left to right.
+        assert_eq!(vertical_crop(1920, 1080, 0.0), (0, 1314, 0, 0));
+        assert_eq!(vertical_crop(1920, 1080, 1.0), (1314, 0, 0, 0));
+        let (l, r, _, _) = vertical_crop(1920, 1080, 0.5);
+        assert_eq!((l % 2, 1920 - l - r), (0, 606));
+        // Ultrawide keeps its full height.
+        let (l, r, t, b) = vertical_crop(3440, 1440, 0.5);
+        assert_eq!((3440 - l - r, t + b), (810, 0));
+        // Already portrait: trims top and bottom, centred.
+        assert_eq!(vertical_crop(720, 1600, 0.3), (0, 0, 160, 160));
+    }
+
+    #[test]
+    fn slow_motion_stretches_the_range_and_shifts_the_rest() {
+        let s = |v: u64| gst::ClockTime::from_mseconds(v);
+        let slow = Slow {
+            from: s(1000),
+            to: s(2000),
+            factor: 2.0,
+        };
+        assert_eq!(slow.map(s(500)), s(500));
+        assert_eq!(slow.map(s(1500)), s(2000));
+        assert_eq!(slow.map(s(2000)), s(3000));
+        assert_eq!(slow.map(s(2500)), s(3500));
+        // Clamped to the trim, and nothing to do at 1x.
+        assert_eq!(
+            slow.within(s(1500), s(3000)),
+            Some(Slow {
+                from: s(1500),
+                to: s(2000),
+                factor: 2.0
+            })
+        );
+        assert_eq!(
+            Slow {
+                factor: 1.0,
+                ..slow
+            }
+            .within(s(0), s(5000)),
+            None
+        );
+        assert_eq!(
+            Slow {
+                factor: 9.0,
+                ..slow
+            }
+            .within(s(0), s(5000))
+            .unwrap()
+            .factor,
+            4.0
+        );
     }
 
     #[test]

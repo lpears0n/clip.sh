@@ -106,6 +106,15 @@
     view === 'games' ? 'Games' : view === 'game' ? (game?.name ?? 'Games') : view === 'clips' ? 'All clips' : 'Settings',
   )
 
+  async function copyClip(c: Clip) {
+    try {
+      await api.copyClip(c.path)
+      notify('Copied. Paste it into Discord, a chat or a folder.')
+    } catch (e) {
+      notify(String(e), true)
+    }
+  }
+
   function notify(text: string, error = false) {
     showToast({ text, error })
   }
@@ -193,12 +202,19 @@
     if (typeof path === 'string') open(path)
   }
 
-  async function render(start: number, end: number, volumes: number[], maxMb: number | null) {
+  async function render(
+    start: number,
+    end: number,
+    volumes: number[],
+    maxMb: number | null,
+    vertical: number | null,
+    slow: { from: number; to: number; factor: number } | null,
+  ) {
     if (!viewing) return
     rendering = true
     renderProgress = 0
     try {
-      await api.render(viewing.path, start, end, volumes, maxMb)
+      await api.render(viewing.path, start, end, volumes, maxMb, vertical, slow)
     } catch (e) {
       if (!/cancelled/.test(String(e))) notify(String(e), true)
     } finally {
@@ -426,6 +442,7 @@
             oncancel={() => api.cancelRender()}
             ondelete={() => viewing && remove([viewing])}
             onshare={() => viewing && api.reveal(viewing.path)}
+            oncopy={() => viewing && copyClip(viewing)}
             onupdate={inLibrary(viewing) ? (p) => viewing && update(viewing, p) : undefined}
           />
         {:else if libraryError && view !== 'settings'}
@@ -441,6 +458,7 @@
             onopen={(c) => open(c.path)}
             ondelete={(c) => remove([c])}
             onshare={(c) => api.reveal(c.path)}
+            oncopy={copyClip}
             onfavorite={(c) => update(c, { favorite: !c.favorite })}
           />
         {:else if view === 'clips'}
@@ -452,6 +470,7 @@
             ondelete={(c) => remove([c])}
             ondeletemany={remove}
             onshare={(c) => api.reveal(c.path)}
+            oncopy={copyClip}
             onfavorite={(c) => update(c, { favorite: !c.favorite })}
           />
         {:else if view === 'settings' && settings}

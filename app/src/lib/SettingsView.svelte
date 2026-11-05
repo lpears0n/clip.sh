@@ -17,10 +17,13 @@
     type Status,
     type UpdateInfo,
     type Usage,
+    type AudioLevel,
+    onAudioLevel,
     onUpdateProgress,
   } from './api'
   import { bytes } from './format'
   import HotkeyBinder from './HotkeyBinder.svelte'
+  import LevelMeter from './LevelMeter.svelte'
   import { ACCENTS, type Accent, prefs, setPrefs } from './prefs.svelte'
   import {
     CODEC_LABEL,
@@ -61,6 +64,22 @@
   $effect(() => {
     if (category === 'Hotkeys') api.hotkeyBackend().then((b) => (hotkeyBackend = b))
   })
+  // Live levels while Audio is open, for the devices a recording would
+  // use; restarted when one of them changes, stopped on leaving the page.
+  let levels = $state<Partial<Record<AudioLevel['track'], AudioLevel>>>({})
+  $effect(() => {
+    if (category !== 'Audio') return
+    // Restart on any change to what is recorded.
+    void [settings.desktop_audio, settings.desktop_device, settings.mic, settings.mic_device]
+    levels = {}
+    const unlisten = onAudioLevel((l) => (levels = { ...levels, [l.track]: l }))
+    api.startAudioMeters().catch(() => {})
+    return () => {
+      api.stopAudioMeters().catch(() => {})
+      unlisten.then((f) => f())
+    }
+  })
+
   let copied = $state(false)
   async function copyCommand() {
     await navigator.clipboard.writeText('rerunsctl save')
@@ -587,41 +606,51 @@
             description="Pick your headset to leave out sound from other outputs."
             disabled={!settings.desktop_audio}
           >
-            <select
-              class="field w-64"
-              aria-label="Output device"
-              disabled={!settings.desktop_audio}
-              value={settings.desktop_device ?? ''}
-              onchange={(e) => update({ desktop_device: e.currentTarget.value || null })}
-            >
-              <option value="">System default</option>
-              {#each caps?.output_devices ?? [] as d (d.id)}
-                <option value={d.id}>{d.name}</option>
-              {/each}
-              {#if settings.desktop_device && caps && !caps.output_devices.some((d) => d.id === settings.desktop_device)}
-                <option value={settings.desktop_device}>Not connected</option>
+            <div class="flex w-64 flex-col gap-2">
+              <select
+                class="field w-64"
+                aria-label="Output device"
+                disabled={!settings.desktop_audio}
+                value={settings.desktop_device ?? ''}
+                onchange={(e) => update({ desktop_device: e.currentTarget.value || null })}
+              >
+                <option value="">System default</option>
+                {#each caps?.output_devices ?? [] as d (d.id)}
+                  <option value={d.id}>{d.name}</option>
+                {/each}
+                {#if settings.desktop_device && caps && !caps.output_devices.some((d) => d.id === settings.desktop_device)}
+                  <option value={settings.desktop_device}>Not connected</option>
+                {/if}
+              </select>
+              {#if settings.desktop_audio}
+                <LevelMeter label="Game and desktop audio" peakDb={levels.desktop?.peak_db ?? null} error={levels.desktop?.error} />
               {/if}
-            </select>
+            </div>
           </Row>
           <Row title="Microphone" description="Saved as its own track, so you can mix it when trimming.">
             <Toggle label="Microphone" checked={settings.mic} onchange={(mic) => update({ mic })} />
           </Row>
           <Row title="Input device" disabled={!settings.mic}>
-            <select
-              class="field w-64"
-              aria-label="Input device"
-              disabled={!settings.mic}
-              value={settings.mic_device ?? ''}
-              onchange={(e) => update({ mic_device: e.currentTarget.value || null })}
-            >
-              <option value="">System default</option>
-              {#each caps?.mic_devices ?? [] as d (d.id)}
-                <option value={d.id}>{d.name}</option>
-              {/each}
-              {#if settings.mic_device && caps && !caps.mic_devices.some((d) => d.id === settings.mic_device)}
-                <option value={settings.mic_device}>Not connected</option>
+            <div class="flex w-64 flex-col gap-2">
+              <select
+                class="field w-64"
+                aria-label="Input device"
+                disabled={!settings.mic}
+                value={settings.mic_device ?? ''}
+                onchange={(e) => update({ mic_device: e.currentTarget.value || null })}
+              >
+                <option value="">System default</option>
+                {#each caps?.mic_devices ?? [] as d (d.id)}
+                  <option value={d.id}>{d.name}</option>
+                {/each}
+                {#if settings.mic_device && caps && !caps.mic_devices.some((d) => d.id === settings.mic_device)}
+                  <option value={settings.mic_device}>Not connected</option>
+                {/if}
+              </select>
+              {#if settings.mic}
+                <LevelMeter label="Microphone" peakDb={levels.mic?.peak_db ?? null} error={levels.mic?.error} />
               {/if}
-            </select>
+            </div>
           </Row>
         </div>
         <p class="px-1 text-secondary text-muted">

@@ -1,8 +1,9 @@
 <script lang="ts">
-  import { Check, Clapperboard, FolderOpen, Scissors, Star, Trash2 } from '@lucide/svelte'
+  import { Check, Clapperboard, Copy, FolderOpen, Scissors, Star, Trash2 } from '@lucide/svelte'
   import { type Clip, fileUrl, videoUrl } from './api'
   import { duration, when } from './format'
   import { prefs } from './prefs.svelte'
+  import { dragOut } from './share'
 
   let {
     clip,
@@ -13,6 +14,7 @@
     onopen,
     ondelete,
     onshare,
+    oncopy,
     onselect,
     onfavorite,
   }: {
@@ -26,6 +28,8 @@
     onopen: () => void
     ondelete: () => void
     onshare: () => void
+    /** Put the clip on the clipboard as a file. */
+    oncopy: () => void
     onselect?: () => void
     /** Absent for clips outside the library, which can't be starred. */
     onfavorite?: () => void
@@ -83,6 +87,12 @@
       {selected ? 'ring-2 ring-accent' : 'ring-line hover:ring-line-strong'}"
     onclick={activate}
     onkeydown={(e) => e.key === 'Enter' && activate()}
+    draggable={!selectable}
+    ondragstart={(e) => {
+      // Out of the window as a real file: drop it into Discord or a folder.
+      e.preventDefault()
+      dragOut(clip.path)
+    }}
     onpointerenter={enter}
     onpointermove={scrub}
     onpointerleave={leave}
@@ -163,6 +173,17 @@
         </button>
       {/if}
       <div class="absolute top-2 right-2 flex gap-1 opacity-0 transition-opacity duration-fast group-focus-within:opacity-100 group-hover:opacity-100">
+        <button
+          class="btn-scrim"
+          onclick={(e) => {
+            e.stopPropagation()
+            oncopy()
+          }}
+          title="Copy, then paste into Discord or a folder"
+          aria-label="Copy clip"
+        >
+          <Copy size={16} />
+        </button>
         <button
           class="btn-scrim"
           onclick={(e) => {

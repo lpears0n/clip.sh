@@ -29,6 +29,10 @@ clip-ipc = { version = "1.0.0", path = "../../crates/clip-ipc" }
 tauri-plugin-window-state = "2"
 notify-debouncer-full = "0.5"
 tauri-plugin-updater = "2"
+# Drag a clip out of the window into Discord, a chat or a folder.
+tauri-plugin-drag = "2.1.1"
+# Copy a clip as a file (Ctrl+C, then paste it into a chat). Images not needed.
+arboard = { version = "3.7", default-features = false, features = ["wayland-data-control"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 rustix = { version = "1", features = ["fs"] }

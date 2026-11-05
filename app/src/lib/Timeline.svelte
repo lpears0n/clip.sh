@@ -13,6 +13,9 @@
     start = $bindable(),
     end = $bindable(),
     markers = [],
+    slow = false,
+    slowFrom = $bindable(0),
+    slowTo = $bindable(0),
     onseek,
   }: {
     duration: number
@@ -22,12 +25,16 @@
     end: number
     /** Marked moments, in seconds. */
     markers?: number[]
+    /** Show and edit a slow-motion range inside the trim. */
+    slow?: boolean
+    slowFrom?: number
+    slowTo?: number
     onseek: (t: number) => void
   } = $props()
 
   const MIN = 0.1
   let track: HTMLDivElement
-  let drag = $state<'start' | 'end' | 'seek' | null>(null)
+  let drag = $state<'start' | 'end' | 'slowFrom' | 'slowTo' | 'seek' | null>(null)
 
   const frac = (t: number) => (duration > 0 ? Math.min(1, Math.max(0, t / duration)) : 0)
   const pct = (t: number) => `${frac(t) * 100}%`
@@ -47,7 +54,7 @@
     return Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)) * duration
   }
 
-  function down(e: PointerEvent, what: 'start' | 'end' | 'seek') {
+  function down(e: PointerEvent, what: 'start' | 'end' | 'slowFrom' | 'slowTo' | 'seek') {
     e.stopPropagation()
     drag = what
     track.setPointerCapture(e.pointerId)
@@ -63,6 +70,12 @@
     } else if (drag === 'end') {
       end = Math.max(t, start + MIN)
       onseek(end)
+    } else if (drag === 'slowFrom') {
+      slowFrom = Math.min(Math.max(t, start), slowTo - MIN)
+      onseek(slowFrom)
+    } else if (drag === 'slowTo') {
+      slowTo = Math.max(Math.min(t, end), slowFrom + MIN)
+      onseek(slowTo)
     } else {
       onseek(trim ? Math.min(end, Math.max(start, t)) : t)
     }
@@ -101,6 +114,22 @@
       <div class="played" style:left="0" style:width="100%" style:transform="scaleX({playedScale})"></div>
     {/if}
   </div>
+  {#if trim && slow}
+    <div class="slow-band" style:left={pct(slowFrom)} style:width="{(frac(slowTo) - frac(slowFrom)) * 100}%" title="Slow motion"></div>
+    {#each [['slowFrom', slowFrom, 'Slow motion start'], ['slowTo', slowTo, 'Slow motion end']] as const as [what, at, label] (what)}
+      <div
+        class="marker slow-marker"
+        style:left={pct(at)}
+        onpointerdown={(e) => down(e, what)}
+        role="slider"
+        aria-label={label}
+        aria-valuemin={0}
+        aria-valuemax={duration}
+        aria-valuenow={at}
+        tabindex="-1"
+      ></div>
+    {/each}
+  {/if}
   {#each markers as m, i (i)}
     <button
       class="tick"
@@ -212,6 +241,23 @@
   .track.dragging .dot {
     width: 14px;
     height: 14px;
+  }
+
+  /* Slow-motion range: a striped band over the line, its own white
+     handles so it reads apart from the trim markers. */
+  .slow-band {
+    position: absolute;
+    top: 50%;
+    height: 9px;
+    transform: translateY(-50%);
+    border-radius: 3px;
+    background: repeating-linear-gradient(135deg, rgb(255 255 255 / 30%) 0 3px, rgb(255 255 255 / 8%) 3px 6px);
+    pointer-events: none;
+  }
+
+  .slow-marker::after {
+    background: #fff !important;
+    height: 10px !important;
   }
 
   /* Marked moments: short white ticks standing above the line, with a

@@ -15,6 +15,7 @@
     ondelete,
     ondeletemany,
     onshare,
+    oncopy,
     onfavorite,
   }: {
     clips: Clip[]
@@ -24,6 +25,7 @@
     ondelete: (c: Clip) => void
     ondeletemany: (cs: Clip[]) => void
     onshare: (c: Clip) => void
+    oncopy: (c: Clip) => void
     onfavorite: (c: Clip) => void
   } = $props()
 
@@ -217,6 +219,7 @@
             onopen={() => onopen(clip)}
             ondelete={() => ondelete(clip)}
             onshare={() => onshare(clip)}
+            oncopy={() => oncopy(clip)}
             onselect={() => toggle(clip)}
             onfavorite={() => onfavorite(clip)}
           />

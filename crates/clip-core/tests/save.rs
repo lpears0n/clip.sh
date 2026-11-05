@@ -145,6 +145,8 @@ fn saves_last_n_seconds_as_mp4() {
         end: gst::ClockTime::from_mseconds(2000),
         volumes: vec![0.5],
         max_bytes: None,
+        vertical: None,
+        slow: None,
     };
     let cfg = VideoConfig {
         fps: 30,
@@ -209,6 +211,8 @@ fn fits_an_export_under_a_size_limit() {
         end: gst::ClockTime::from_mseconds(3500),
         volumes: vec![1.0],
         max_bytes: Some(max_bytes),
+        vertical: None,
+        slow: None,
     };
     let cfg = VideoConfig {
         fps: 60,
@@ -234,6 +238,79 @@ fn fits_an_export_under_a_size_limit() {
         .to_string();
     assert!(err.starts_with("too long to fit in 20 kB"), "{err}");
     assert!(!dir.join("no.mp4").exists());
+
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// Vertical 9:16 with a 2x slow-motion range: the picture is the cropped
+/// window, and the file is longer by what the slow range adds.
+#[test]
+fn renders_vertical_with_slow_motion() {
+    clip_core::init().unwrap();
+    let dir = std::env::temp_dir().join(format!("reruns-vertical-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let source = dir.join("source.mp4");
+    let aac = aac_encoder();
+    let pipeline = gst::parse::launch(&format!(
+        "videotestsrc num-buffers=240 pattern=ball ! video/x-raw,width=1280,height=720,framerate=60/1 \
+         ! videoconvert ! x264enc bitrate=4000 key-int-max=60 speed-preset=ultrafast ! h264parse ! mp4mux name=m \
+         ! filesink name=out \
+         audiotestsrc num-buffers=188 samplesperbuffer=1024 ! audio/x-raw,rate=48000,channels=2 \
+         ! audioconvert ! {aac} ! aacparse ! m.",
+    ))
+    .unwrap()
+    .downcast::<gst::Bin>()
+    .unwrap();
+    pipeline
+        .by_name("out")
+        .unwrap()
+        .set_property("location", source.to_str().unwrap());
+    pipeline.set_state(gst::State::Playing).unwrap();
+    let bus = pipeline.bus().unwrap();
+    bus.timed_pop_filtered(gst::ClockTime::from_seconds(60), &[gst::MessageType::Eos])
+        .expect("source rendered");
+    pipeline.set_state(gst::State::Null).unwrap();
+
+    let ms = gst::ClockTime::from_mseconds;
+    let edit = clip_core::export::Edit {
+        start: ms(500),
+        end: ms(3500),
+        volumes: vec![1.0],
+        max_bytes: None,
+        vertical: Some(0.25),
+        slow: Some(clip_core::export::Slow {
+            from: ms(1500),
+            to: ms(2500),
+            factor: 2.0,
+        }),
+    };
+    assert_eq!(edit.output_duration(), ms(4000));
+    let out = dir.join("vertical.mp4");
+    let cfg = VideoConfig {
+        fps: 60,
+        bitrate_kbps: 4_000,
+        ..Default::default()
+    };
+    clip_core::export::render(&source, &out, &edit, Encoder::X264, &cfg).unwrap();
+
+    let video = ffprobe(&out, "stream=width,height");
+    assert_eq!(video.lines().next().unwrap(), "404,720", "{video}");
+    let streams = ffprobe(&out, "stream=codec_type");
+    assert!(streams.contains("audio"), "{streams}");
+    let duration: f64 = ffprobe(&out, "format=duration").trim().parse().unwrap();
+    assert!((3.85..=4.15).contains(&duration), "duration {duration}");
+    // The video itself is stretched, not just padded out by the audio.
+    let video_secs: f64 = ffprobe(&out, "stream=duration")
+        .lines()
+        .next()
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    assert!(
+        (3.85..=4.15).contains(&video_secs),
+        "video lasts {video_secs}"
+    );
 
     std::fs::remove_dir_all(dir).unwrap();
 }

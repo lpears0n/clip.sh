@@ -155,6 +155,12 @@ pub fn add_audio_branch(
     Ok(parse)
 }
 
+/// The capture element the recorder would open for `source` (falling back
+/// to the default device the same way), for the level meters.
+pub fn meter_source(source: &AudioSource) -> Result<gst::Element> {
+    make_source(&present(source))
+}
+
 /// `source`, or the default device of its kind if the one it names isn't
 /// connected right now (an unplugged headset must not stop the recording).
 fn present(source: &AudioSource) -> AudioSource {
