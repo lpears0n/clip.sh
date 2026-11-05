@@ -140,6 +140,18 @@
     }
   }
 
+  // The video's timeupdate event comes only ~4 times a second, which made
+  // the progress line jump. While playing, follow the playhead on every
+  // display frame instead.
+  $effect(() => {
+    if (paused || !video) return
+    let id = requestAnimationFrame(function frame() {
+      tick()
+      id = requestAnimationFrame(frame)
+    })
+    return () => cancelAnimationFrame(id)
+  })
+
   function ended() {
     if (loop) {
       seek(trimming ? start : 0)

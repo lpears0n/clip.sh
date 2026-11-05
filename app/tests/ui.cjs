@@ -218,6 +218,28 @@ async function runScenario(scenario, browser) {
   )
   await page.waitForTimeout(300)
   await shot('viewer')
+  // While playing, the playhead moves every frame, not at timeupdate's ~4 Hz.
+  const positions = await page.evaluate(
+    () =>
+      new Promise((done) => {
+        const v = document.querySelector('video')
+        const head = document.querySelector('.player .head')
+        const seen = new Set()
+        v.muted = true
+        v.play().then(() => {
+          const until = performance.now() + 500
+          requestAnimationFrame(function frame(now) {
+            seen.add(head.style.transform)
+            if (now < until) requestAnimationFrame(frame)
+            else {
+              v.pause()
+              done(seen.size)
+            }
+          })
+        })
+      }),
+  )
+  assert.ok(positions >= 12, `playhead drew ${positions} positions in 0.5 s (want a smooth ~30)`)
   // Marked moments: ticks on the line, [ and ] jump between them.
   assert.equal(await page.locator('.player .tick').count(), 2, 'two marked moments on the line')
   const nearTime = (t) =>
