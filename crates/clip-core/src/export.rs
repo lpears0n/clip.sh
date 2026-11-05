@@ -319,10 +319,13 @@ pub fn render_with(
     if let Some(dir) = output.parent() {
         std::fs::create_dir_all(dir)?;
     }
+    // Every pass renders under a temporary name; the edit only appears
+    // once it is done (and, with a size limit, fits).
+    let partial = crate::save::partial_path(output);
     let Some(max_bytes) = edit.max_bytes else {
-        return render_once(
+        let result = render_once(
             input,
-            output,
+            &partial,
             edit,
             encoder,
             &cfg,
@@ -330,6 +333,7 @@ pub fn render_with(
             None,
             &control,
         );
+        return crate::save::finish_partial(output, result);
     };
     let seconds = edit.output_duration().seconds_f64();
     let mut plan = plan_size(max_bytes, seconds, audio_tracks > 0)?;
@@ -342,9 +346,11 @@ pub fn render_with(
             fps: plan.fps.map_or(cfg.fps, |f| f.min(cfg.fps)),
             ..cfg.clone()
         };
+        // A failed or cancelled pass removes its file; a too-big one from
+        // before was only ever the temporary file, so nothing is left.
         render_once(
             input,
-            output,
+            &partial,
             edit,
             encoder,
             &cfg,
@@ -352,10 +358,13 @@ pub fn render_with(
             Some(plan),
             &control,
         )?;
-        let size = std::fs::metadata(output)?.len();
+        let size = match std::fs::metadata(&partial) {
+            Ok(m) => m.len(),
+            Err(e) => return crate::save::finish_partial(output, Err(e.into())),
+        };
         if size <= max_bytes {
             tracing::info!(size, max_bytes, ?plan, "fitted export");
-            return Ok(());
+            return crate::save::finish_partial(output, Ok(()));
         }
         let scaled = plan.video_kbps as f64 * max_bytes as f64 / size as f64 * 0.95;
         tracing::info!(
@@ -369,11 +378,12 @@ pub fn render_with(
         }
         plan.video_kbps = scaled as u32;
     }
-    let _ = std::fs::remove_file(output);
+    let _ = std::fs::remove_file(&partial);
     bail!("couldn't fit in {}; trim it shorter", mb(max_bytes))
 }
 
-/// One render; `plan` scales the picture and sets the audio rate.
+/// One render into `output` (removed if it fails); `plan` scales the
+/// picture and sets the audio rate.
 #[allow(clippy::too_many_arguments)]
 fn render_once(
     input: &Path,
@@ -393,7 +403,7 @@ fn render_once(
         .property("faststart", true)
         .build()?;
     let sink = gst::ElementFactory::make("filesink")
-        .property("location", crate::save::partial_path(output))
+        .property("location", output)
         .build()?;
     pipeline.add_many([&dec, &mux, &sink])?;
     mux.link(&sink)?;
@@ -571,8 +581,10 @@ fn render_once(
         Some(e) => result.and(Err(anyhow::anyhow!(e))),
         None => result,
     };
-    // Written under a temporary name: the edit only appears once complete.
-    crate::save::finish_partial(output, result)
+    if result.is_err() {
+        let _ = std::fs::remove_file(output);
+    }
+    result
 }
 
 /// How long a render may take before it is taken for stuck: ten minutes,

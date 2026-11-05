@@ -101,9 +101,25 @@ fn meta_path(clip: &Path) -> PathBuf {
     PathBuf::from(p)
 }
 
+/// Whole or not at all (a temporary file moved over the old one): the
+/// storage limit reads `favorite` from here and must never catch it
+/// half-written.
 pub fn write_meta(clip: &Path, meta: &ClipMeta) -> Result<()> {
-    std::fs::write(meta_path(clip), serde_json::to_string(meta)?)?;
+    clip_core::save::write_atomic(&meta_path(clip), serde_json::to_string(meta)?.as_bytes())?;
     Ok(())
+}
+
+/// Whether a clip is starred: `Some(false)` when it has no sidecar, `None`
+/// when it has one that can't be read (in use, damaged), so a caller about
+/// to delete it can play safe.
+pub fn is_favorite(clip: &Path) -> Option<bool> {
+    match std::fs::read_to_string(meta_path(clip)) {
+        Ok(text) => serde_json::from_str::<ClipMeta>(&text)
+            .ok()
+            .map(|m| m.favorite),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Some(false),
+        Err(_) => None,
+    }
 }
 
 pub fn read_meta(clip: &Path) -> Option<ClipMeta> {

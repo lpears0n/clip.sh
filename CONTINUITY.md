@@ -423,6 +423,23 @@ Ad slots: AdSlot component, off unless `"ads": true` in settings.json (728×90 u
     `target.object`/`node.target` in `stream-properties`), and
     `keepalive-time` through `encoder::set`. The element builder panics
     on a property the element lacks; never set optional ones through it.
+- **Windows CI on PR #28**: `fits_an_export_under_a_size_limit` failed
+  moving the finished `.part` into place (os error 32, sharing
+  violation). A file just closed is often held open for a moment by
+  Defender or the indexer; that blocks a rename but not a write, which is
+  why the old write-in-place code never hit it. Renames now go through
+  `save::rename_retrying` (retries errors 5/32/33 for up to 5 s, Windows
+  only), and a finished file that still can't be moved is kept as
+  `.part` instead of deleted.
+- **Review fixes on PR #28:** sidecars (`.mp4.json`) and settings are
+  written with `save::write_atomic`, and the storage limit treats a
+  sidecar that exists but can't be read as starred
+  (`library::is_favorite` → `None`), so a clip mid-rename is never taken
+  for unstarred. Size-limited exports keep every pass under the `.part`
+  name until one fits (a failed later pass used to leave the earlier,
+  too-big file at the final path). The thumbnailer stamps a file before
+  each attempt; if it changed during a failed attempt it is retried in 2 s
+  instead of being recorded as failed in its finished state.
 - Left alone: seeking the export pipeline logs a harmless
   GStreamer-CRITICAL (mp4mux's output segment is in bytes; the seek
   still reaches the decoder).

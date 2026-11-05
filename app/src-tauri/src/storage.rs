@@ -104,7 +104,9 @@ pub fn enforce(clips_dir: &Path, policy: Policy) -> Result<Vec<PathBuf>> {
         if Some(&f.path) == newest.as_ref() || (policy.protect_edits && f.is_edit) {
             continue;
         }
-        if policy.protect_favorites && library::read_meta(&f.path).is_some_and(|m| m.favorite) {
+        // A sidecar that can't be read right now might say "starred":
+        // only a clip known not to be starred may go.
+        if policy.protect_favorites && library::is_favorite(&f.path) != Some(false) {
             continue;
         }
         // One clip that can't go (open in another app, read-only) mustn't
@@ -239,6 +241,12 @@ mod tests {
             ..policy(Some(2000), false)
         };
         assert_eq!(names(&enforce(&root, unprotected).unwrap()), ["a"]);
+
+        // A sidecar that can't be read might say starred: the clip stays.
+        let root = library();
+        std::fs::write(root.join("Game").join("a.mp4.json"), "{\"favo").unwrap();
+        let removed = enforce(&root, policy(Some(2000), false)).unwrap();
+        assert_eq!(names(&removed), ["b_edit"]);
         std::fs::remove_dir_all(root).unwrap();
     }
 }

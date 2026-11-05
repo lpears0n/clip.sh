@@ -237,6 +237,24 @@ fn fits_an_export_under_a_size_limit() {
     let duration: f64 = ffprobe(&out, "format=duration").trim().parse().unwrap();
     assert!((2.9..=3.1).contains(&duration), "duration {duration}");
 
+    // Cancelled (here before the first pass is done): neither the edit nor
+    // its temporary file is left; every pass renders under the temporary
+    // name, so a failure on a later pass can't leave an earlier one either.
+    let cancelled = dir.join("cancelled.mp4");
+    let control = clip_core::export::Control {
+        on_progress: None,
+        cancel: Some(std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
+            true,
+        ))),
+    };
+    let err =
+        clip_core::export::render_with(&source, &cancelled, &edit, Encoder::X264, &cfg, control)
+            .unwrap_err()
+            .to_string();
+    assert!(err.contains("cancelled"), "{err}");
+    assert!(!cancelled.exists());
+    assert!(!clip_core::save::partial_path(&cancelled).exists());
+
     // Far too small: refused up front, with how long would fit.
     let edit = clip_core::export::Edit {
         max_bytes: Some(20_000),

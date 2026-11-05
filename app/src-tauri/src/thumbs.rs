@@ -6,7 +6,7 @@ use std::{
     collections::HashMap,
     path::{Path, PathBuf},
     sync::{Arc, Mutex, mpsc},
-    time::SystemTime,
+    time::{Duration, SystemTime},
 };
 
 use tauri::{AppHandle, Emitter};
@@ -24,6 +24,10 @@ struct Job {
     path: PathBuf,
     game: String,
 }
+
+/// How long to wait before trying a file again that changed while an
+/// attempt on it failed (it was still being copied in).
+const RETRY_CHANGED: Duration = Duration::from_secs(2);
 
 /// A file's size and modification time: whether it changed since.
 type Stamp = (u64, Option<SystemTime>);
@@ -49,6 +53,7 @@ impl Thumbnailer {
         let seen: Arc<Mutex<HashMap<PathBuf, Option<Stamp>>>> = Arc::default();
         for _ in 0..WORKERS {
             let rx = rx.clone();
+            let tx = tx.clone();
             let app = app.clone();
             let seen = seen.clone();
             std::thread::Builder::new()
@@ -59,6 +64,10 @@ impl Thumbnailer {
                             Ok(j) => j,
                             Err(_) => return,
                         };
+                        // Stamped before: a file that finishes copying while
+                        // this attempt fails must not be recorded as failed
+                        // in its finished state.
+                        let before = stamp(&job.path);
                         match library::generate(&job.path) {
                             Ok(()) => {
                                 // Done: allow regeneration if the file changes later.
@@ -70,10 +79,23 @@ impl Thumbnailer {
                                     Err(e) => tracing::warn!("{}: {e:#}", job.path.display()),
                                 }
                             }
+                            Err(e) if stamp(&job.path) != before => {
+                                // Changed during the attempt: still queued, so
+                                // try again shortly rather than wait for a
+                                // refresh that may have come and gone.
+                                tracing::debug!(
+                                    "thumbnail for {}: {e:#}; the file changed, retrying",
+                                    job.path.display()
+                                );
+                                let tx = tx.clone();
+                                std::thread::spawn(move || {
+                                    std::thread::sleep(RETRY_CHANGED);
+                                    let _ = tx.send(job);
+                                });
+                            }
                             Err(e) => {
                                 tracing::warn!("thumbnail for {}: {e:#}", job.path.display());
-                                let failed = stamp(&job.path);
-                                seen.lock().unwrap().insert(job.path, Some(failed));
+                                seen.lock().unwrap().insert(job.path, Some(before));
                             }
                         }
                     }

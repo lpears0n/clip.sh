@@ -1,9 +1,6 @@
 //! User settings, stored as JSON in `$XDG_CONFIG_HOME/reruns/settings.json`.
 
-use std::{
-    path::{Path, PathBuf},
-    sync::atomic::{AtomicU64, Ordering},
-};
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use clip_core::{
@@ -266,18 +263,11 @@ impl Settings {
 }
 
 fn save_to(settings: &Settings, path: &Path) -> Result<()> {
-    static NEXT: AtomicU64 = AtomicU64::new(0);
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    // Unique per save: two saves at once mustn't write the same file.
-    let tmp = path.with_extension(format!("json.{}.tmp", NEXT.fetch_add(1, Ordering::Relaxed)));
-    let written = std::fs::write(&tmp, serde_json::to_string_pretty(settings)?)
-        .and_then(|()| std::fs::rename(&tmp, path));
-    if written.is_err() {
-        let _ = std::fs::remove_file(&tmp);
-    }
-    written.with_context(|| format!("writing {}", path.display()))
+    clip_core::save::write_atomic(path, serde_json::to_string_pretty(settings)?.as_bytes())
+        .with_context(|| format!("writing {}", path.display()))
 }
 
 #[cfg(test)]

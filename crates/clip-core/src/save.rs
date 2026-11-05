@@ -1,6 +1,10 @@
 //! Mux a [`Clip`] snapshot into an MP4 file.
 
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
+    time::{Duration, Instant},
+};
 
 use anyhow::{Context, Result, bail};
 use gstreamer as gst;
@@ -24,15 +28,67 @@ pub fn partial_path(path: &Path) -> PathBuf {
 }
 
 /// Finish a file written to [`partial_path`]`(path)`: on success move it
-/// into place (replacing what was there), otherwise remove it.
+/// into place (replacing what was there), otherwise remove it. A finished
+/// file that can't be moved is kept under its temporary name rather than
+/// lost, and the error says where.
 pub fn finish_partial(path: &Path, result: Result<()>) -> Result<()> {
     let partial = partial_path(path);
-    let result = result.and_then(|()| {
-        std::fs::rename(&partial, path)
-            .with_context(|| format!("moving {} into place", path.display()))
-    });
-    if result.is_err() {
+    if let Err(e) = result {
         let _ = std::fs::remove_file(&partial);
+        return Err(e);
+    }
+    rename_retrying(&partial, path).with_context(|| {
+        format!(
+            "moving {} into place (it is kept as {})",
+            path.display(),
+            partial.display()
+        )
+    })
+}
+
+/// How long a rename keeps trying while Windows reports the file busy.
+const RENAME_PATIENCE: Duration = Duration::from_secs(5);
+
+/// `std::fs::rename`, replacing `to`. On Windows a file that was just
+/// written is often held open for a moment by antivirus or the search
+/// indexer, which fails a rename (not a write) with a sharing violation;
+/// those are retried for a few seconds.
+pub fn rename_retrying(from: &Path, to: &Path) -> std::io::Result<()> {
+    let deadline = Instant::now() + RENAME_PATIENCE;
+    let mut wait = Duration::from_millis(10);
+    loop {
+        match std::fs::rename(from, to) {
+            Err(e) if busy(&e) && Instant::now() < deadline => {
+                std::thread::sleep(wait);
+                wait = (wait * 2).min(Duration::from_millis(500));
+            }
+            result => return result,
+        }
+    }
+}
+
+/// A Windows error that means another process has the file open for now:
+/// access denied, sharing violation, lock violation.
+fn busy(e: &std::io::Error) -> bool {
+    cfg!(windows) && matches!(e.raw_os_error(), Some(5 | 32 | 33))
+}
+
+/// Write `contents` to `path` whole: to a temporary file next to it, then
+/// moved over it. A reader never sees it half-written and a crash can't
+/// leave it truncated.
+pub fn write_atomic(path: &Path, contents: &[u8]) -> std::io::Result<()> {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    // Unique per write: two writes at once mustn't share a file.
+    let mut tmp = path.as_os_str().to_owned();
+    tmp.push(format!(
+        ".{}-{}.tmp",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    let tmp = PathBuf::from(tmp);
+    let result = std::fs::write(&tmp, contents).and_then(|()| rename_retrying(&tmp, path));
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
     }
     result
 }
@@ -161,6 +217,23 @@ fn sanitize(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn atomic_writes_replace_whole_and_leave_nothing_behind() {
+        let dir = std::env::temp_dir().join(format!("reruns-atomic-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("clip.mp4.json");
+        write_atomic(&path, b"first").unwrap();
+        write_atomic(&path, b"second").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "second");
+        let names: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(names, ["clip.mp4.json"], "no temporary files left");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn sanitizes_folder_names() {
