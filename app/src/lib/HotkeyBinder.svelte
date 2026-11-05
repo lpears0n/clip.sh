@@ -41,7 +41,7 @@
     onblur={() => (listening = false)}
   >
     {#if listening}
-      <span class="text-secondary font-medium">Press a key combination…</span>
+      <span class="text-secondary font-medium">Press keys…</span>
     {:else}
       {#each value.split('+') as k, i (i)}
         {#if i > 0}<span class="text-muted">+</span>{/if}

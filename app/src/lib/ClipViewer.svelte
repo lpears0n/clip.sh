@@ -410,7 +410,7 @@
     ['M', 'Mute'],
     ['F', 'Fullscreen'],
     ['T', 'Trim'],
-    ['Ctrl+C', 'Copy the clip (paste it into Discord)'],
+    ['Ctrl+C', 'Copy clip'],
     ['I / O', 'Set trim start / end'],
     ['Esc', 'Back'],
     ['?', 'This list'],
@@ -530,7 +530,7 @@
       <button class="action {trimming ? 'text-accent' : ''}" onclick={() => (trimming = !trimming)} title="Trim (T)">
         {trimming ? 'Done' : 'Trim'}
       </button>
-      <button class="action" onclick={oncopy} title="Copy the clip, then paste it into Discord or a folder (Ctrl+C)">Copy</button>
+      <button class="action" onclick={oncopy} title="Copy (Ctrl+C)">Copy</button>
       <button class="action" onclick={onshare}>Show in folder</button>
       <button
         class="action {armed ? 'text-danger' : ''}"
@@ -683,7 +683,7 @@
           <option value="vertical">Vertical 9:16</option>
         </select>
       </label>
-      <label class="flex items-center gap-2.5" title="Plays the striped range slower; its sound is muted">
+      <label class="flex items-center gap-2.5" title="Slows the striped range (muted)">
         <span class="text-muted">Slow-mo</span>
         <select class="field w-24 flex-none" value={slowFactor} onchange={(e) => setSlow(Number(e.currentTarget.value))} aria-label="Slow motion">
           <option value={1}>Off</option>

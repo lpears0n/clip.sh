@@ -52,7 +52,7 @@
       <button
         class="btn-icon size-7 text-muted"
         onclick={onignore}
-        title="Not a game? Stop recording it and don’t detect it again"
+        title="Not a game"
         aria-label="Not a game"
       >
         <X size={14} />

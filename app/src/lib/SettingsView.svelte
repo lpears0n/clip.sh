@@ -185,14 +185,14 @@
     !support
       ? ''
       : !support.configured
-        ? 'This build can’t update itself. Installers from the Releases page can.'
+        ? 'This build can’t update itself.'
         : updateError
           ? updateError
           : available
-            ? `Version ${available.version} is available.`
+            ? `Version ${available.version} available.`
             : checked
-              ? 'You’re up to date.'
-              : 'Updates come from the GitHub releases, signed.',
+              ? 'Up to date.'
+              : '',
   )
 
   // Save sounds
@@ -251,10 +251,10 @@
       <section class="space-y-2">
         <h3 class="section-title px-1">Startup</h3>
         <div class="card divide-y divide-line">
-          <Row title="Launch at login" description="Start Reruns in the background when you sign in.">
+          <Row title="Launch at login">
             <Toggle label="Launch at login" checked={settings.launch_at_login} onchange={(launch_at_login) => update({ launch_at_login })} />
           </Row>
-          <Row title="Start in tray" description="When launched at login, don't open the window." disabled={!settings.launch_at_login}>
+          <Row title="Start in tray" disabled={!settings.launch_at_login}>
             <Toggle
               label="Start in tray"
               disabled={!settings.launch_at_login}
@@ -262,7 +262,7 @@
               onchange={(start_in_tray) => update({ start_in_tray })}
             />
           </Row>
-          <Row title="Closing the window" description="Keep recording in the tray, or quit completely.">
+          <Row title="Closing the window">
             <select
               class="field"
               value={settings.close_to_tray ? 'tray' : 'quit'}
@@ -277,10 +277,10 @@
       <section class="space-y-2">
         <h3 class="section-title px-1">When a clip is saved</h3>
         <div class="card divide-y divide-line">
-          <Row title="Show a notification" description="Includes the game the clip was saved under.">
+          <Row title="Show a notification">
             <Toggle label="Show a notification" checked={settings.notify_on_save} onchange={(notify_on_save) => update({ notify_on_save })} />
           </Row>
-          <Row title="Play a sound" description="A short sound you can hear in-game.">
+          <Row title="Play a sound">
             <Toggle label="Play a sound" checked={settings.sound_on_save} onchange={(sound_on_save) => update({ sound_on_save })} />
           </Row>
           {#if settings.sound_on_save}
@@ -311,7 +311,7 @@
                 <button class="btn h-9" onclick={() => chooseSound('screenshot')}>Choose file…</button>
               </div>
             </Row>
-            <Row title="Sound volume" description="Relative to the sound file itself. The built-in beep is already quiet.">
+            <Row title="Sound volume">
               <div class="flex items-center gap-3">
                 <input
                   type="range"
@@ -337,7 +337,7 @@
           {#if status?.backend === 'windows'}
             <Row
               title="In-game popup"
-              description="A small popup over the game says when recording is ready and when a clip saves. It never shows up in clips."
+              description="“Ready” and “Clip saved” over the game. Not recorded."
             >
               <Toggle label="In-game popup" checked={settings.overlay} onchange={(overlay) => update({ overlay })} />
             </Row>
@@ -370,7 +370,7 @@
               </button>
             {/if}
           </Row>
-          <Row title="Check automatically" description="Looks for a new release every few hours. Nothing downloads until you choose to update.">
+          <Row title="Check automatically">
             <Toggle
               label="Check for updates automatically"
               checked={settings.check_for_updates}
@@ -384,7 +384,7 @@
       <section class="space-y-2">
         <h3 class="section-title px-1">Quality</h3>
         <div class="card divide-y divide-line">
-          <Row title="Preset" description="Tuned for your display and GPU. Changing any value below makes it Custom.">
+          <Row title="Preset">
             <Segmented
               label="Preset"
               value={preset}
@@ -397,7 +397,7 @@
           </Row>
           <Row
             title="Frame rate"
-            description={hz ? `Your display runs at ${hz} Hz. Higher rates repeat frames.` : 'Frames per second.'}
+            description={hz ? `Your display: ${hz} Hz` : undefined}
           >
             <select class="field w-44" value={settings.fps} onchange={(e) => update({ fps: Number(e.currentTarget.value) })}>
               {#each FPS_OPTIONS as f (f)}
@@ -405,7 +405,7 @@
               {/each}
             </select>
           </Row>
-          <Row title="Bitrate" description="More bitrate keeps fast motion sharp.">
+          <Row title="Bitrate">
             <input
               type="range"
               min="5"
@@ -422,10 +422,10 @@
           <Row
             title="Codec"
             description={settings.codec === 'h264'
-              ? 'H.264 plays everywhere, including Discord and phones.'
+              ? 'Plays everywhere.'
               : settings.codec === 'hevc'
-                ? 'HEVC is about a third smaller at the same quality. Some apps can’t play it.'
-                : 'AV1 gives the best quality per megabyte. Needs a recent player.'}
+                ? 'A third smaller. Some apps can’t play it.'
+                : 'Smallest files. Needs a recent player.'}
           >
             <Segmented
               label="Codec"
@@ -439,7 +439,7 @@
               }))}
             />
           </Row>
-          <Row title="Encoder" description="Hardware encoders cost almost no game performance.">
+          <Row title="Encoder">
             <select
               class="field w-48"
               value={settings.encoder ?? 'auto'}
@@ -458,10 +458,9 @@
           </Row>
         </div>
         <p class="px-1 text-secondary text-muted">
-          A {lengthLabel(settings.replay_seconds)} clip is about
-          <span class="font-medium text-fg-2">{bytes(clipBytes)}</span>, and the replay buffer holds the same in memory.
+          {lengthLabel(settings.replay_seconds)} ≈ <span class="font-medium text-fg-2">{bytes(clipBytes)}</span>, on disk and in RAM.
           {#if clipBytes > 2e9}
-            <span class="text-accent">That’s a lot of RAM; consider a shorter replay or lower bitrate.</span>
+            <span class="text-accent">That’s a lot of RAM.</span>
           {/if}
         </p>
       </section>
@@ -469,7 +468,7 @@
       <section class="space-y-2">
         <h3 class="section-title px-1">Capture</h3>
         <div class="card divide-y divide-line">
-          <Row title="Replay length" description="How far back a clip reaches when you press the hotkey. Applies right away, even mid-game.">
+          <Row title="Replay length" description="Applies immediately.">
             <select
               class="field w-44"
               value={settings.replay_seconds}
@@ -480,31 +479,23 @@
               {/each}
             </select>
           </Row>
-          <Row title="Record cursor" description="Draw the mouse pointer into clips.">
+          <Row title="Record cursor">
             <Toggle label="Record cursor" checked={settings.cursor} onchange={(cursor) => update({ cursor })} />
           </Row>
           <Row
             title="GPU direct capture"
             description={status?.capture_path === 'zerocopy'
-              ? 'Active: frames go straight from the compositor into the encoder, so a busy game can’t starve the capture.'
-              : status?.capture_path === 'copy'
-                ? settings.zero_copy
-                  ? 'Not available on this driver right now; frames are copied through memory instead.'
-                  : 'Off: frames are copied through memory. Turn on for smoother capture under load.'
-                : status?.backend === 'windows'
-                  ? 'Frames go straight from Windows Graphics Capture into the encoder as D3D11 textures.'
-                  : 'Frames go straight from the compositor into the encoder when the driver allows; otherwise they’re copied through memory. Compare with and without under load.'}
+              ? 'Active.'
+              : status?.capture_path === 'copy' && settings.zero_copy
+                ? 'Not available on this driver.'
+                : undefined}
           >
             <Toggle label="GPU direct capture" checked={settings.zero_copy} onchange={(zero_copy) => update({ zero_copy })} />
           </Row>
           {#if status?.backend !== 'windows'}
           <Row
             title="Capture method"
-            description={status?.backend === 'kwin'
-              ? 'Recording each game’s window directly, with no permission prompts (KDE Plasma).'
-              : status?.backend === 'portal'
-                ? 'Recording the screen you chose through your desktop. Works on any Wayland desktop.'
-                : 'How games are captured.'}
+            description={status?.backend === 'kwin' ? 'Game window, no prompts.' : status?.backend === 'portal' ? 'The screen you chose.' : undefined}
           >
             <select
               class="field w-48"
@@ -522,13 +513,13 @@
           {:else}
             <Row
               title="Capture method"
-              description="Only the game’s own window is recorded, never the rest of your screen. Notifications, Discord and your other monitors stay out of clips."
+              description="Game window only."
             />
           {/if}
           {#if status?.backend === 'windows'}
             <Row
               title="HDR compatibility"
-              description="On an HDR display, tone-map HDR games so clips look right instead of blown out. This records the game’s area of the screen rather than its window, so a notification or overlay on top of the game can show up in clips. Applies from the next game; no effect on SDR displays."
+              description="Fixes blown-out HDR clips. Records the screen area, so overlays can show up."
             >
               <Toggle
                 label="HDR compatibility"
@@ -539,7 +530,7 @@
             {#if settings.hdr_compatibility}
               <Row
                 title="Capture the window in HDR"
-                description="Experimental. Records the game’s own window in HDR and tone-maps it on the GPU, so nothing on top of the game gets in. If it doesn’t work on your PC, Reruns goes back to the screen area by itself."
+                description="Experimental. Records only the game window."
               >
                 <Toggle
                   label="Capture the window in HDR"
@@ -553,12 +544,12 @@
             <Row
               title="HDR display"
               description={status.hdr_tonemapped
-                ? `The game’s display is in HDR (SDR white at ${Math.round(status.hdr.sdr_white_nits)} nits). HDR is tone-mapped into your clips.`
-                : `The game’s display is in HDR (SDR white at ${Math.round(status.hdr.sdr_white_nits)} nits). Clips are SDR, so bright HDR highlights look blown out${status.backend === 'windows' ? '; turn on HDR compatibility to fix that' : ''}.`}
+                ? `SDR white ${Math.round(status.hdr.sdr_white_nits)} nits. Tone-mapped.`
+                : `SDR white ${Math.round(status.hdr.sdr_white_nits)} nits. Highlights blow out${status.backend === 'windows' ? ' without HDR compatibility' : ''}.`}
             />
           {/if}
           {#if settings.ignored_games.length}
-            <Row title="Not games" description="Apps you said aren’t games. They’re never recorded; remove one to detect it again.">
+            <Row title="Not games" description="Never recorded. Remove one to record it again.">
               <div class="flex max-w-80 flex-wrap justify-end gap-1.5">
                 {#each settings.ignored_games as g, i (g.exe ?? g.name)}
                   <span class="chip" title={g.exe ? `${g.exe}.exe` : g.name}>
@@ -579,8 +570,8 @@
             <Row
               title="Screen"
               description={status.needs_screen
-                ? 'Choose which screen to record. Your desktop asks once and remembers.'
-                : 'Your desktop remembers this choice; games are recorded without asking.'}
+                ? 'Your desktop asks once.'
+                : undefined}
             >
               <button class="btn {status.needs_screen ? 'border-accent/60 text-accent' : ''}" onclick={onchoosescreen}>
                 {status.needs_screen ? 'Choose screen' : 'Change screen'}
@@ -589,21 +580,18 @@
           {/if}
         </div>
         <p class="px-1 text-secondary text-muted">
-          {status?.backend === 'windows'
-            ? 'Recording changes apply from the next game you launch.'
-            : 'Recording changes apply from the next game you launch; a new capture method applies after restarting Reruns.'}
+          {status?.backend === 'windows' ? 'Changes apply from the next game.' : 'Changes apply from the next game; capture method after a restart.'}
         </p>
       </section>
     {:else if category === 'Audio'}
       <section class="space-y-2">
         <h3 class="section-title px-1">Sources</h3>
         <div class="card divide-y divide-line">
-          <Row title="Game and desktop audio" description="Everything playing through the output below.">
+          <Row title="Game and desktop audio">
             <Toggle label="Game and desktop audio" checked={settings.desktop_audio} onchange={(desktop_audio) => update({ desktop_audio })} />
           </Row>
           <Row
             title="Output device"
-            description="Pick your headset to leave out sound from other outputs."
             disabled={!settings.desktop_audio}
           >
             <div class="flex w-64 flex-col gap-2">
@@ -627,7 +615,7 @@
               {/if}
             </div>
           </Row>
-          <Row title="Microphone" description="Saved as its own track, so you can mix it when trimming.">
+          <Row title="Microphone" description="Saved as a separate track.">
             <Toggle label="Microphone" checked={settings.mic} onchange={(mic) => update({ mic })} />
           </Row>
           <Row title="Input device" disabled={!settings.mic}>
@@ -654,13 +642,13 @@
           </Row>
         </div>
         <p class="px-1 text-secondary text-muted">
-          A device that isn’t connected when a game starts is swapped for the default until it’s back.
+          Unplugged devices fall back to the default.
         </p>
       </section>
       <section class="space-y-2">
         <h3 class="section-title px-1">Quality</h3>
         <div class="card divide-y divide-line">
-          <Row title="Audio bitrate" description="Per track, AAC. 160 kbps is transparent for most games.">
+          <Row title="Audio bitrate" description="Per track.">
             <select
               class="field w-[140px]"
               value={settings.audio_bitrate_kbps}
@@ -672,7 +660,7 @@
             </select>
           </Row>
         </div>
-        <p class="px-1 text-secondary text-muted">Recording changes apply from the next game you launch.</p>
+        <p class="px-1 text-secondary text-muted">Changes apply from the next game.</p>
       </section>
     {:else if category === 'Hotkeys'}
       <section class="space-y-2">
@@ -682,22 +670,22 @@
             <Row
               title="Clip that"
               description={hotkeyBackend === 'portal'
-                ? 'Registered with your desktop, which may ask to confirm it once.'
+                ? 'Your desktop may ask to confirm it.'
                 : hotkeyBackend === 'native'
-                  ? 'Registered with Windows. Works over fullscreen games; pick another key if an app already owns it.'
-                  : 'Saves the replay buffer from the current game. Works in fullscreen games.'}
+                  ? 'If nothing happens, another app may own this key.'
+                  : undefined}
             >
               <HotkeyBinder value={settings.hotkey} onbind={(hotkey) => update({ hotkey })} />
             </Row>
             <Row
               title="Screenshot"
-              description="Saves the newest frame of the game as a PNG, next to its clips."
+              description="Saved as PNG with the clips."
             >
               <HotkeyBinder value={settings.screenshot_hotkey} onbind={(screenshot_hotkey) => update({ screenshot_hotkey })} />
             </Row>
             <Row
               title="Mark a moment"
-              description="Drops a marker into the recording. Clips you save show it on their timeline; [ and ] jump between markers."
+              description="Shows on the clip’s timeline."
             >
               <HotkeyBinder value={settings.marker_hotkey} onbind={(marker_hotkey) => update({ marker_hotkey })} />
             </Row>
@@ -705,17 +693,17 @@
           <Row
             title="Command"
             description={hotkeyBackend === null
-              ? 'Your desktop has no global shortcut service. Bind this command to a key in its keyboard settings; rerunsctl screenshot takes a screenshot and rerunsctl mark marks a moment.'
+              ? 'No global hotkeys on this desktop. Bind this to a key in its keyboard settings.'
               : hotkeyBackend === 'native'
-                ? 'Use it from scripts, Stream Deck profiles or AutoHotkey. rerunsctl screenshot takes a screenshot; rerunsctl mark marks a moment.'
-                : 'Bind this to any key in your desktop’s keyboard settings, or use it from scripts. rerunsctl screenshot takes a screenshot; rerunsctl mark marks a moment.'}
+                ? 'For scripts, Stream Deck or AutoHotkey.'
+                : 'Bind it to a key, or use it in scripts.'}
           >
-            <code class="rounded-ctl border border-line bg-canvas px-2.5 py-1.5 text-secondary text-fg-2">rerunsctl save</code>
+            <code class="rounded-ctl border border-line bg-canvas px-2.5 py-1.5 text-secondary text-fg-2" title="Also: rerunsctl screenshot, rerunsctl mark">rerunsctl save</code>
             <button class="btn" onclick={copyCommand}>{copied ? 'Copied' : 'Copy'}</button>
           </Row>
         </div>
         {#if hotkeyBackend === 'kglobalaccel'}
-          <p class="px-1 text-secondary text-muted">Also listed in System Settings → Shortcuts, under Reruns.</p>
+          <p class="px-1 text-secondary text-muted">Also in System Settings → Shortcuts.</p>
         {/if}
       </section>
     {:else if category === 'Storage'}
@@ -752,7 +740,7 @@
       <section class="space-y-2">
         <h3 class="section-title px-1">File limits</h3>
         <div class="card divide-y divide-line">
-          <Row title="Storage limit" description="Over the limit, the oldest clips are removed after each save.">
+          <Row title="Storage limit" description="Oldest clips go first.">
             {#if limitChoice === 'custom'}
               <input
                 class="field w-20 text-right tabular-nums"
@@ -777,7 +765,7 @@
           </Row>
           <Row
             title="Protect edited clips"
-            description="Only remove original captures, never clips you rendered in the trimmer."
+            description="Never remove clips you rendered."
             disabled={settings.storage_limit_gb == null}
           >
             <Toggle
@@ -787,7 +775,7 @@
               onchange={(protect_edits) => update({ protect_edits })}
             />
           </Row>
-          <Row title="Move deleted clips to Trash" description="Deleted and removed clips stay restorable until you empty the Trash.">
+          <Row title="Move deleted clips to Trash">
             <Toggle label="Move deleted clips to Trash" checked={settings.use_trash} onchange={(use_trash) => update({ use_trash })} />
           </Row>
         </div>
@@ -796,7 +784,7 @@
       <section class="space-y-2">
         <h3 class="section-title px-1">Theme</h3>
         <div class="card divide-y divide-line">
-          <Row title="Accent colour" description="Used for buttons, the record button and the trim range.">
+          <Row title="Accent colour">
             <div class="flex items-center gap-2" role="radiogroup" aria-label="Accent colour">
               {#each Object.entries(ACCENTS) as [id, a] (id)}
                 <button
@@ -814,7 +802,7 @@
               {/each}
             </div>
           </Row>
-          <Row title="Card size" description="How many clips fit across the library.">
+          <Row title="Card size">
             <Segmented
               label="Card size"
               value={prefs.density}
@@ -830,15 +818,14 @@
       <section class="space-y-2">
         <h3 class="section-title px-1">Motion</h3>
         <div class="card divide-y divide-line">
-          <Row title="Preview clips on hover" description="Play a silent preview when the pointer rests on a clip.">
+          <Row title="Preview clips on hover">
             <Toggle label="Preview clips on hover" checked={prefs.hoverPreviews} onchange={(hoverPreviews) => setPrefs({ hoverPreviews })} />
           </Row>
-          <Row title="Reduce motion" description="Turn off animations and transitions. Follows your system setting when off.">
+          <Row title="Reduce motion" description="When off, follows your system.">
             <Toggle label="Reduce motion" checked={prefs.reduceMotion} onchange={(reduceMotion) => setPrefs({ reduceMotion })} />
           </Row>
         </div>
       </section>
-      <p class="px-1 text-secondary text-muted">Appearance settings are stored on this computer only.</p>
     {/if}
   </div>
 </div>

@@ -60,17 +60,13 @@
 
   // First-run checklist: capture, hotkey, where clips go.
   const capture = $derived.by(() => {
-    if (!status) return { ok: false, text: 'Starting the recorder…' }
-    if (status.needs_screen) return { ok: false, text: 'Choose which screen to record.', action: 'screen' as const }
+    if (!status) return { ok: false, text: 'Starting…' }
+    if (status.needs_screen) return { ok: false, text: 'Choose a screen.', action: 'screen' as const }
     if (status.state === 'unavailable') return { ok: false, text: status.error ?? 'Capture unavailable.', action: 'recording' as const }
     return {
       ok: true,
       text:
-        status.backend === 'kwin'
-          ? 'Game windows are captured directly, no prompts.'
-          : status.backend === 'windows'
-            ? 'Your game’s window is captured directly, no prompts.'
-            : 'Capturing the screen you chose.',
+        status.backend === 'kwin' || status.backend === 'windows' ? 'Game window, no prompts.' : 'The screen you chose.',
     }
   })
   const folder = $derived(settings?.clips_dir.replace(/^\/home\/[^/]+/, '~') ?? '…')
@@ -135,8 +131,7 @@
   <div class="mx-auto flex h-full max-w-2xl flex-col justify-center">
     <h1 class="display-face text-display font-semibold">Play something</h1>
     <p class="mt-2 text-body text-muted">
-      Games you play show up here. Reruns keeps the last {settings ? settings.replay_seconds : 30} seconds in memory while
-      you play, so a moment is never lost.
+      Games show up here after you play one.
     </p>
 
     <ol class="card mt-8 divide-y divide-line">
@@ -158,7 +153,7 @@
         <span class="flex size-9 flex-none items-center justify-center rounded-full bg-ok/15 text-ok"><Check size={18} /></span>
         <div class="min-w-0 flex-1">
           <div class="flex items-center gap-2 text-body font-medium"><Keyboard size={15} class="text-muted" /> Save a clip</div>
-          <div class="mt-0.5 text-secondary text-muted">Press <kbd class="align-[1px]">{hotkey}</kbd> in any game. Change it under Hotkeys.</div>
+          <div class="mt-0.5 text-secondary text-muted">Press <kbd class="align-[1px]">{hotkey}</kbd> in any game.</div>
         </div>
         <button class="btn h-8" onclick={() => onsettings('Hotkeys')}>Change</button>
       </li>
@@ -172,7 +167,7 @@
       </li>
     </ol>
     <p class="mt-4 text-secondary text-muted">
-      You can also drop any video onto this window to trim it.
+      Drop any video here to trim it.
     </p>
   </div>
 {/if}

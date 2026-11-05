@@ -245,7 +245,7 @@ async function runScenario(scenario, browser) {
   assert.ok(positions >= 12, `playhead drew ${positions} positions in 0.5 s (want a smooth ~30)`)
   // Ctrl+C copies the clip itself, ready to paste into Discord.
   await page.keyboard.press('Control+c')
-  await page.getByText('Copied. Paste it into Discord').waitFor()
+  await page.getByText('Clip copied').waitFor()
   assert.match(await page.evaluate(() => window.__copied), /\.mp4$/, 'the clip file went to copy_clip')
   // Marked moments: ticks on the line, [ and ] jump between them.
   assert.equal(await page.locator('.player .tick').count(), 2, 'two marked moments on the line')
@@ -330,7 +330,7 @@ async function runScenario(scenario, browser) {
 
   // "Not a game" from the top bar, listed under Settings → Recording.
   await page.getByRole('button', { name: 'Not a game' }).click()
-  await page.getByText('Won’t record ELDEN RING again').waitFor()
+  await page.getByText('Ignoring ELDEN RING').waitFor()
 
   // Settings and appearance.
   await page.getByRole('button', { name: 'Settings 3' }).click()
@@ -343,7 +343,7 @@ async function runScenario(scenario, browser) {
   await shot('settings-recording-blue')
   assert.equal(await page.getByRole('button', { name: 'Detect ELDEN RING again' }).count(), 1, 'ignored app listed')
   await page.getByText('HDR display').waitFor()
-  assert.ok(await page.getByText('SDR white at 240 nits').isVisible(), 'HDR row shows the SDR white level')
+  assert.ok(await page.getByText('SDR white 240 nits').isVisible(), 'HDR row shows the SDR white level')
   // Windows: HDR compatibility, and the experimental window capture under it.
   await page.evaluate(
     (s) => window[`_${window.__listeners['status-changed']}`]({ event: 'status-changed', id: 1, payload: s }),
@@ -390,7 +390,7 @@ async function runScenario(scenario, browser) {
   // Updates: checked on request; an update shows in Settings and the top bar.
   await page.getByText('Reruns 0.1.0').waitFor()
   await page.getByRole('button', { name: 'Check now' }).click()
-  await page.getByText('Version 0.2.0 is available.').waitFor()
+  await page.getByText('Version 0.2.0 available.').waitFor()
   assert.equal(await page.getByRole('button', { name: 'Update and restart' }).count(), 1, 'update button')
   assert.equal(await page.locator('header').getByRole('button', { name: 'Update 0.2.0' }).count(), 1, 'top bar shows the update')
   await page.getByRole('heading', { name: 'Updates' }).scrollIntoViewIfNeeded()

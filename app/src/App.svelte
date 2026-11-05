@@ -109,7 +109,7 @@
   async function copyClip(c: Clip) {
     try {
       await api.copyClip(c.path)
-      notify('Copied. Paste it into Discord, a chat or a folder.')
+      notify('Clip copied')
     } catch (e) {
       notify(String(e), true)
     }
@@ -292,7 +292,7 @@
     const name = status?.game
     try {
       settings = await api.ignoreCurrentGame()
-      notify(`Won’t record ${name ?? 'that app'} again. Undo in Settings → Recording.`)
+      notify(`Ignoring ${name ?? 'that app'}. Undo in Settings → Recording.`)
     } catch (e) {
       notify(String(e), true)
     }
@@ -422,7 +422,7 @@
       <h1 class="display-face truncate text-title font-semibold" data-tauri-drag-region>{title}</h1>
       <div class="h-full min-w-0 flex-1" data-tauri-drag-region></div>
       {#if newRelease}
-        <button class="btn h-8 flex-none px-3 text-secondary" onclick={() => openSettings('General')} title="See the update in Settings">
+        <button class="btn h-8 flex-none px-3 text-secondary" onclick={() => openSettings('General')}>
           Update {newRelease.version}
         </button>
       {/if}

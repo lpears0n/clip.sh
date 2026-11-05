@@ -236,7 +236,7 @@ fn fits_an_export_under_a_size_limit() {
     let err = clip_core::export::render(&source, &dir.join("no.mp4"), &edit, Encoder::X264, &cfg)
         .unwrap_err()
         .to_string();
-    assert!(err.starts_with("too long to fit in 20 kB"), "{err}");
+    assert!(err.starts_with("too long for 20 kB"), "{err}");
     assert!(!dir.join("no.mp4").exists());
 
     std::fs::remove_dir_all(dir).unwrap();
