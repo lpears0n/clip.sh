@@ -5,10 +5,10 @@
 //! builds once the owner has set it up; see docs/RELEASING.md). Other
 //! builds report updates as not set up, and nothing is ever checked.
 //!
-//! Only the check runs by itself: one small request a few minutes after
-//! start and then every six hours, so nothing is downloaded while a game is
-//! being played. Downloading and installing happen when the user asks, and
-//! end with a restart.
+//! Only the check runs by itself: one small request shortly after start
+//! (whose result the app offers in a prompt) and then every six hours, so
+//! nothing is downloaded while a game is being played. Downloading and
+//! installing happen when the user asks, and end with a restart.
 
 use std::time::Duration;
 
@@ -24,7 +24,8 @@ pub const UPDATE_AVAILABLE: &str = "update-available";
 /// unknown).
 pub const UPDATE_PROGRESS: &str = "update-progress";
 
-const FIRST_CHECK: Duration = Duration::from_secs(3 * 60);
+/// Long enough for start-up (and a login's other apps) to settle.
+const FIRST_CHECK: Duration = Duration::from_secs(20);
 const CHECK_EVERY: Duration = Duration::from_secs(6 * 60 * 60);
 
 #[derive(Debug, Clone, Serialize)]
@@ -33,6 +34,8 @@ pub struct UpdateInfo {
     pub current_version: String,
     /// Release notes, as written on the release.
     pub notes: Option<String>,
+    /// Found by the check at start-up: the app asks once whether to update.
+    pub prompt: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -70,6 +73,7 @@ pub fn spawn_checks(app: &AppHandle) {
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(FIRST_CHECK).await;
         let mut announced: Option<String> = None;
+        let mut first = true;
         loop {
             let enabled = app
                 .state::<AppState>()
@@ -79,8 +83,9 @@ pub fn spawn_checks(app: &AppHandle) {
                 .check_for_updates;
             if enabled {
                 match check(&app).await {
-                    Ok(Some(info)) if announced.as_deref() != Some(info.version.as_str()) => {
+                    Ok(Some(mut info)) if announced.as_deref() != Some(info.version.as_str()) => {
                         tracing::info!(version = %info.version, "update available");
+                        info.prompt = first;
                         let _ = app.emit(UPDATE_AVAILABLE, &info);
                         announced = Some(info.version);
                     }
@@ -88,6 +93,7 @@ pub fn spawn_checks(app: &AppHandle) {
                     Err(e) => tracing::info!("update check: {e}"),
                 }
             }
+            first = false;
             tokio::time::sleep(CHECK_EVERY).await;
         }
     });
@@ -107,6 +113,7 @@ async fn check(app: &AppHandle) -> Result<Option<UpdateInfo>, String> {
         version: u.version.clone(),
         current_version: u.current_version.clone(),
         notes: u.body.clone().filter(|b| !b.trim().is_empty()),
+        prompt: false,
     }))
 }
 

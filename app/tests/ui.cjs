@@ -392,9 +392,22 @@ async function runScenario(scenario, browser) {
   await page.getByRole('button', { name: 'Check now' }).click()
   await page.getByText('Version 0.2.0 available.').waitFor()
   assert.equal(await page.getByRole('button', { name: 'Update and restart' }).count(), 1, 'update button')
-  assert.equal(await page.locator('header').getByRole('button', { name: 'Update 0.2.0' }).count(), 1, 'top bar shows the update')
+  assert.equal(await page.locator('header').getByRole('button', { name: 'Update to 0.2.0' }).count(), 1, 'top bar shows the update')
   await page.getByRole('heading', { name: 'Updates' }).scrollIntoViewIfNeeded()
   await shot('settings-updates')
+  // An update found at start-up: the prompt opens once; "Later" leaves a
+  // pulsing icon in the header that opens it again.
+  await page.evaluate(
+    (u) => window[`_${window.__listeners['update-available']}`]({ event: 'update-available', id: 1, payload: u }),
+    { version: '1.2.0', current_version: '1.1.0', notes: null, prompt: true },
+  )
+  await page.getByRole('dialog', { name: 'Reruns 1.2.0' }).waitFor()
+  await shot('update-prompt')
+  await page.getByRole('button', { name: 'Later' }).click()
+  assert.equal(await page.getByRole('dialog', { name: 'Reruns 1.2.0' }).count(), 0, 'Later closes the prompt')
+  await page.getByRole('button', { name: 'Update to 1.2.0' }).click()
+  await page.getByRole('dialog', { name: 'Reruns 1.2.0' }).waitFor()
+  await page.keyboard.press('Escape')
   await page.getByRole('button', { name: 'Hotkeys' }).click()
   await page.waitForTimeout(150)
   assert.equal(await page.locator('kbd', { hasText: /^F9$/ }).count(), 1, 'screenshot hotkey row')

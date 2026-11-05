@@ -312,6 +312,12 @@ Ad slots: AdSlot component, off unless `"ads": true` in settings.json (728×90 u
   one short sentence for side effects only, no reassurance or "so that"
   tails, toasts say what happened). Settings descriptions went from ~820
   words to ~217. Follow §2.8 for any new text.
+- Updates: the first check runs 20 s after start; its result has
+  `prompt: true` and opens `UpdatePrompt.svelte` once per launch ("Later"
+  closes it until the next). Any found update also shows a download icon
+  in the header with a breathing halo (`::before`, so the button itself
+  stays still; off with reduced motion). 1.0.0 still shows its old text
+  button: the prompt only exists from 1.1.0 on.
 - Deep-dive backlog, not done yet, best first: apply recording settings to the running capture instead of
   "from the next game"; unload the webview while hidden in the tray
   (~100–250 MB during games); make HDR window capture the default once

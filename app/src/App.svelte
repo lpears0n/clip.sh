@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { CircleAlert, PanelLeft } from '@lucide/svelte'
+  import { CircleAlert, Download, PanelLeft } from '@lucide/svelte'
   import { getCurrentWebview } from '@tauri-apps/api/webview'
   import { open as openDialog } from '@tauri-apps/plugin-dialog'
   import { onMount } from 'svelte'
@@ -36,6 +36,7 @@
   import StateMessage from './lib/StateMessage.svelte'
   import StatusBar from './lib/StatusBar.svelte'
   import Toast, { type ToastData } from './lib/Toast.svelte'
+  import UpdatePrompt from './lib/UpdatePrompt.svelte'
   import WindowControls from './lib/WindowControls.svelte'
 
   type View = 'games' | 'game' | 'clips' | 'settings'
@@ -54,6 +55,8 @@
   let settings = $state<Settings | null>(null)
   /** A newer release, found by the background check or Settings. */
   let newRelease = $state<UpdateInfo | null>(null)
+  /** The update dialog: opened by the start-up check, or the header icon. */
+  let updatePrompt = $state(false)
   let usage = $state<Usage | null>(null)
   let caps = $state<Capabilities | null>(null)
   let innerWidth = $state(1280)
@@ -372,7 +375,10 @@
         notify(`Screenshot saved as ${path.split(/[\\/]/).pop()}`)
       }),
       onMarked(() => notify('Moment marked')),
-      onUpdateAvailable((u) => (newRelease = u)),
+      onUpdateAvailable((u) => {
+        newRelease = u
+        if (u.prompt) updatePrompt = true
+      }),
       onLibraryChanged(() => {
         refreshLibrary()
         refreshUsage()
@@ -422,8 +428,13 @@
       <h1 class="display-face truncate text-title font-semibold" data-tauri-drag-region>{title}</h1>
       <div class="h-full min-w-0 flex-1" data-tauri-drag-region></div>
       {#if newRelease}
-        <button class="btn h-8 flex-none px-3 text-secondary" onclick={() => openSettings('General')}>
-          Update {newRelease.version}
+        <button
+          class="update-badge btn-icon flex-none text-accent"
+          onclick={() => (updatePrompt = true)}
+          title="Update to {newRelease.version}"
+          aria-label="Update to {newRelease.version}"
+        >
+          <Download size={18} />
         </button>
       {/if}
       <StatusBar {status} {now} {flash} {saving} {hotkey} onsave={save} onopen={pickVideo} onchoosescreen={chooseScreen} onignore={ignoreGame} />
@@ -510,3 +521,39 @@
 {#if toast}
   <Toast data={toast} onclose={() => (toast = null)} />
 {/if}
+
+{#if updatePrompt && newRelease}
+  <UpdatePrompt info={newRelease} onclose={() => (updatePrompt = false)} />
+{/if}
+
+<style>
+  /* A slow breath, not a blink: a soft accent halo behind the icon swells
+     and fades, so it's noticeable without nagging and the button itself
+     stays still under the pointer. Turned off with reduced motion
+     (app.css). */
+  .update-badge {
+    position: relative;
+    isolation: isolate;
+  }
+  .update-badge::before {
+    content: '';
+    position: absolute;
+    inset: 3px;
+    z-index: -1;
+    border-radius: 999px;
+    background: var(--color-accent);
+    opacity: 0;
+    animation: breathe 2.4s ease-in-out infinite;
+  }
+  @keyframes breathe {
+    0%,
+    100% {
+      opacity: 0.06;
+      transform: scale(0.75);
+    }
+    50% {
+      opacity: 0.24;
+      transform: scale(1.1);
+    }
+  }
+</style>

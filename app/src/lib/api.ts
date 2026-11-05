@@ -74,6 +74,8 @@ export interface UpdateInfo {
   version: string
   current_version: string
   notes: string | null
+  /** Found at start-up: ask once whether to update. */
+  prompt: boolean
 }
 
 /** A save sound: the built-in beep, or a file the user imported. */
