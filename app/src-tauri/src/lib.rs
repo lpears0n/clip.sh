@@ -178,16 +178,8 @@ async fn list_games(
     })
     .await
     .map_err(err)?;
-    // Steam's art lives outside the clips folder.
-    let scope = app.asset_protocol_scope();
-    for g in &list {
-        for p in [&g.art.capsule, &g.art.hero, &g.art.logo]
-            .into_iter()
-            .flatten()
-        {
-            let _ = scope.allow_file(p);
-        }
-    }
+    // Again here in case Steam was installed after start-up.
+    allow_steam_art(&app);
     Ok(list)
 }
 
@@ -577,6 +569,19 @@ fn allow_clips_dir(app: &AppHandle, dir: &std::path::Path) {
     }
 }
 
+/// Steam's art lives outside the clips folder. Allowed from start-up, not
+/// per file once listed: the window paints its cached library first, and
+/// Steam moves the files when a game's art changes.
+fn allow_steam_art(app: &AppHandle) {
+    let scope = app.asset_protocol_scope();
+    for root in clip_core::game::steam_roots() {
+        let dir = root.join("appcache").join("librarycache");
+        if let Err(e) = scope.allow_directory(&dir, true) {
+            tracing::warn!("asset scope for {}: {e}", dir.display());
+        }
+    }
+}
+
 pub(crate) fn show_main(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.show();
@@ -795,6 +800,7 @@ pub fn run() {
                 let _ = w.set_decorations(false);
             }
             allow_clips_dir(app.handle(), &app.state::<AppState>().clips_dir());
+            allow_steam_art(app.handle());
             watch_clips_dir(app.handle(), &app.state::<AppState>().clips_dir());
             updates::spawn_checks(app.handle());
             {

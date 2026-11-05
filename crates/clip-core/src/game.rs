@@ -3,9 +3,8 @@
 //! Detection itself is per platform (`/proc` here, window walking in
 //! `win::game`); the Steam library lookups are shared.
 
-#[cfg(target_os = "linux")]
-use std::path::Path;
-use std::{fs, path::PathBuf};
+use std::fs;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct Game {
@@ -210,34 +209,45 @@ pub struct SteamArt {
 pub fn steam_art(id: u32) -> SteamArt {
     let mut art = SteamArt::default();
     for root in steam_roots() {
-        let dir = root.join("appcache/librarycache").join(id.to_string());
-        let Ok(entries) = fs::read_dir(&dir) else {
-            continue;
-        };
-        let mut files: Vec<PathBuf> = vec![];
-        for e in entries.flatten() {
-            let p = e.path();
-            if p.is_dir() {
-                if let Ok(inner) = fs::read_dir(&p) {
-                    files.extend(inner.flatten().map(|f| f.path()));
-                }
-            } else {
-                files.push(p);
-            }
-        }
-        let find = |name: &str| {
-            files
-                .iter()
-                .find(|f| f.file_name().is_some_and(|n| n == name))
-                .cloned()
-        };
-        art.capsule = art
-            .capsule
-            .or_else(|| find("library_capsule.jpg").or_else(|| find("library_600x900.jpg")));
-        art.hero = art.hero.or_else(|| find("library_hero.jpg"));
-        art.logo = art.logo.or_else(|| find("logo.png"));
+        let found = art_in(&root.join("appcache/librarycache").join(id.to_string()));
+        art.capsule = art.capsule.or(found.capsule);
+        art.hero = art.hero.or(found.hero);
+        art.logo = art.logo.or(found.logo);
     }
     art
+}
+
+/// The art in one app's cache folder, loose or one folder down.
+fn art_in(dir: &Path) -> SteamArt {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return SteamArt::default();
+    };
+    let mut files: Vec<PathBuf> = vec![];
+    for e in entries.flatten() {
+        let p = e.path();
+        if p.is_dir() {
+            if let Ok(inner) = fs::read_dir(&p) {
+                files.extend(inner.flatten().map(|f| f.path()));
+            }
+        } else {
+            files.push(p);
+        }
+    }
+    // Steam swaps in a new hashed folder when a game's art changes (a new
+    // season) and deletes the old one later: of several copies, the newest
+    // is the one that stays.
+    let find = |name: &str| {
+        files
+            .iter()
+            .filter(|f| f.file_name().is_some_and(|n| n == name))
+            .max_by_key(|f| fs::metadata(f).and_then(|m| m.modified()).ok())
+            .cloned()
+    };
+    SteamArt {
+        capsule: find("library_capsule.jpg").or_else(|| find("library_600x900.jpg")),
+        hero: find("library_hero.jpg"),
+        logo: find("logo.png"),
+    }
 }
 
 /// Where the Steam client may be installed on this platform.
@@ -342,6 +352,39 @@ pub(crate) fn vdf_value(text: &str, key: &str) -> Option<String> {
         let v = rest.strip_prefix('"')?.strip_suffix('"')?;
         Some(v.replace("\\\\", "\\"))
     })
+}
+
+#[cfg(test)]
+mod art_tests {
+    use super::*;
+    use std::time::{Duration, SystemTime};
+
+    #[test]
+    fn newest_copy_of_swapped_art_wins() {
+        let dir = std::env::temp_dir().join(format!("reruns-art-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let old = dir.join("0a1b");
+        let new = dir.join("ff02");
+        for d in [&old, &new] {
+            fs::create_dir_all(d).unwrap();
+            fs::write(d.join("library_hero.jpg"), b"x").unwrap();
+        }
+        fs::write(dir.join("logo.png"), b"x").unwrap();
+        let day_ago = SystemTime::now() - Duration::from_secs(86_400);
+        fs::File::options()
+            .write(true)
+            .open(old.join("library_hero.jpg"))
+            .unwrap()
+            .set_modified(day_ago)
+            .unwrap();
+
+        let art = art_in(&dir);
+        assert_eq!(art.hero, Some(new.join("library_hero.jpg")));
+        assert_eq!(art.logo, Some(dir.join("logo.png")));
+        assert_eq!(art.capsule, None);
+        assert_eq!(art_in(&dir.join("missing")), SteamArt::default());
+        fs::remove_dir_all(&dir).unwrap();
+    }
 }
 
 #[cfg(test)]

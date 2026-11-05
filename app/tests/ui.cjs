@@ -29,6 +29,9 @@ function fixtures(scenario) {
     game('Counter-Strike 2', 730, 12, { last: now - 26 * h, total: 40 * h }),
     game('Hades II', 1145350, 3, { last: now - 5 * 24 * h, total: 6 * h }),
   ]
+  // Steam art; the test server fails each file's first request.
+  const art = '/home/u/.local/share/Steam/appcache/librarycache/1245620/'
+  games[0].art = { capsule: art + 'library_600x900.jpg', hero: art + 'library_hero.jpg', logo: art + 'logo.png' }
   const clips = []
   let i = 0
   for (const g of games) {
@@ -89,7 +92,7 @@ function mockBridge(data) {
   window.__TAURI_INTERNALS__ = {
     metadata: { currentWindow: { label: 'main' }, currentWebview: { label: 'main', windowLabel: 'main' } },
     transformCallback: (cb) => { const id = ++n; window[`_${id}`] = cb; return id },
-    convertFileSrc: (p) => 'asset://' + p,
+    convertFileSrc: (p) => 'http://127.0.0.1:2/' + encodeURIComponent(p),
     invoke: async (cmd, args) => {
       if (cmd === 'open_for_edit') return data.list_clips.find((c) => c.path === args.path) || { ...data.list_clips[0], path: args.path }
       if (cmd === 'update_clip') {
@@ -160,6 +163,15 @@ async function runScenario(scenario, browser) {
       },
     })
   })
+  // Files on disk: Steam art loads on its second request, the rest is missing.
+  const PIXEL = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64')
+  const hits = {}
+  await page.route('http://127.0.0.1:2/**', (r) => {
+    const file = decodeURIComponent(new URL(r.request().url()).pathname.slice(1))
+    hits[file] = (hits[file] ?? 0) + 1
+    if (!file.includes('/librarycache/') || hits[file] === 1) return r.fulfill({ status: 404 })
+    return r.fulfill({ status: 200, body: PIXEL, headers: { 'Content-Type': 'image/png' } })
+  })
   await page.goto(`http://localhost:${PORT}/`)
   await page.waitForTimeout(800)
   const shot = (name) => page.screenshot({ path: path.join(out, `${scenario}-${name}.png`) })
@@ -167,6 +179,19 @@ async function runScenario(scenario, browser) {
 
   await shot('games')
   if (scenario === 'full') {
+    // Art that fails to load shows the title, and loads on the next listing
+    // (here: coming back to the window).
+    const logo = page.locator('img[alt="ELDEN RING"]')
+    await page.locator('h1', { hasText: 'ELDEN RING' }).waitFor()
+    assert.equal(await logo.count(), 0, 'no broken logo')
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+    await page.waitForFunction(() => {
+      const img = document.querySelector('img[alt="ELDEN RING"]')
+      return img?.complete && img.naturalWidth > 0
+    })
+    assert.equal(await page.locator('h1', { hasText: 'ELDEN RING' }).count(), 0, 'logo replaces the title')
+    assert.match(await logo.getAttribute('src'), /\?retry=1$/)
+
     // "Not a game" from a Games page card: gone at once, and stays gone.
     const card = page.getByRole('button', { name: 'Hades II is not a game' })
     await page.getByText('Hades II').first().hover()
