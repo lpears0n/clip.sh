@@ -415,6 +415,23 @@ async function runScenario(scenario, browser) {
   await page.getByText('· retrying').waitFor()
   assert.equal(await page.getByText('Waiting for a game').count(), 0, 'no "waiting" while a game is failing')
   await shot('status-retrying')
+  // NVENC refused at the game's start: AMD records it, and the header says so.
+  await page.evaluate(
+    (s) => window[`_${window.__listeners['status-changed']}`]({ event: 'status-changed', id: 1, payload: s }),
+    { state: 'recording', game: 'Fortnite', steam_app_id: null, session_start_ms: Date.now(), buffered_seconds: 30, replay_seconds: 30, encoder: 'amfh264enc', encoder_fallback: { preferred: 'nvenc', using: 'amf', reason: 'Failed to open session' }, capture_path: 'zerocopy', error: null, backend: 'windows', needs_screen: false, hdr: null, hdr_tonemapped: false },
+  )
+  const fallback = page.getByText('on AMD AMF')
+  await fallback.waitFor()
+  const why = await fallback.getAttribute('title')
+  assert.ok(why.includes('NVIDIA NVENC refused to start (Failed to open session)'), `fallback says why: ${why}`)
+  assert.ok(why.includes('tries NVIDIA NVENC again at the next game'), 'and that the next game tries again')
+  await shot('status-encoder-fallback')
+  // The usual encoder: no note.
+  await page.evaluate(
+    (s) => window[`_${window.__listeners['status-changed']}`]({ event: 'status-changed', id: 1, payload: s }),
+    { state: 'recording', game: 'Fortnite', steam_app_id: null, session_start_ms: Date.now(), buffered_seconds: 30, replay_seconds: 30, encoder: 'nvd3d11h264enc', encoder_fallback: null, capture_path: 'zerocopy', error: null, backend: 'windows', needs_screen: false, hdr: null, hdr_tonemapped: false },
+  )
+  await page.waitForFunction(() => !document.body.innerText.includes('on AMD AMF'))
   await page.getByRole('button', { name: 'Audio' }).click()
   await page.waitForTimeout(150)
   assert.equal(await page.getByLabel('Output device').inputValue(), 'out-headset', 'chosen output is selected')

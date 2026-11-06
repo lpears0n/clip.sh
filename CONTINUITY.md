@@ -499,6 +499,22 @@ Fortnite sessions on 1.0.0–1.1.2. Only bugs reproduced there were fixed:
   Experience), capture restart loops on "not-negotiated".
 - First test run after installing GStreamer seems to hang: that is the
   plugin registry being built (in `gst-plugin-scanner`), not a test.
+- **Encoder fallback no longer sticks** (branch `nvenc-fallback`, on top
+  of the fixes above). The log showed the NVENC probe failing once
+  (2026-11-05 01:33) and AMF recording every game after it until the app
+  restarted, when NVENC worked at once. Windows now probes per game
+  (`win::auto::EncoderChoice::new_game`; restarts of the same game keep
+  the choice), and while recording the status carries `encoder_fallback`
+  {preferred, using, reason}: the header shows "on AMD AMF" with the
+  reason in its tooltip. Encoders set aside for failing *while
+  recording* still stay aside until restart. Linux still probes once per
+  run (`encoder_fallback()` is always `None` there). Not reproducible on
+  demand: this RTX 5080 took 48 NVENC sessions at once without refusing,
+  so the in-game refusal (cause unknown: VRAM, another app) is covered
+  by unit tests with a refusing probe, not a live run.
+- UI tests on Windows without pnpm: start `node_modules\.bin\vite.cmd
+  --port 5173` yourself (the test reuses a running server) and set
+  `CHROMIUM_PATH` to Chrome.
 
 ## Next, in order
 1. v1.0.0: owner adds the updater key secrets (`docs/RELEASING.md`), then

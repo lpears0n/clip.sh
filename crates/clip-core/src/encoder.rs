@@ -159,6 +159,70 @@ fn factory_name(el: &gst::Element) -> String {
         .unwrap_or_default()
 }
 
+/// What [`Encoder::probe_report`] found.
+#[derive(Debug, Clone, Default)]
+pub struct Probe {
+    /// The first encoder that encoded a test frame.
+    pub chosen: Option<Encoder>,
+    /// Better encoders that exist here but refused, with the error.
+    pub refused: Vec<(Encoder, String)>,
+}
+
+/// The encoder in use isn't the one normally chosen: a better one refused
+/// (a driver out of sessions or memory, say). Shown in the status bar.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct EncoderFallback {
+    /// The encoder that would normally be used.
+    pub preferred: Encoder,
+    /// The one used instead.
+    pub using: Encoder,
+    /// Why, in the driver's words ("Failed to open session").
+    pub reason: String,
+}
+
+impl EncoderFallback {
+    /// The fallback, if any, when `using` was picked: the best-ranked
+    /// encoder above it that refused. `refused` holds candidates and their
+    /// errors (from the probe, or set aside while recording); `manual` is
+    /// the user's own choice, which outranks everything when it refused.
+    pub fn find(
+        using: Encoder,
+        manual: Option<Encoder>,
+        refused: &[(Encoder, String)],
+    ) -> Option<Self> {
+        let reason_of = |e: Encoder| refused.iter().find(|(r, _)| *r == e).map(|(_, why)| why);
+        let preferred = match manual {
+            // The user's own choice, working: nothing fell back.
+            Some(m) if m == using => return None,
+            Some(m) if reason_of(m).is_some() => m,
+            _ => Encoder::ALL
+                .into_iter()
+                .take_while(|e| *e != using)
+                .find(|e| reason_of(*e).is_some())?,
+        };
+        Some(Self {
+            preferred,
+            using,
+            reason: brief(reason_of(preferred)?),
+        })
+    }
+}
+
+/// The last line of a GStreamer error: its debug text ends with the
+/// element's own message ("…gstnvencoder.cpp(1234): … :\nFailed to open
+/// session"). The recorder's errors quote that text (`Some("…\n…")`), so
+/// an escaped newline and the closing `")` are handled too.
+fn brief(error: &str) -> String {
+    error
+        .lines()
+        .flat_map(|l| l.split("\\n"))
+        .map(|l| l.trim().trim_end_matches("\")").trim())
+        .filter(|l| !l.is_empty())
+        .last()
+        .unwrap_or(error)
+        .to_owned()
+}
+
 impl Encoder {
     /// Probe order: hardware first. Elements that don't exist on a platform
     /// simply fail the probe.
@@ -211,10 +275,29 @@ impl Encoder {
     /// Like [`probe`](Self::probe), skipping encoders that passed the
     /// probe but then failed while recording.
     pub fn probe_excluding(codec: Codec, skip: &[Encoder]) -> Option<Encoder> {
-        Self::ALL
-            .into_iter()
-            .filter(|e| !skip.contains(e))
-            .find(|e| e.works(codec))
+        Self::probe_report(codec, skip).chosen
+    }
+
+    /// Like [`probe_excluding`](Self::probe_excluding), also saying which
+    /// better encoders exist here but refused the test frame, and why.
+    pub fn probe_report(codec: Codec, skip: &[Encoder]) -> Probe {
+        let mut refused = Vec::new();
+        for e in Self::ALL.into_iter().filter(|e| !skip.contains(e)) {
+            match e.check(codec) {
+                Some(Ok(())) => {
+                    return Probe {
+                        chosen: Some(e),
+                        refused,
+                    };
+                }
+                Some(Err(reason)) => refused.push((e, reason)),
+                None => {}
+            }
+        }
+        Probe {
+            chosen: None,
+            refused,
+        }
     }
 
     /// Whether a pipeline error `message` came from this encoder's element
@@ -227,22 +310,24 @@ impl Encoder {
     /// Whether the element exists *and* can encode a test frame. Factories can
     /// be registered even when the driver fails at runtime.
     pub fn works(self, codec: Codec) -> bool {
-        let Some(name) = self.element(codec) else {
-            return false;
-        };
+        matches!(self.check(codec), Some(Ok(())))
+    }
+
+    /// `None` when this encoder isn't available here (no element for the
+    /// codec, or not installed); otherwise whether a test frame encoded,
+    /// and the error if not.
+    fn check(self, codec: Codec) -> Option<Result<(), String>> {
+        let name = self.element(codec)?;
         if gst::ElementFactory::find(name).is_none() {
             tracing::debug!(element = name, "encoder not available here");
-            return false;
+            return None;
         }
-        match self.encode_test_frame(codec) {
-            Ok(()) => true,
-            Err(e) => {
-                // Worth a line at info: an encoder that exists but can't run
-                // is how a broken driver or install shows itself.
-                tracing::info!(element = name, "encoder failed the probe: {e:#}");
-                false
-            }
-        }
+        Some(self.encode_test_frame(codec).map_err(|e| {
+            // Worth a line at info: an encoder that exists but can't run
+            // is how a broken driver or install shows itself.
+            tracing::info!(element = name, "encoder failed the probe: {e:#}");
+            format!("{e:#}")
+        }))
     }
 
     fn encode_test_frame(self, codec: Codec) -> Result<()> {
@@ -440,6 +525,51 @@ mod tests {
         let capture = "Internal data stream error. from Some(\"/GstPipeline:p/GstQueue:queue12\"): \
                        streaming stopped, reason not-negotiated (-4)";
         assert!(!Encoder::Nvenc.is_blamed_in(Codec::H264, capture));
+    }
+
+    #[test]
+    fn a_refused_better_encoder_is_a_fallback() {
+        let nvenc = (
+            Encoder::Nvenc,
+            "Could not encode stream.: ../sys/nvcodec/gstnvencoder.cpp(1170): \
+             gst_nv_encoder_init_session (): /GstPipeline:pipeline0/x:\nFailed to open session"
+                .to_owned(),
+        );
+        let fallback = EncoderFallback::find(Encoder::Amf, None, std::slice::from_ref(&nvenc));
+        assert_eq!(
+            fallback,
+            Some(EncoderFallback {
+                preferred: Encoder::Nvenc,
+                using: Encoder::Amf,
+                reason: "Failed to open session".into(),
+            })
+        );
+        // Nothing better refused: the normal choice.
+        assert_eq!(EncoderFallback::find(Encoder::Nvenc, None, &[]), None);
+        // Only encoders ranked above the one used count.
+        let x264 = (Encoder::X264, "broken".to_owned());
+        assert_eq!(EncoderFallback::find(Encoder::Amf, None, &[x264]), None);
+        // The user picked AMF themselves: not a fallback, whatever refused.
+        assert_eq!(
+            EncoderFallback::find(
+                Encoder::Amf,
+                Some(Encoder::Amf),
+                std::slice::from_ref(&nvenc)
+            ),
+            None
+        );
+        // The user picked NVENC and it refused: that's the one named.
+        let qsv = (Encoder::Qsv, "x".to_owned());
+        let f = EncoderFallback::find(Encoder::Mf, Some(Encoder::Nvenc), &[qsv, nvenc]).unwrap();
+        assert_eq!(f.preferred, Encoder::Nvenc);
+        // An error without debug text is kept whole.
+        assert_eq!(
+            brief("Could not encode stream."),
+            "Could not encode stream."
+        );
+        // The recorder's form, debug text quoted.
+        let recorder = r#"Could not encode stream. from Some("/GstPipeline:p/X:nvd3d11h264enc3"): Some("../sys/nvcodec/gstnvencoder.cpp(1170): gst_nv_encoder_init_session (): /GstPipeline:p/X:nvd3d11h264enc3:\nFailed to open session")"#;
+        assert_eq!(brief(recorder), "Failed to open session");
     }
 
     #[test]
