@@ -415,6 +415,32 @@ async function runScenario(scenario, browser) {
   await page.getByText('· retrying').waitFor()
   assert.equal(await page.getByText('Waiting for a game').count(), 0, 'no "waiting" while a game is failing')
   await shot('status-retrying')
+  // NVENC refused at the game's start: AMD records it, and the header says so.
+  await page.evaluate(
+    (s) => window[`_${window.__listeners['status-changed']}`]({ event: 'status-changed', id: 1, payload: s }),
+    { state: 'recording', game: 'Fortnite', steam_app_id: null, session_start_ms: Date.now(), buffered_seconds: 30, replay_seconds: 30, encoder: 'amfh264enc', encoder_fallback: { preferred: 'nvenc', using: 'amf', reason: 'Failed to open session', set_aside: false }, capture_path: 'zerocopy', error: null, backend: 'windows', needs_screen: false, hdr: null, hdr_tonemapped: false },
+  )
+  const fallback = page.getByText('on AMD AMF')
+  await fallback.waitFor()
+  const why = await fallback.getAttribute('title')
+  assert.ok(why.includes('NVIDIA NVENC refused to start (Failed to open session)'), `fallback says why: ${why}`)
+  assert.ok(why.includes('tries NVIDIA NVENC again at the next game'), 'and that the next game tries again')
+  await shot('status-encoder-fallback')
+  // Set aside after failing while recording: no promise of the next game.
+  await page.evaluate(
+    (s) => window[`_${window.__listeners['status-changed']}`]({ event: 'status-changed', id: 1, payload: s }),
+    { state: 'recording', game: 'Fortnite', steam_app_id: null, session_start_ms: Date.now(), buffered_seconds: 30, replay_seconds: 30, encoder: 'amfh264enc', encoder_fallback: { preferred: 'nvenc', using: 'amf', reason: 'Failed to open session', set_aside: true }, capture_path: 'zerocopy', error: null, backend: 'windows', needs_screen: false, hdr: null, hdr_tonemapped: false },
+  )
+  await page.waitForFunction(() => document.querySelector('[title*="kept failing while recording"]'))
+  const aside = await page.getByText('on AMD AMF').getAttribute('title')
+  assert.ok(aside.includes('records with AMD AMF until it restarts'), `set aside says when: ${aside}`)
+  assert.ok(!aside.includes('next game'), 'no promise of the next game')
+  // The usual encoder: no note.
+  await page.evaluate(
+    (s) => window[`_${window.__listeners['status-changed']}`]({ event: 'status-changed', id: 1, payload: s }),
+    { state: 'recording', game: 'Fortnite', steam_app_id: null, session_start_ms: Date.now(), buffered_seconds: 30, replay_seconds: 30, encoder: 'nvd3d11h264enc', encoder_fallback: null, capture_path: 'zerocopy', error: null, backend: 'windows', needs_screen: false, hdr: null, hdr_tonemapped: false },
+  )
+  await page.waitForFunction(() => !document.body.innerText.includes('on AMD AMF'))
   await page.getByRole('button', { name: 'Audio' }).click()
   await page.waitForTimeout(150)
   assert.equal(await page.getByLabel('Output device').inputValue(), 'out-headset', 'chosen output is selected')
@@ -481,7 +507,8 @@ async function runScenario(scenario, browser) {
 // The in-game popup page: fire the events the backend sends and check what
 // it draws. The window is transparent, so it's shot over a stand-in game.
 async function overlayScenario(browser) {
-  const page = await browser.newPage({ viewport: { width: 380, height: 72 }, colorScheme: 'dark' })
+  // The window's size on a 1080-line screen (WIDTH × HEIGHT in overlay.rs).
+  const page = await browser.newPage({ viewport: { width: 480, height: 130 }, colorScheme: 'dark' })
   page.on('pageerror', (e) => { throw new Error(`page error in overlay: ${e.message}`) })
   await page.addInitScript(mockBridge, fixtures('full'))
   await page.goto(`http://localhost:${PORT}/overlay.html`)
@@ -494,18 +521,36 @@ async function overlayScenario(browser) {
   await page.waitForTimeout(300)
   assert.equal(await page.locator('#title').textContent(), 'Ready to record')
   assert.ok((await page.locator('#detail').textContent()).startsWith('Press F8 to clip'))
-  assert.ok(await page.locator('.dot').isVisible(), 'recording dot on ready')
+  assert.ok(await page.locator('.rec').isVisible(), 'recording dot on ready')
   await page.screenshot({ path: path.join(out, 'overlay-ready.png') })
 
-  await fire({ kind: 'saved', title: 'Clip saved', detail: "Tom Clancy's Rainbow Six Siege", key: null, ms: 600 })
-  await page.waitForTimeout(250)
+  // Each kind has its own glyph.
+  for (const [kind, title, glyph] of [['screenshot', 'Screenshot saved', '.camera'], ['marked', 'Moment marked', '.flag']]) {
+    await fire({ kind, title, detail: 'Fortnite', key: null, ms: 1500 })
+    await page.waitForTimeout(100)
+    assert.ok(await page.locator(glyph).isVisible(), `${glyph} on ${kind}`)
+    assert.equal(await page.locator('.glyph:visible').count(), 1, `one glyph on ${kind}`)
+  }
+
+  await fire({ kind: 'saved', title: 'Clip saved', detail: "Tom Clancy's Rainbow Six Siege", key: null, ms: 900 })
+  await page.waitForTimeout(500)
   assert.equal(await page.locator('#title').textContent(), 'Clip saved')
   assert.ok(await page.locator('.check').isVisible(), 'check mark on saved')
+  assert.equal(await page.locator('.rec').isVisible(), false, 'no recording dot on saved')
   assert.ok(!(await page.locator('#detail').textContent()).includes('Press'), 'no key hint on saved')
   await page.screenshot({ path: path.join(out, 'overlay-saved.png') })
   // Fades out on its own before the backend hides the window.
   await page.waitForTimeout(700)
   assert.equal(await page.locator('#popup').evaluate((e) => e.classList.contains('in')), false, 'fades out')
+
+  // A bigger screen gets a bigger window; the card keeps its share of it.
+  const small = await page.locator('#popup').boundingBox()
+  await page.setViewportSize({ width: 960, height: 260 })
+  await fire({ kind: 'saved', title: 'Clip saved', detail: "Tom Clancy's Rainbow Six Siege", key: null, ms: 3000 })
+  await page.waitForTimeout(500)
+  const big = await page.locator('#popup').boundingBox()
+  assert.ok(Math.abs(big.height / small.height - 2) < 0.05, `card scales with the window (${small.height} → ${big.height})`)
+  await page.screenshot({ path: path.join(out, 'overlay-saved-4k.png') })
   await page.close()
 }
 

@@ -52,6 +52,9 @@ pub struct Status {
     pub buffered_seconds: f64,
     pub replay_seconds: u32,
     pub encoder: Option<String>,
+    /// While recording: the usual encoder refused, so another one is used
+    /// (tried again at the next game).
+    pub encoder_fallback: Option<clip_core::EncoderFallback>,
     /// "zerocopy" (DMA-BUF into GPU memory) or "copy", while recording.
     pub capture_path: Option<clip_core::CapturePath>,
     pub error: Option<String>,
@@ -168,6 +171,7 @@ async fn run(
                 buffered_seconds: 0.0,
                 replay_seconds,
                 encoder: None,
+                encoder_fallback: None,
                 capture_path: None,
                 error: Some(format!("{e:#}")),
                 backend: None,
@@ -299,6 +303,7 @@ struct Shown {
     state: State,
     game: Option<String>,
     encoder: Option<String>,
+    encoder_fallback: Option<clip_core::EncoderFallback>,
     capture_path: Option<clip_core::CapturePath>,
     error: Option<String>,
     hdr_tonemapped: bool,
@@ -310,6 +315,7 @@ impl Shown {
             state: s.state.clone(),
             game: s.game.clone(),
             encoder: s.encoder.clone(),
+            encoder_fallback: s.encoder_fallback.clone(),
             capture_path: s.capture_path,
             error: s.error.clone(),
             hdr_tonemapped: s.hdr_tonemapped,
@@ -373,6 +379,7 @@ fn status(
             .encoder()
             .and_then(|e| e.element(auto.codec()))
             .map(str::to_owned),
+        encoder_fallback: auto.encoder_fallback().cloned(),
         capture_path: rec.as_ref().map(|s| s.path),
         error: rec
             .and_then(|s| s.error)

@@ -1,16 +1,24 @@
-/* The in-game popup. A borderless, transparent, click-through window the
-   size of the card; everything outside the card stays see-through. Tokens
-   match app.css (kept literal: this page loads without Tailwind). */
+/* The in-game popup. A borderless, transparent, click-through window; the
+   card sits in its top-right corner and everything else stays see-through.
+   Sizes are design units: one unit is a pixel on a 1080-line screen, and
+   the page zooms to fill the window, which the backend sizes from the
+   game's resolution (see overlay.ts). Tokens match app.css (kept literal:
+   this page loads without Tailwind). */
 @import '@fontsource-variable/inter';
 @import '@fontsource-variable/archivo/wdth.css';
 
 :root {
   --accent: oklch(72% 0.19 50);
-  --overlay: oklch(24.5% 0.005 270 / 94%);
-  --line: oklch(100% 0 0 / 14%);
-  --fg: oklch(100% 0 0 / 92%);
-  --muted: oklch(100% 0 0 / 60%);
+  --on-accent: oklch(14% 0.004 270);
+  --surface: oklch(19% 0.005 270 / 96%);
+  --line: oklch(100% 0 0 / 12%);
+  --line-2: oklch(100% 0 0 / 18%);
+  --fg: oklch(100% 0 0 / 94%);
+  --fg-2: oklch(100% 0 0 / 66%);
   --danger: oklch(66% 0.21 15);
+  /* The one shadow floating surfaces get (docs/DESIGN.md 2.4). */
+  --shadow: 0 8px 24px oklch(0% 0 0 / 45%);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   color-scheme: dark;
 }
 
@@ -24,118 +32,230 @@ body {
   font-family: 'Inter Variable', Inter, system-ui, sans-serif;
 }
 
+/* Room around the card for its shadow and its slide in from the right. */
 body {
   display: flex;
   align-items: flex-start;
   justify-content: flex-end;
-  padding: 6px;
+  padding: 24px 24px 32px;
   box-sizing: border-box;
 }
 
 .popup {
+  /* Ready is about recording (red); the rest are about what was kept. */
+  --tone: var(--accent);
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 14px;
+  min-width: 280px;
   max-width: 100%;
   box-sizing: border-box;
-  padding: 10px 16px 10px 12px;
+  padding: 14px 22px 14px 14px;
+  overflow: hidden;
   border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--overlay);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
   color: var(--fg);
   opacity: 0;
-  transform: translateY(-6px);
+  transform: translateX(28px);
   transition:
-    opacity 180ms ease-out,
-    transform 180ms ease-out;
+    opacity 140ms ease-in,
+    transform 140ms ease-in;
+}
+
+.popup[data-kind='ready'] {
+  --tone: var(--danger);
 }
 
 .popup.in {
   opacity: 1;
   transform: none;
+  transition:
+    opacity 160ms ease-out,
+    transform 220ms var(--ease-out);
 }
 
-.icon {
+/* The icon: a recording dot for Ready, the accent with a dark glyph for
+   everything that was saved or marked. */
+.tile {
+  position: relative;
   display: grid;
   place-items: center;
   flex: none;
-  width: 30px;
-  height: 30px;
-  border-radius: 999px;
-  background: oklch(100% 0 0 / 8%);
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  background: var(--accent);
+  color: var(--on-accent);
 }
 
-.dot {
-  width: 10px;
-  height: 10px;
+.popup.in .tile {
+  animation: pop 320ms cubic-bezier(0.34, 1.56, 0.64, 1) 40ms both;
+}
+
+.popup[data-kind='ready'] .tile {
+  background: oklch(100% 0 0 / 7%);
+}
+
+.rec {
+  display: none;
+  width: 14px;
+  height: 14px;
   border-radius: 999px;
   background: var(--danger);
+  /* A static ring, drawn with spread only: no blur, no glow. */
+  box-shadow: 0 0 0 5px color-mix(in oklch, var(--danger) 22%, transparent);
+}
+
+.popup[data-kind='ready'] .rec {
+  display: block;
+}
+
+.glyph {
+  display: none;
+  width: 24px;
+  height: 24px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.25;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .check {
-  display: none;
-  width: 16px;
-  height: 16px;
-  color: var(--accent);
+  stroke-width: 3;
 }
 
-.popup[data-kind='saved'] .icon,
-.popup[data-kind='screenshot'] .icon,
-.popup[data-kind='marked'] .icon {
-  background: color-mix(in oklch, var(--accent) 20%, transparent);
+.check path {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 0;
 }
 
-.popup[data-kind='saved'] .dot,
-.popup[data-kind='screenshot'] .dot,
-.popup[data-kind='marked'] .dot {
-  display: none;
+/* The check draws itself once the tile has landed. */
+.popup.in .check path {
+  animation: draw 280ms cubic-bezier(0.65, 0, 0.35, 1) 160ms both;
 }
 
 .popup[data-kind='saved'] .check,
-.popup[data-kind='screenshot'] .check,
-.popup[data-kind='marked'] .check {
+.popup[data-kind='screenshot'] .camera,
+.popup[data-kind='marked'] .flag {
   display: block;
 }
 
 .text {
   display: flex;
   flex-direction: column;
+  gap: 2px;
   min-width: 0;
 }
 
 .title {
   font-family: 'Archivo Variable', 'Inter Variable', system-ui, sans-serif;
   font-stretch: 112%;
-  font-size: 15px;
-  line-height: 20px;
-  font-weight: 650;
+  font-size: 19px;
+  line-height: 24px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
 }
 
 .detail {
   overflow: hidden;
-  font-size: 13px;
-  line-height: 18px;
-  color: var(--muted);
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--fg-2);
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 
+/* A key cap: raised by a heavier bottom edge. */
 kbd {
-  padding: 0 5px;
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  font: 600 12px/16px 'Inter Variable', system-ui, sans-serif;
+  display: inline-block;
+  min-width: 22px;
+  box-sizing: border-box;
+  margin: 0 2px;
+  padding: 0 7px;
+  border: 1px solid var(--line-2);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  background: oklch(100% 0 0 / 8%);
+  font: 650 12px/19px 'Inter Variable', system-ui, sans-serif;
+  text-align: center;
   color: var(--fg);
+  vertical-align: 1px;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .popup {
-    transition: opacity 120ms linear;
+/* How long the popup stays: runs down along the bottom edge. */
+.life {
+  position: absolute;
+  inset: auto 0 0;
+  height: 3px;
+  background: var(--tone);
+  opacity: 0.85;
+  transform: scaleX(0);
+  transform-origin: left;
+}
+
+.popup.in .life {
+  animation: life var(--life, 3s) linear both;
+}
+
+@keyframes pop {
+  from {
+    transform: scale(0.5);
+  }
+  to {
     transform: none;
   }
 }
 
-.reduce-motion .popup {
-  transition: opacity 120ms linear;
+@keyframes draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes life {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+
+/* Reduced motion: a plain fade, nothing moves. */
+@media (prefers-reduced-motion: reduce) {
+  .popup,
+  .popup.in {
+    transform: none;
+    transition: opacity 120ms linear;
+  }
+  .popup.in .tile,
+  .popup.in .check path {
+    animation: none;
+  }
+  .life {
+    display: none;
+  }
+}
+
+.reduce-motion .popup,
+.reduce-motion .popup.in {
   transform: none;
+  transition: opacity 120ms linear;
+}
+
+.reduce-motion .popup.in .tile,
+.reduce-motion .popup.in .check path {
+  animation: none;
+}
+
+.reduce-motion .life {
+  display: none;
 }

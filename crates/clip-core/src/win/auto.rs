@@ -14,7 +14,7 @@ use tokio::sync::mpsc;
 
 pub use crate::backend::Backend;
 use crate::{
-    encoder::{Codec, Encoder},
+    encoder::{Codec, Encoder, EncoderFallback, Probe},
     game::Game,
     recorder::{CaptureSource, Recorder, RecorderConfig, RestartPolicy, SavedClip, Status},
     save::{clip_path, screenshot_path},
@@ -54,9 +54,95 @@ struct Active {
     recorder: Recorder,
 }
 
+/// Which encoder records. Probed again for every new game: an encoder that
+/// refused for one game (a driver out of sessions or memory) gets another
+/// chance at the next, instead of the fallback sticking until the app
+/// restarts. Encoders that kept failing *while recording* stay set aside
+/// until the app restarts.
+#[derive(Default)]
+struct EncoderChoice {
+    probed: HashMap<Codec, Encoder>,
+    /// Set aside after failing while recording, with the error.
+    broken: Vec<(Encoder, String)>,
+    /// For the current game, when a better encoder refused.
+    fallback: Option<EncoderFallback>,
+}
+
+impl EncoderChoice {
+    /// A new game (not a restart of the current one): probe afresh.
+    fn new_game(&mut self) {
+        self.probed.clear();
+        self.fallback = None;
+    }
+
+    fn is_broken(&self, e: Encoder) -> bool {
+        self.broken.iter().any(|(b, _)| *b == e)
+    }
+
+    /// The encoder to use without probing, if one is settled: the user's
+    /// choice (unless set aside), else this game's probe result.
+    fn settled(&mut self, codec: Codec, manual: Option<Encoder>) -> Option<Encoder> {
+        if let Some(m) = manual
+            && m.element(codec).is_some()
+            && !self.is_broken(m)
+        {
+            self.fallback = None;
+            return Some(m);
+        }
+        self.probed.get(&codec).copied()
+    }
+
+    /// Encoders the probe must skip.
+    fn skip(&self) -> Vec<Encoder> {
+        self.broken.iter().map(|(e, _)| *e).collect()
+    }
+
+    /// Take a probe's result for this game, noting a fallback.
+    fn probed(&mut self, codec: Codec, manual: Option<Encoder>, probe: Probe) -> Result<Encoder> {
+        let chosen = probe
+            .chosen
+            .with_context(|| format!("no working {codec:?} encoder found"))?;
+        let refused: Vec<_> = probe
+            .refused
+            .into_iter()
+            .chain(self.broken.iter().cloned())
+            .collect();
+        self.fallback = EncoderFallback::find(chosen, manual, &refused, &self.skip());
+        if let Some(f) = &self.fallback {
+            tracing::warn!(
+                preferred = ?f.preferred,
+                using = ?f.using,
+                reason = %f.reason,
+                "{}",
+                if f.set_aside {
+                    "the usual encoder kept failing while recording; using another until \
+                     Reruns restarts"
+                } else {
+                    "the usual encoder refused; recording this game with another, and trying \
+                     it again at the next game"
+                }
+            );
+        }
+        self.probed.insert(codec, chosen);
+        Ok(chosen)
+    }
+
+    /// `encoder` kept failing while recording: skip it from now on.
+    fn set_aside(&mut self, codec: Codec, encoder: Encoder, failure: &str) {
+        self.broken.push((encoder, failure.to_owned()));
+        self.probed.remove(&codec);
+    }
+
+    fn current(&self, codec: Codec, manual: Option<Encoder>) -> Option<Encoder> {
+        manual
+            .filter(|e| e.element(codec).is_some() && !self.is_broken(*e))
+            .or_else(|| self.probed.get(&codec).copied())
+    }
+}
+
 pub struct AutoRecorder {
     cfg: RecorderConfig,
-    probed: HashMap<Codec, Encoder>,
+    encoders: EncoderChoice,
     running: Vec<RunningGame>,
     active: Option<Active>,
     /// When a failed recording may be restarted.
@@ -68,9 +154,6 @@ pub struct AutoRecorder {
     /// is recorded without tone mapping (never the screen area, which would
     /// bring overlays and other windows into clips).
     hdr_window_broken: bool,
-    /// Encoders that passed the probe but kept failing while recording
-    /// (NVENC refusing a session, say); skipped until the app restarts.
-    broken_encoders: Vec<Encoder>,
     /// Failures in a row that the encoder itself was blamed for.
     encoder_failures: u32,
 }
@@ -115,13 +198,12 @@ impl AutoRecorder {
         Ok((
             Self {
                 cfg,
-                probed: HashMap::new(),
+                encoders: EncoderChoice::default(),
                 running: vec![],
                 active: None,
                 restarts: RestartPolicy::default(),
                 resume: None,
                 hdr_window_broken: false,
-                broken_encoders: Vec::new(),
                 encoder_failures: 0,
             },
             rx,
@@ -213,6 +295,9 @@ impl AutoRecorder {
         let Some(next) = next else {
             return Ok(None);
         };
+        if self.resume.as_ref() != Some(&next.game) {
+            self.encoders.new_game();
+        }
         match self.start(next.clone()).await {
             // A restart continues the same play session: no new "Started"
             // (which would also pop "Ready to record" over the game again).
@@ -259,8 +344,7 @@ impl AutoRecorder {
             "the encoder keeps failing while recording; switching to the next one that works \
              (another app may be using it, or the driver refuses more sessions)"
         );
-        self.broken_encoders.push(encoder);
-        self.probed.remove(&codec);
+        self.encoders.set_aside(codec, encoder, failure);
         self.encoder_failures = 0;
     }
 
@@ -389,21 +473,14 @@ impl AutoRecorder {
 
     async fn resolve_encoder(&mut self) -> Result<Encoder> {
         let codec = self.cfg.video.codec;
-        if let Some(e) = self.cfg.encoder
-            && e.element(codec).is_some()
-            && !self.broken_encoders.contains(&e)
-        {
+        let manual = self.cfg.encoder;
+        if let Some(e) = self.encoders.settled(codec, manual) {
             return Ok(e);
         }
-        if let Some(e) = self.probed.get(&codec) {
-            return Ok(*e);
-        }
-        let skip = self.broken_encoders.clone();
-        let e = tokio::task::spawn_blocking(move || Encoder::probe_excluding(codec, &skip))
-            .await?
-            .with_context(|| format!("no working {codec:?} encoder found"))?;
-        self.probed.insert(codec, e);
-        Ok(e)
+        let skip = self.encoders.skip();
+        let probe =
+            tokio::task::spawn_blocking(move || Encoder::probe_report(codec, &skip)).await?;
+        self.encoders.probed(codec, manual, probe)
     }
 
     pub fn codec(&self) -> Codec {
@@ -411,12 +488,13 @@ impl AutoRecorder {
     }
 
     pub fn encoder(&self) -> Option<Encoder> {
-        self.cfg
-            .encoder
-            .filter(|e| {
-                e.element(self.cfg.video.codec).is_some() && !self.broken_encoders.contains(e)
-            })
-            .or_else(|| self.probed.get(&self.cfg.video.codec).copied())
+        self.encoders
+            .current(self.cfg.video.codec, self.cfg.encoder)
+    }
+
+    /// While recording: a better encoder refused, and which one is used.
+    pub fn encoder_fallback(&self) -> Option<&EncoderFallback> {
+        self.active.as_ref().and(self.encoders.fallback.as_ref())
     }
 
     /// What to put on the ignore list to stop recording the current game
@@ -502,5 +580,97 @@ impl AutoRecorder {
 
     pub async fn shutdown(mut self) -> Result<()> {
         self.stop().await.map(|_| ())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const H264: Codec = Codec::H264;
+
+    /// What the owner's PC saw: NVENC refused the test frame, AMF took it.
+    fn nvenc_refused() -> Probe {
+        Probe {
+            chosen: Some(Encoder::Amf),
+            refused: vec![(
+                Encoder::Nvenc,
+                "Could not encode stream.: gstnvencoder.cpp(1170): init_session ():\n\
+                 Failed to open session"
+                    .into(),
+            )],
+        }
+    }
+
+    fn nvenc_works() -> Probe {
+        Probe {
+            chosen: Some(Encoder::Nvenc),
+            refused: vec![],
+        }
+    }
+
+    #[test]
+    fn a_refused_encoder_gets_another_chance_at_the_next_game() {
+        let mut c = EncoderChoice::default();
+        // Game 1: NVENC refuses; AMF records it, and the status says why.
+        c.new_game();
+        assert_eq!(c.settled(H264, None), None, "nothing probed yet");
+        assert_eq!(c.probed(H264, None, nvenc_refused()).unwrap(), Encoder::Amf);
+        let f = c.fallback.clone().expect("a fallback");
+        assert_eq!(
+            (f.preferred, f.using, f.reason.as_str()),
+            (Encoder::Nvenc, Encoder::Amf, "Failed to open session")
+        );
+        assert!(!f.set_aside, "refused the probe: retried at the next game");
+        // Restarting the same game keeps the choice: no probe.
+        assert_eq!(c.settled(H264, None), Some(Encoder::Amf));
+        assert_eq!(c.fallback, Some(f));
+        // Game 2: probed again. NVENC is back; no fallback.
+        c.new_game();
+        assert_eq!(c.settled(H264, None), None, "a new game probes afresh");
+        assert_eq!(c.fallback, None);
+        assert_eq!(c.probed(H264, None, nvenc_works()).unwrap(), Encoder::Nvenc);
+        assert_eq!(c.fallback, None);
+        assert_eq!(c.current(H264, None), Some(Encoder::Nvenc));
+    }
+
+    #[test]
+    fn encoders_failing_while_recording_stay_set_aside() {
+        let mut c = EncoderChoice::default();
+        c.new_game();
+        c.probed(H264, None, nvenc_works()).unwrap();
+        c.set_aside(
+            H264,
+            Encoder::Nvenc,
+            r#"Could not encode stream. from Some("/p/x:nvd3d11h264enc3"): Some("x.cpp(1): f ():\nFailed to open session")"#,
+        );
+        assert_eq!(c.settled(H264, None), None, "set aside: probe again");
+        assert_eq!(c.skip(), vec![Encoder::Nvenc]);
+        // The probe skipped NVENC; the status still names it, and why.
+        let probe = Probe {
+            chosen: Some(Encoder::Amf),
+            refused: vec![],
+        };
+        assert_eq!(c.probed(H264, None, probe).unwrap(), Encoder::Amf);
+        let f = c.fallback.clone().expect("a fallback");
+        assert_eq!(
+            (f.preferred, f.reason.as_str()),
+            (Encoder::Nvenc, "Failed to open session")
+        );
+        assert!(f.set_aside, "the status says it waits for a restart");
+        // Still skipped at the next game, even when picked by hand.
+        c.new_game();
+        assert_eq!(c.skip(), vec![Encoder::Nvenc]);
+        assert_eq!(c.settled(H264, Some(Encoder::Nvenc)), None);
+    }
+
+    #[test]
+    fn a_working_manual_choice_is_never_a_fallback() {
+        let mut c = EncoderChoice::default();
+        c.new_game();
+        c.probed(H264, None, nvenc_refused()).unwrap();
+        assert!(c.fallback.is_some());
+        assert_eq!(c.settled(H264, Some(Encoder::Amf)), Some(Encoder::Amf));
+        assert_eq!(c.fallback, None);
     }
 }

@@ -741,10 +741,19 @@ pub fn run() {
         log = %logging::log_path().display(),
         "Reruns starting"
     );
-    if ipc_server::hand_off_to_running_instance() {
-        tracing::info!("Reruns is already running; showed its window");
-        return;
-    }
+    // Before anything slow: until the socket is ours, a second launch would
+    // also find no instance and start recording alongside this one.
+    let control = match ipc_server::claim() {
+        Ok(ipc_server::Claim::Ours(listener)) => Some(listener),
+        Ok(ipc_server::Claim::Running) => {
+            tracing::info!("Reruns is already running; showed its window");
+            return;
+        }
+        Err(e) => {
+            tracing::warn!("control socket unavailable: {e:#}");
+            None
+        }
+    };
     #[cfg(windows)]
     point_gstreamer_at_bundled_plugins();
     if let Err(e) = clip_core::init() {
@@ -781,7 +790,7 @@ pub fn run() {
                 .with_denylist(&["overlay"])
                 .build(),
         )
-        .setup(|app| {
+        .setup(move |app| {
             let settings = Settings::load();
             let media = tauri::async_runtime::block_on(media_server::MediaServer::start())?;
             let token_path = dirs::data_dir()
@@ -891,8 +900,8 @@ pub fn run() {
             }
             enforce_storage(app.handle());
             setup_tray(app.handle())?;
-            if let Err(e) = ipc_server::serve(app.handle().clone()) {
-                tracing::warn!("control socket unavailable: {e:#}");
+            if let Some(listener) = control {
+                ipc_server::serve(app.handle().clone(), listener);
             }
             Ok(())
         })

@@ -16,6 +16,11 @@ export interface Status {
   buffered_seconds: number
   replay_seconds: number
   encoder: string | null
+  /** While recording: the usual encoder refused, so another one is used.
+   *  `reason` is the driver's words. It is tried again at the next game,
+   *  unless `set_aside` (it kept failing while recording): then only after
+   *  Reruns restarts. */
+  encoder_fallback: { preferred: Encoder; using: Encoder; reason: string; set_aside: boolean } | null
   /** While recording: frames go straight into GPU memory, or through RAM. */
   capture_path: 'zerocopy' | 'copy' | null
   error: string | null

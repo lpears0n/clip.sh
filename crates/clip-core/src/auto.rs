@@ -463,6 +463,12 @@ impl AutoRecorder {
             .or_else(|| self.probed.get(&self.cfg.video.codec).copied())
     }
 
+    /// Never on Linux yet: it probes once per app run, and the per-game
+    /// probe with its fallback note is Windows-only so far.
+    pub fn encoder_fallback(&self) -> Option<&crate::encoder::EncoderFallback> {
+        None
+    }
+
     /// What to put on the ignore list to stop recording the current game
     /// for good ("not a game"). By name: Linux detection names are stable.
     pub fn ignore_entry(&self) -> Option<crate::game::IgnoredGame> {
