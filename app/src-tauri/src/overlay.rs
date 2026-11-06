@@ -76,6 +76,26 @@ impl Popup {
     }
 }
 
+/// Size of the overlay window in design units: the card plus room for its
+/// shadow and entrance. A unit is one pixel on a 1080-line screen; the page
+/// zooms to fill whatever size the window is given (`DESIGN_WIDTH` in
+/// overlay.ts matches `WIDTH`).
+#[cfg_attr(not(windows), allow(dead_code))]
+const WIDTH: f64 = 480.0;
+#[cfg_attr(not(windows), allow(dead_code))]
+const HEIGHT: f64 = 130.0;
+
+/// Pixels per design unit over a game whose client area is `width` ×
+/// `height` pixels: the popup takes the same share of the screen at any
+/// resolution or display scaling. Measured by height (16:9 at most), so an
+/// ultrawide screen doesn't blow it up; kept readable in a small window and
+/// in proportion on a very large screen.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn units(width: i32, height: i32) -> f64 {
+    let lines = f64::from(height).min(f64::from(width) * 9.0 / 16.0);
+    (lines / 1080.0).clamp(0.7, 3.0)
+}
+
 pub use imp::{create, show};
 
 #[cfg(windows)]
@@ -85,7 +105,10 @@ mod imp {
         time::Duration,
     };
 
-    use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, WebviewUrl, WebviewWindowBuilder};
+    use tauri::{
+        AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewUrl,
+        WebviewWindowBuilder,
+    };
     use windows::Win32::{
         Foundation::{HWND, POINT, RECT},
         Graphics::Gdi::ClientToScreen,
@@ -95,14 +118,9 @@ mod imp {
         },
     };
 
-    use super::{Popup, SHOW_EVENT};
+    use super::{HEIGHT, Popup, SHOW_EVENT, WIDTH, units};
 
     const LABEL: &str = "overlay";
-    /// Logical size of the window: room for the card and its fade.
-    const WIDTH: f64 = 380.0;
-    const HEIGHT: f64 = 72.0;
-    /// Gap from the game's top-right corner, in logical pixels.
-    const MARGIN: f64 = 20.0;
 
     /// Bumped by every show, so only the latest one's timer hides the window.
     static GENERATION: AtomicU64 = AtomicU64::new(0);
@@ -144,14 +162,20 @@ mod imp {
             return;
         }
 
-        // Top-right corner of the game's client area.
-        let Some((right, top)) = client_top_right(fg) else {
+        // Sized for the game's resolution, flush with its client area's
+        // top-right corner; the page's padding keeps the card off the edge.
+        let Some(client) = client_rect(fg) else {
             return;
         };
-        let scale = window.scale_factor().unwrap_or(1.0);
-        let width = (WIDTH * scale).round() as i32;
-        let margin = (MARGIN * scale).round() as i32;
-        let _ = window.set_position(PhysicalPosition::new(right - width - margin, top + margin));
+        let s = units(client.right - client.left, client.bottom - client.top);
+        let (width, height) = ((WIDTH * s).round() as u32, (HEIGHT * s).round() as u32);
+        // Moved first: landing on a monitor with other display scaling
+        // makes Windows rescale the window, and the size must win.
+        let _ = window.set_position(PhysicalPosition::new(
+            client.right - width as i32,
+            client.top,
+        ));
+        let _ = window.set_size(PhysicalSize::new(width, height));
 
         let ms = popup.ms;
         let _ = app.emit_to(LABEL, SHOW_EVENT, popup);
@@ -191,18 +215,20 @@ mod imp {
         });
     }
 
-    /// Screen coordinates of the window's client-area top-right corner.
-    fn client_top_right(hwnd: HWND) -> Option<(i32, i32)> {
+    /// The window's client area, in screen coordinates.
+    fn client_rect(hwnd: HWND) -> Option<RECT> {
         let mut r = RECT::default();
         // SAFETY: plain queries on a window handle; a stale one just fails.
         unsafe {
             GetClientRect(hwnd, &mut r).ok()?;
-            let mut p = POINT {
-                x: r.right,
-                y: r.top,
-            };
+            let mut p = POINT { x: 0, y: 0 };
             ClientToScreen(hwnd, &mut p).ok().ok()?;
-            Some((p.x, p.y))
+            Some(RECT {
+                left: p.x,
+                top: p.y,
+                right: p.x + r.right,
+                bottom: p.y + r.bottom,
+            })
         }
     }
 }
@@ -225,4 +251,23 @@ pub fn enabled(app: &AppHandle) -> bool {
     use tauri::Manager;
     app.try_state::<crate::AppState>()
         .is_some_and(|s| s.settings.lock().unwrap().overlay)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_popup_keeps_its_share_of_the_screen() {
+        assert_eq!(units(1920, 1080), 1.0);
+        assert_eq!(units(2560, 1440), 1440.0 / 1080.0);
+        assert_eq!(units(3840, 2160), 2.0);
+        // Ultrawide: by height, not width.
+        assert_eq!(units(3440, 1440), units(2560, 1440));
+        // A tall, narrow window: as if 16:9 at its width.
+        assert_eq!(units(1600, 2000), 900.0 / 1080.0);
+        // Small windows stay readable; huge screens stay in proportion.
+        assert_eq!(units(800, 450), 0.7);
+        assert_eq!(units(15360, 8640), 3.0);
+    }
 }

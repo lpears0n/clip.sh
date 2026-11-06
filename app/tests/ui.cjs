@@ -498,7 +498,8 @@ async function runScenario(scenario, browser) {
 // The in-game popup page: fire the events the backend sends and check what
 // it draws. The window is transparent, so it's shot over a stand-in game.
 async function overlayScenario(browser) {
-  const page = await browser.newPage({ viewport: { width: 380, height: 72 }, colorScheme: 'dark' })
+  // The window's size on a 1080-line screen (WIDTH × HEIGHT in overlay.rs).
+  const page = await browser.newPage({ viewport: { width: 480, height: 130 }, colorScheme: 'dark' })
   page.on('pageerror', (e) => { throw new Error(`page error in overlay: ${e.message}`) })
   await page.addInitScript(mockBridge, fixtures('full'))
   await page.goto(`http://localhost:${PORT}/overlay.html`)
@@ -511,18 +512,36 @@ async function overlayScenario(browser) {
   await page.waitForTimeout(300)
   assert.equal(await page.locator('#title').textContent(), 'Ready to record')
   assert.ok((await page.locator('#detail').textContent()).startsWith('Press F8 to clip'))
-  assert.ok(await page.locator('.dot').isVisible(), 'recording dot on ready')
+  assert.ok(await page.locator('.rec').isVisible(), 'recording dot on ready')
   await page.screenshot({ path: path.join(out, 'overlay-ready.png') })
 
-  await fire({ kind: 'saved', title: 'Clip saved', detail: "Tom Clancy's Rainbow Six Siege", key: null, ms: 600 })
-  await page.waitForTimeout(250)
+  // Each kind has its own glyph.
+  for (const [kind, title, glyph] of [['screenshot', 'Screenshot saved', '.camera'], ['marked', 'Moment marked', '.flag']]) {
+    await fire({ kind, title, detail: 'Fortnite', key: null, ms: 1500 })
+    await page.waitForTimeout(100)
+    assert.ok(await page.locator(glyph).isVisible(), `${glyph} on ${kind}`)
+    assert.equal(await page.locator('.glyph:visible').count(), 1, `one glyph on ${kind}`)
+  }
+
+  await fire({ kind: 'saved', title: 'Clip saved', detail: "Tom Clancy's Rainbow Six Siege", key: null, ms: 900 })
+  await page.waitForTimeout(500)
   assert.equal(await page.locator('#title').textContent(), 'Clip saved')
   assert.ok(await page.locator('.check').isVisible(), 'check mark on saved')
+  assert.equal(await page.locator('.rec').isVisible(), false, 'no recording dot on saved')
   assert.ok(!(await page.locator('#detail').textContent()).includes('Press'), 'no key hint on saved')
   await page.screenshot({ path: path.join(out, 'overlay-saved.png') })
   // Fades out on its own before the backend hides the window.
   await page.waitForTimeout(700)
   assert.equal(await page.locator('#popup').evaluate((e) => e.classList.contains('in')), false, 'fades out')
+
+  // A bigger screen gets a bigger window; the card keeps its share of it.
+  const small = await page.locator('#popup').boundingBox()
+  await page.setViewportSize({ width: 960, height: 260 })
+  await fire({ kind: 'saved', title: 'Clip saved', detail: "Tom Clancy's Rainbow Six Siege", key: null, ms: 3000 })
+  await page.waitForTimeout(500)
+  const big = await page.locator('#popup').boundingBox()
+  assert.ok(Math.abs(big.height / small.height - 2) < 0.05, `card scales with the window (${small.height} → ${big.height})`)
+  await page.screenshot({ path: path.join(out, 'overlay-saved-4k.png') })
   await page.close()
 }
 

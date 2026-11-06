@@ -21,6 +21,20 @@ const title = document.getElementById('title')!
 const detail = document.getElementById('detail')!
 let fade: ReturnType<typeof setTimeout> | undefined
 
+/** Width of the page in design units (a unit is a pixel on a 1080-line
+ *  screen). Matches `WIDTH` in src-tauri/src/overlay.rs. */
+const DESIGN_WIDTH = 480
+/** How long the card takes to fade out before the window is hidden. */
+const EXIT_MS = 220
+
+/** The backend sizes the window for the game's resolution; zoom the page
+ *  so the design fills it, sharp at any size. */
+function fit() {
+  document.documentElement.style.zoom = String(window.innerWidth / DESIGN_WIDTH)
+}
+fit()
+window.addEventListener('resize', fit)
+
 /** The user's accent and motion preference, from the main window's storage. */
 function applyPrefs() {
   let accent: Accent = 'orange'
@@ -49,12 +63,14 @@ export function show(p: Popup) {
     if (p.detail) detail.append(' · ')
   }
   detail.append(p.detail)
+  const visible = Math.max(0, p.ms - EXIT_MS)
+  popup.style.setProperty('--life', `${visible}ms`)
   // Restart the entrance even if a popup is already showing.
   popup.classList.remove('in')
   void popup.offsetWidth
   popup.classList.add('in')
   clearTimeout(fade)
-  fade = setTimeout(() => popup.classList.remove('in'), Math.max(0, p.ms - 220))
+  fade = setTimeout(() => popup.classList.remove('in'), visible)
 }
 
 listen<Popup>('overlay-show', (e) => show(e.payload))
