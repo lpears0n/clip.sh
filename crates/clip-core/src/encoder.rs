@@ -178,17 +178,23 @@ pub struct EncoderFallback {
     pub using: Encoder,
     /// Why, in the driver's words ("Failed to open session").
     pub reason: String,
+    /// It kept failing while recording, so it is skipped until Reruns
+    /// restarts. Otherwise it refused the probe and the next game tries it
+    /// again.
+    pub set_aside: bool,
 }
 
 impl EncoderFallback {
     /// The fallback, if any, when `using` was picked: the best-ranked
     /// encoder above it that refused. `refused` holds candidates and their
     /// errors (from the probe, or set aside while recording); `manual` is
-    /// the user's own choice, which outranks everything when it refused.
+    /// the user's own choice, which outranks everything when it refused;
+    /// `set_aside` lists the encoders skipped until restart.
     pub fn find(
         using: Encoder,
         manual: Option<Encoder>,
         refused: &[(Encoder, String)],
+        set_aside: &[Encoder],
     ) -> Option<Self> {
         let reason_of = |e: Encoder| refused.iter().find(|(r, _)| *r == e).map(|(_, why)| why);
         let preferred = match manual {
@@ -204,6 +210,7 @@ impl EncoderFallback {
             preferred,
             using,
             reason: brief(reason_of(preferred)?),
+            set_aside: set_aside.contains(&preferred),
         })
     }
 }
@@ -535,32 +542,38 @@ mod tests {
              gst_nv_encoder_init_session (): /GstPipeline:pipeline0/x:\nFailed to open session"
                 .to_owned(),
         );
-        let fallback = EncoderFallback::find(Encoder::Amf, None, std::slice::from_ref(&nvenc));
+        let refused = std::slice::from_ref(&nvenc);
+        let fallback = EncoderFallback::find(Encoder::Amf, None, refused, &[]);
         assert_eq!(
             fallback,
             Some(EncoderFallback {
                 preferred: Encoder::Nvenc,
                 using: Encoder::Amf,
                 reason: "Failed to open session".into(),
+                set_aside: false,
             })
         );
+        // Set aside after failing while recording: said so (no retry
+        // until restart).
+        let f = EncoderFallback::find(Encoder::Amf, None, refused, &[Encoder::Nvenc]).unwrap();
+        assert!(f.set_aside);
         // Nothing better refused: the normal choice.
-        assert_eq!(EncoderFallback::find(Encoder::Nvenc, None, &[]), None);
+        assert_eq!(EncoderFallback::find(Encoder::Nvenc, None, &[], &[]), None);
         // Only encoders ranked above the one used count.
         let x264 = (Encoder::X264, "broken".to_owned());
-        assert_eq!(EncoderFallback::find(Encoder::Amf, None, &[x264]), None);
+        assert_eq!(
+            EncoderFallback::find(Encoder::Amf, None, &[x264], &[]),
+            None
+        );
         // The user picked AMF themselves: not a fallback, whatever refused.
         assert_eq!(
-            EncoderFallback::find(
-                Encoder::Amf,
-                Some(Encoder::Amf),
-                std::slice::from_ref(&nvenc)
-            ),
+            EncoderFallback::find(Encoder::Amf, Some(Encoder::Amf), refused, &[]),
             None
         );
         // The user picked NVENC and it refused: that's the one named.
         let qsv = (Encoder::Qsv, "x".to_owned());
-        let f = EncoderFallback::find(Encoder::Mf, Some(Encoder::Nvenc), &[qsv, nvenc]).unwrap();
+        let f =
+            EncoderFallback::find(Encoder::Mf, Some(Encoder::Nvenc), &[qsv, nvenc], &[]).unwrap();
         assert_eq!(f.preferred, Encoder::Nvenc);
         // An error without debug text is kept whole.
         assert_eq!(

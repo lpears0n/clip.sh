@@ -418,7 +418,7 @@ async function runScenario(scenario, browser) {
   // NVENC refused at the game's start: AMD records it, and the header says so.
   await page.evaluate(
     (s) => window[`_${window.__listeners['status-changed']}`]({ event: 'status-changed', id: 1, payload: s }),
-    { state: 'recording', game: 'Fortnite', steam_app_id: null, session_start_ms: Date.now(), buffered_seconds: 30, replay_seconds: 30, encoder: 'amfh264enc', encoder_fallback: { preferred: 'nvenc', using: 'amf', reason: 'Failed to open session' }, capture_path: 'zerocopy', error: null, backend: 'windows', needs_screen: false, hdr: null, hdr_tonemapped: false },
+    { state: 'recording', game: 'Fortnite', steam_app_id: null, session_start_ms: Date.now(), buffered_seconds: 30, replay_seconds: 30, encoder: 'amfh264enc', encoder_fallback: { preferred: 'nvenc', using: 'amf', reason: 'Failed to open session', set_aside: false }, capture_path: 'zerocopy', error: null, backend: 'windows', needs_screen: false, hdr: null, hdr_tonemapped: false },
   )
   const fallback = page.getByText('on AMD AMF')
   await fallback.waitFor()
@@ -426,6 +426,15 @@ async function runScenario(scenario, browser) {
   assert.ok(why.includes('NVIDIA NVENC refused to start (Failed to open session)'), `fallback says why: ${why}`)
   assert.ok(why.includes('tries NVIDIA NVENC again at the next game'), 'and that the next game tries again')
   await shot('status-encoder-fallback')
+  // Set aside after failing while recording: no promise of the next game.
+  await page.evaluate(
+    (s) => window[`_${window.__listeners['status-changed']}`]({ event: 'status-changed', id: 1, payload: s }),
+    { state: 'recording', game: 'Fortnite', steam_app_id: null, session_start_ms: Date.now(), buffered_seconds: 30, replay_seconds: 30, encoder: 'amfh264enc', encoder_fallback: { preferred: 'nvenc', using: 'amf', reason: 'Failed to open session', set_aside: true }, capture_path: 'zerocopy', error: null, backend: 'windows', needs_screen: false, hdr: null, hdr_tonemapped: false },
+  )
+  await page.waitForFunction(() => document.querySelector('[title*="kept failing while recording"]'))
+  const aside = await page.getByText('on AMD AMF').getAttribute('title')
+  assert.ok(aside.includes('records with AMD AMF until it restarts'), `set aside says when: ${aside}`)
+  assert.ok(!aside.includes('next game'), 'no promise of the next game')
   // The usual encoder: no note.
   await page.evaluate(
     (s) => window[`_${window.__listeners['status-changed']}`]({ event: 'status-changed', id: 1, payload: s }),

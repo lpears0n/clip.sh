@@ -107,14 +107,20 @@ impl EncoderChoice {
             .into_iter()
             .chain(self.broken.iter().cloned())
             .collect();
-        self.fallback = EncoderFallback::find(chosen, manual, &refused);
+        self.fallback = EncoderFallback::find(chosen, manual, &refused, &self.skip());
         if let Some(f) = &self.fallback {
             tracing::warn!(
                 preferred = ?f.preferred,
                 using = ?f.using,
                 reason = %f.reason,
-                "the usual encoder refused; recording this game with another, and trying it \
-                 again at the next game"
+                "{}",
+                if f.set_aside {
+                    "the usual encoder kept failing while recording; using another until \
+                     Reruns restarts"
+                } else {
+                    "the usual encoder refused; recording this game with another, and trying \
+                     it again at the next game"
+                }
             );
         }
         self.probed.insert(codec, chosen);
@@ -615,6 +621,7 @@ mod tests {
             (f.preferred, f.using, f.reason.as_str()),
             (Encoder::Nvenc, Encoder::Amf, "Failed to open session")
         );
+        assert!(!f.set_aside, "refused the probe: retried at the next game");
         // Restarting the same game keeps the choice: no probe.
         assert_eq!(c.settled(H264, None), Some(Encoder::Amf));
         assert_eq!(c.fallback, Some(f));
@@ -650,6 +657,7 @@ mod tests {
             (f.preferred, f.reason.as_str()),
             (Encoder::Nvenc, "Failed to open session")
         );
+        assert!(f.set_aside, "the status says it waits for a restart");
         // Still skipped at the next game, even when picked by hand.
         c.new_game();
         assert_eq!(c.skip(), vec![Encoder::Nvenc]);

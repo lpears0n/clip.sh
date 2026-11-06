@@ -8,8 +8,14 @@ use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader
 
 use crate::AppState;
 
+/// Linux: the socket, and the lock that makes it ours.
 #[cfg(target_os = "linux")]
-pub type Listener = tokio::net::UnixListener;
+pub struct Listener {
+    socket: tokio::net::UnixListener,
+    /// Held for the life of the app; the kernel drops it when the process
+    /// exits, crash included.
+    lock: std::fs::File,
+}
 #[cfg(windows)]
 pub type Listener = tokio::net::windows::named_pipe::NamedPipeServer;
 
@@ -25,22 +31,58 @@ pub enum Claim {
 /// first thing at start-up, before anything slow: the socket is what marks
 /// an instance as running, so a second launch during this one's start-up
 /// (seconds, while GStreamer loads) must already find it taken.
+///
+/// Linux: an exclusive lock on `reruns.lock` beside the socket is the claim.
+/// Taking it is atomic, so two launches at the same instant can't both
+/// win, and only its holder may replace the socket file: a stale one left
+/// by a crash, never a live one.
 #[cfg(target_os = "linux")]
 pub fn claim() -> anyhow::Result<Claim> {
     use std::os::unix::fs::PermissionsExt;
 
-    if clip_ipc::request(&Request::Show).is_ok() {
-        return Ok(Claim::Running);
-    }
     let path = socket_path();
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    // No live instance answered, so any file here is stale.
-    let _ = std::fs::remove_file(&path);
-    let listener = tauri::async_runtime::block_on(async { Listener::bind(&path) })?;
-    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
-    Ok(Claim::Ours(listener))
+    let lock_path = path.with_extension("lock");
+    let mut last = None;
+    // Retried briefly: the holder binds its socket right after taking the
+    // lock, and an instance that is quitting lets go of it.
+    for _ in 0..20 {
+        if let Some(lock) = try_lock(&lock_path)? {
+            // Ours: any socket file here is left over from a crash.
+            let _ = std::fs::remove_file(&path);
+            let socket =
+                tauri::async_runtime::block_on(async { tokio::net::UnixListener::bind(&path) })?;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+            return Ok(Claim::Ours(Listener { socket, lock }));
+        }
+        match clip_ipc::request(&Request::Show) {
+            Ok(_) => return Ok(Claim::Running),
+            Err(e) => last = Some(e),
+        }
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+    anyhow::bail!(
+        "another Reruns holds the lock but doesn't answer: {}",
+        last.map(|e| e.to_string()).unwrap_or_default()
+    )
+}
+
+/// Take an exclusive lock on `path` (created if missing) without waiting:
+/// `None` while another process holds it.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn try_lock(path: &std::path::Path) -> std::io::Result<Option<std::fs::File>> {
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(path)?;
+    match file.try_lock() {
+        Ok(()) => Ok(Some(file)),
+        Err(std::fs::TryLockError::WouldBlock) => Ok(None),
+        Err(std::fs::TryLockError::Error(e)) => Err(e),
+    }
 }
 
 /// Windows: the first instance of the named pipe is the claim. Creating it
@@ -81,9 +123,12 @@ pub fn claim() -> anyhow::Result<Claim> {
 #[cfg(target_os = "linux")]
 pub fn serve(app: AppHandle, listener: Listener) {
     tracing::info!(path = %socket_path().display(), "control socket ready");
+    let Listener { socket, lock } = listener;
     tauri::async_runtime::spawn(async move {
+        // The task runs for the life of the app, and so holds the lock.
+        let _lock = lock;
         loop {
-            match listener.accept().await {
+            match socket.accept().await {
                 Ok((sock, _)) => {
                     let app = app.clone();
                     tauri::async_runtime::spawn(async move {
@@ -175,5 +220,27 @@ fn saved(result: Result<std::path::PathBuf, String>) -> Response {
             ..Response::ok(format!("saved {}", path.display()))
         },
         Err(e) => Response::err(e),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_one_process_holds_the_lock() {
+        let dir = std::env::temp_dir().join(format!("reruns-lock-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("reruns.lock");
+        let held = try_lock(&path).unwrap().expect("a free lock is taken");
+        // A second launch (another open of the file) finds it held.
+        assert!(try_lock(&path).unwrap().is_none(), "the lock is exclusive");
+        // Released when its holder goes away (as at exit, or a crash).
+        drop(held);
+        assert!(
+            try_lock(&path).unwrap().is_some(),
+            "free again once dropped"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

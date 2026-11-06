@@ -52,13 +52,17 @@
       <span class="text-secondary text-muted tabular-nums">{buffered}s</span>
       {#if status?.encoder_fallback}
         <!-- The usual encoder refused (a driver out of sessions, say): say
-             which one records instead; the next game tries the usual one. -->
+             which one records instead, and when the usual one is tried
+             again: the next game, or after a restart when it kept failing
+             while recording. -->
         {@const f = status.encoder_fallback}
+        {@const preferred = ENCODER_LABEL[f.preferred]}
+        {@const using = ENCODER_LABEL[f.using]}
         <span
           class="whitespace-nowrap text-secondary text-fg-2"
-          title="{ENCODER_LABEL[f.preferred]} refused to start ({f.reason}), so this game records with {ENCODER_LABEL[
-            f.using
-          ]}. Reruns tries {ENCODER_LABEL[f.preferred]} again at the next game."
+          title={f.set_aside
+            ? `${preferred} kept failing while recording (${f.reason}), so Reruns records with ${using} until it restarts.`
+            : `${preferred} refused to start (${f.reason}), so this game records with ${using}. Reruns tries ${preferred} again at the next game.`}
         >
           on {ENCODER_LABEL[f.using]}
         </span>
