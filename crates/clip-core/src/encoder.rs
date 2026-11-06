@@ -281,7 +281,12 @@ impl Encoder {
         ) {
             Some(msg) => match msg.view() {
                 gst::MessageView::Eos(_) => Ok(()),
-                gst::MessageView::Error(e) => Err(anyhow::anyhow!("{}", e.error())),
+                // The debug text carries the reason ("Failed to open
+                // session"); the error alone is only "Could not encode stream."
+                gst::MessageView::Error(e) => Err(match e.debug() {
+                    Some(debug) => anyhow::anyhow!("{}: {debug}", e.error()),
+                    None => anyhow::anyhow!("{}", e.error()),
+                }),
                 _ => unreachable!(),
             },
             None => Err(anyhow::anyhow!("timed out")),

@@ -204,10 +204,13 @@ fn make_source(source: &AudioSource) -> Result<gst::Element> {
 
 #[cfg(not(target_os = "linux"))]
 fn make_source(source: &AudioSource) -> Result<gst::Element> {
-    // wasapi2src: shared-mode WASAPI, low latency, no exclusive grabs.
+    // wasapi2src: shared-mode WASAPI, no exclusive grabs. Not low-latency:
+    // that leaves a 20 ms ring buffer (2 × 10 ms), so any stall of the
+    // reading thread over 20 ms, routine while a game loads the CPU, drops
+    // audio ("Can't record audio fast enough"). The default holds 200 ms.
     let mut src = gst::ElementFactory::make("wasapi2src")
         .name(source.name())
-        .property("low-latency", true);
+        .property("low-latency", false);
     if let AudioSource::Desktop(_) = source {
         // Loopback of a render device: everything playing through it. With
         // no device named, the default one.

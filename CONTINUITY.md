@@ -466,6 +466,40 @@ Ad slots: AdSlot component, off unless `"ads": true` in settings.json (728×90 u
   Not yet seen working on Windows: the meters, the hotkey change and the
   HDR log text (CI builds them; nothing here runs Windows).
 
+## Windows bugs from the owner's machine (2026-11-06)
+The owner's Windows PC (RTX 5080 + AMD iGPU, 3440×1440 HDR, SteelSeries
+Sonar) now has Rust, GStreamer 1.28.8 (per-user, with dev files, under
+`%LOCALAPPDATA%\Programs\gstreamer`; set `PKG_CONFIG`/`PKG_CONFIG_PATH`/
+`PATH` from it as CI does), ffmpeg and Process Monitor. Its log
+(`%LOCALAPPDATA%\gg.reruns.app\logs\reruns.log`) covers real Overwatch and
+Fortnite sessions on 1.0.0–1.1.2. Only bugs reproduced there were fixed:
+- **Two instances ran at once.** The single-instance check ran before
+  GStreamer init, but the control pipe was only created at the end of
+  setup, and a failure there just warned. Reproduced on 1.1.2 (two
+  launches 0.3 s apart: both kept running, the second without hotkeys).
+  Now `ipc_server::claim()` takes the pipe (Linux: socket) first thing in
+  `run()`; on Windows a launch that finds the pipe held (access denied)
+  asks that instance to show itself and exits. Checked with the fixed
+  build: three launches 0.3 s apart plus a late one leave one process.
+- **Desktop audio dropped under game load** (662 "Can't record audio fast
+  enough" in one Fortnite session, ~22 s of audio missing by AAC frame
+  count). `wasapi2src low-latency=true` gives a 20 ms ring (2 × 10 ms
+  segments, per its debug log); `false` gives 200 ms. A/B with the bundled
+  1.26.9 plugins under 32 busy threads: `true` dropped in 2 of 2 runs,
+  `false` in 0 of 2. Now `low-latency=false`.
+- **The encoder probe hid its reason**: it logged only "Could not encode
+  stream."; it now includes GStreamer's debug text ("Failed to open
+  session"). NVENC passes the probe when no game runs; during games it was
+  refused (other NVENC users on that PC: SteelSeries GG, Game Bar).
+- Not reproduced, left alone: the Windows pipe connect has no timeout (a
+  hung instance would hang new launches and `rerunsctl`), and a busy pipe
+  reads as "not running".
+- Already fixed by 1.1.2 per the log: Steam art blocked by the asset
+  scope, non-games recorded (GameOverlay, Snipping Tool, Windows Input
+  Experience), capture restart loops on "not-negotiated".
+- First test run after installing GStreamer seems to hang: that is the
+  plugin registry being built (in `gst-plugin-scanner`), not a test.
+
 ## Next, in order
 1. v1.0.0: owner adds the updater key secrets (`docs/RELEASING.md`), then
    tags `v1.0.0` on `main`; the Release workflow makes the draft. Owner
