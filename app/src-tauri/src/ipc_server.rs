@@ -34,8 +34,9 @@ pub enum Claim {
 ///
 /// Linux: an exclusive lock on `reruns.lock` beside the socket is the claim.
 /// Taking it is atomic, so two launches at the same instant can't both
-/// win, and only its holder may replace the socket file: a stale one left
-/// by a crash, never a live one.
+/// win, and only its holder may replace the socket file, and only when
+/// nothing answers on it (a stale one left by a crash, never a live one,
+/// even one owned by an older Reruns that doesn't take the lock).
 #[cfg(target_os = "linux")]
 pub fn claim() -> anyhow::Result<Claim> {
     use std::os::unix::fs::PermissionsExt;
@@ -50,7 +51,12 @@ pub fn claim() -> anyhow::Result<Claim> {
     // lock, and an instance that is quitting lets go of it.
     for _ in 0..20 {
         if let Some(lock) = try_lock(&lock_path)? {
-            // Ours: any socket file here is left over from a crash.
+            // A Reruns from before this lock owns the socket without it:
+            // hand off to it rather than take its socket away.
+            if clip_ipc::request(&Request::Show).is_ok() {
+                return Ok(Claim::Running);
+            }
+            // Nobody answers: the socket file is left over from a crash.
             let _ = std::fs::remove_file(&path);
             let socket =
                 tauri::async_runtime::block_on(async { tokio::net::UnixListener::bind(&path) })?;
