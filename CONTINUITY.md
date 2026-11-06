@@ -515,6 +515,25 @@ Fortnite sessions on 1.0.0–1.1.2. Only bugs reproduced there were fixed:
 - UI tests on Windows without pnpm: start `node_modules\.bin\vite.cmd
   --port 5173` yourself (the test reuses a running server) and set
   `CHROMIUM_PATH` to Chrome.
+- **In-game popup redesigned and scaled** (`overlay.rs`, `overlay.css`):
+  the window is sized from the game's client area, in design units of a
+  1080-line screen (`units()`: by height, 16:9 at most, clamped 0.7–3),
+  and the page zooms to fill it, so the card is ~7% of screen height at
+  any resolution or display scaling. Not yet seen over a running game.
+- **Review fixes on PR #29:** Linux takes an exclusive lock on
+  `reruns.lock` beside the socket as the instance claim (two launches at
+  once could both bind), and while holding it still asks the socket's
+  owner to show itself first (an older Reruns without the lock). The
+  fallback note says "until it restarts" for an encoder set aside while
+  recording.
+- `fits_an_export_under_a_size_limit` failed once on Windows (a
+  cancelled export's `.part` still visible) and passed 10 of 10 on its
+  own; likely a just-deleted file still held open. Watch CI for it.
+- **v1.1.3 prepared** (2026-11-06): the changes above merged in PR #29;
+  the version bump and `docs/release-notes/v1.1.3.md` are on
+  `release-1.1.3`. After that merges: tag `v1.1.3` on `main`, check the
+  Windows build log says all required elements load from the bundle,
+  then publish the draft.
 
 ## Next, in order
 1. v1.0.0: owner adds the updater key secrets (`docs/RELEASING.md`), then
