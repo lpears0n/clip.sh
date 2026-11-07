@@ -2,7 +2,9 @@
 //! the games it detects. Its list of them (about 25,000 games with their
 //! icons, Steam ids and executables) is 12.6 MB, so it is fetched at most
 //! once a week, only while the status is on, and kept on disk in a compact
-//! form. Discord loads the icon from its own CDN.
+//! form. Discord loads the icon from its own CDN. Everything here is
+//! async, run in a task of its own, so a slow network never holds up the
+//! status.
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -13,11 +15,11 @@ const LIST: &str = "https://discord.com/api/v10/applications/detectable";
 const MAX_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 
 /// What is known about the recorded game.
-pub struct Game<'a> {
-    pub name: &'a str,
+pub struct Game {
+    pub name: String,
     pub steam_app_id: Option<u32>,
     /// The executable's file stem, any case.
-    pub exe: Option<&'a str>,
+    pub exe: Option<String>,
 }
 
 /// One game in Discord's list, as kept on disk.
@@ -33,15 +35,15 @@ struct Known {
 }
 
 /// URL of Discord's icon for `game`, if Discord knows the game. May
-/// download the list (blocking).
-pub fn icon_for(game: &Game) -> Option<String> {
-    let known = known()?;
+/// download the list.
+pub async fn icon_for(game: &Game) -> Option<String> {
+    let known = known().await?;
     find(&known, game).map(|k| cdn(&k.id, &k.icon, 512))
 }
 
 /// URL of the icon of the Discord application `app_id` (Reruns' own, set
 /// in the Developer Portal), for the badge in the corner.
-pub fn app_icon(app_id: &str) -> Option<String> {
+pub async fn app_icon(app_id: &str) -> Option<String> {
     #[derive(Deserialize)]
     struct App {
         icon: Option<String>,
@@ -49,6 +51,7 @@ pub fn app_icon(app_id: &str) -> Option<String> {
     let body = get(&format!(
         "https://discord.com/api/v10/applications/{app_id}/rpc"
     ))
+    .await
     .map_err(|e| tracing::debug!("discord app icon: {e}"))
     .ok()?;
     let app: App = serde_json::from_slice(&body).ok()?;
@@ -68,13 +71,13 @@ fn find<'a>(known: &'a [Known], game: &Game) -> Option<&'a Known> {
     {
         return Some(k);
     }
-    let name = key(game.name);
+    let name = key(&game.name);
     if !name.is_empty()
         && let Some(k) = known.iter().find(|k| k.names.contains(&name))
     {
         return Some(k);
     }
-    let exe = game.exe?.to_lowercase();
+    let exe = game.exe.as_deref()?.to_lowercase();
     let hits: Vec<&Known> = known.iter().filter(|k| k.exes.contains(&exe)).collect();
     match hits[..] {
         [] => None,
@@ -107,31 +110,45 @@ fn cache_file() -> Option<PathBuf> {
 }
 
 /// The list: from disk while under a week old, else downloaded (once per
-/// run at most); a stale copy beats none.
-fn known() -> Option<Vec<Known>> {
+/// run at most); a stale copy beats none. Parsing runs off the async
+/// threads.
+async fn known() -> Option<Vec<Known>> {
     static TRIED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
     let path = cache_file()?;
-    let fresh = std::fs::metadata(&path)
+    let fresh = tokio::fs::metadata(&path)
+        .await
         .and_then(|m| m.modified())
         .is_ok_and(|t| t.elapsed().is_ok_and(|age| age < MAX_AGE));
     if !fresh && !TRIED.swap(true, std::sync::atomic::Ordering::Relaxed) {
-        match download() {
+        let downloaded = match get(LIST).await {
+            Ok(body) => tokio::task::spawn_blocking(move || parse(&body))
+                .await
+                .map_err(|e| e.to_string())
+                .and_then(|r| r),
+            Err(e) => Err(e),
+        };
+        match downloaded {
             Ok(list) => {
                 if let Some(dir) = path.parent() {
-                    let _ = std::fs::create_dir_all(dir);
+                    let _ = tokio::fs::create_dir_all(dir).await;
                 }
                 if let Ok(json) = serde_json::to_vec(&list) {
-                    let _ = std::fs::write(&path, json);
+                    let _ = tokio::fs::write(&path, json).await;
                 }
                 return Some(list);
             }
             Err(e) => tracing::info!("discord game list: {e}"),
         }
     }
-    serde_json::from_slice(&std::fs::read(&path).ok()?).ok()
+    let bytes = tokio::fs::read(&path).await.ok()?;
+    tokio::task::spawn_blocking(move || serde_json::from_slice(&bytes).ok())
+        .await
+        .ok()
+        .flatten()
 }
 
-fn download() -> Result<Vec<Known>, String> {
+/// Discord's list, down to the games with an icon and what finds them.
+fn parse(body: &[u8]) -> Result<Vec<Known>, String> {
     #[derive(Deserialize)]
     struct Detectable {
         id: String,
@@ -153,8 +170,7 @@ fn download() -> Result<Vec<Known>, String> {
         distributor: Option<String>,
         id: Option<String>,
     }
-    let body = get(LIST)?;
-    let all: Vec<Detectable> = serde_json::from_slice(&body).map_err(|e| e.to_string())?;
+    let all: Vec<Detectable> = serde_json::from_slice(body).map_err(|e| e.to_string())?;
     Ok(all
         .into_iter()
         .filter_map(|d| {
@@ -188,24 +204,21 @@ fn download() -> Result<Vec<Known>, String> {
         .collect())
 }
 
-/// GET `url` (blocking, from the status's own thread).
-fn get(url: &str) -> Result<Vec<u8>, String> {
+async fn get(url: &str) -> Result<Vec<u8>, String> {
     // The updater's TLS setup: rustls with ring, installed once.
     let _ = rustls::crypto::ring::default_provider().install_default();
-    tauri::async_runtime::block_on(async {
-        let client = reqwest::Client::builder()
-            .user_agent(concat!("Reruns/", env!("CARGO_PKG_VERSION")))
-            .timeout(Duration::from_secs(60))
-            .build()
-            .map_err(|e| e.to_string())?;
-        let response = client
-            .get(url)
-            .send()
-            .await
-            .and_then(reqwest::Response::error_for_status)
-            .map_err(|e| e.to_string())?;
-        Ok(response.bytes().await.map_err(|e| e.to_string())?.to_vec())
-    })
+    let client = reqwest::Client::builder()
+        .user_agent(concat!("Reruns/", env!("CARGO_PKG_VERSION")))
+        .timeout(Duration::from_secs(60))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let response = client
+        .get(url)
+        .send()
+        .await
+        .and_then(reqwest::Response::error_for_status)
+        .map_err(|e| e.to_string())?;
+    Ok(response.bytes().await.map_err(|e| e.to_string())?.to_vec())
 }
 
 #[cfg(test)]
@@ -238,9 +251,9 @@ mod tests {
         find(
             &list,
             &Game {
-                name,
+                name: name.into(),
                 steam_app_id: steam,
-                exe,
+                exe: exe.map(Into::into),
             },
         )
         .map(|k| k.id.clone())

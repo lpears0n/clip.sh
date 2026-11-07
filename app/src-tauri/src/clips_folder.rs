@@ -14,15 +14,31 @@ pub fn fallback() -> Option<PathBuf> {
     dirs::home_dir().map(|h| h.join("Reruns"))
 }
 
-/// Whether a file can be made in `dir`, which is created if missing.
+/// Whether a file can be made in `dir`, which is created if missing. The
+/// check makes a new file of its own and removes only that: `create_new`
+/// never opens one already there (a symlink included), and a name that is
+/// taken is skipped for the next.
 pub fn writable(dir: &Path) -> bool {
     if std::fs::create_dir_all(dir).is_err() {
         return false;
     }
-    let probe = dir.join(".reruns-write-check");
-    let ok = std::fs::write(&probe, b"").is_ok();
-    let _ = std::fs::remove_file(&probe);
-    ok
+    for n in 0..8 {
+        let probe = dir.join(format!(".reruns-write-check-{}-{n}", std::process::id()));
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&probe)
+        {
+            Ok(file) => {
+                drop(file);
+                let _ = std::fs::remove_file(&probe);
+                return true;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(_) => return false,
+        }
+    }
+    false
 }
 
 /// `None` while `dir` can be written to; otherwise `fallback`, if that can.
@@ -53,6 +69,24 @@ mod tests {
             std::fs::read_dir(&clips).unwrap().count(),
             0,
             "no check file left"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A file already in the folder under the check's name is left alone;
+    /// the check takes another name.
+    #[test]
+    fn the_check_leaves_existing_files_alone() {
+        let root = temp("existing");
+        std::fs::create_dir_all(&root).unwrap();
+        let theirs = root.join(format!(".reruns-write-check-{}-0", std::process::id()));
+        std::fs::write(&theirs, b"keep me").unwrap();
+        assert!(writable(&root));
+        assert_eq!(std::fs::read(&theirs).unwrap(), b"keep me");
+        assert_eq!(
+            std::fs::read_dir(&root).unwrap().count(),
+            1,
+            "only the check's own file was removed"
         );
         let _ = std::fs::remove_dir_all(&root);
     }

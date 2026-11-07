@@ -556,10 +556,12 @@ Fortnite sessions on 1.0.0–1.1.2. Only bugs reproduced there were fixed:
 - **Clips folder fallback:** Controlled folder access (Windows
   ransomware protection) blocks unknown apps from creating anything in
   Videos and reports "file not found"; a friend lost every clip. Now
-  `clips_folder.rs` checks writability (a check file) at start-up and
-  before each save. Default folder blocked: moves to `~/Reruns` for good,
-  saves settings, emits `settings-changed`, notifies. A folder the user
-  picked: this save goes to `~/Reruns`, one notice per run, setting kept.
+  `clips_folder.rs` checks writability (a `create_new` check file of its
+  own, never an existing one) before each save, and for the default
+  folder at start-up too. A blocked folder moves to `~/Reruns` for good
+  (saves settings, emits `settings-changed`, notifies naming the old
+  folder), the user's own pick included: the library lists one folder,
+  so fallback saves for a kept setting stayed invisible (review on #31).
 - **Discord Rich Presence** (`discord.rs`), owner's pick of layouts:
   title "<game> with Reruns", "Clipping <game>", "Ready to clip" / "N clips
   saved" (this play session), timer. Picture: Discord's own icon for the
@@ -577,8 +579,11 @@ Fortnite sessions on 1.0.0–1.1.2. Only bugs reproduced there were fixed:
   the owner's site exists. Discord shows one "Playing" card per PC, from
   the last app to set one, so this replaces Discord's own "Playing
   <game>" like Medal's does (owner's screenshot); hence the game in the
-  title. Updates at most every 4 s (Discord takes ~5 per 20 s). Over the
-  local IPC pipe (`\\.\pipe\discord-ipc-N`, Linux sockets incl.
+  title. Updates at most every 4 s (Discord takes ~5 per 20 s). A tokio
+  task: every pipe read/write has a 5 s limit (a hung Discord drops the
+  connection), and icon lookups run in their own tasks and come back as
+  messages, so turning off or a game change never waits on the network.
+  Over the local IPC pipe (`\\.\pipe\discord-ipc-N`, Linux sockets incl.
   Flatpak/Snap). Toggle
   "Show on Discord" in General, on by default. `APP_ID`
   1568480492167233636 is the owner's "Reruns" Discord application (icon:

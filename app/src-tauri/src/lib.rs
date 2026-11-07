@@ -57,9 +57,6 @@ pub(crate) struct AppState {
     /// Kept open: on Linux the copied file list is served by this process
     /// for as long as the clipboard object lives.
     clipboard: Mutex<Option<arboard::Clipboard>>,
-    /// The user has been told that saves go to the fallback folder, because
-    /// the clips folder they chose can't be written to (once per run).
-    fallback_noted: AtomicBool,
     discord: discord::Presence,
 }
 
@@ -68,37 +65,24 @@ pub(crate) struct AppState {
 pub const SETTINGS_CHANGED: &str = "settings-changed";
 
 /// The folder to save a new clip or screenshot in: the clips folder, or
-/// `~/Reruns` when it can't be written to ([`clips_folder`]). That is for
-/// good when the clips folder is still the default (the user never picked
-/// it), else for this save; either way the user is told.
+/// when that can't be written to ([`clips_folder`]), `~/Reruns` from now
+/// on. The clips folder setting moves with it, so the library (which
+/// lists one folder) shows what was saved; the user is told which folder
+/// failed, to pick it again once it works (a drive plugged back in).
 pub(crate) fn save_dir(app: &AppHandle) -> PathBuf {
-    let state = app.state::<AppState>();
-    let dir = state.clips_dir();
-    let Some(fallback) = clips_folder::fallback().and_then(|f| clips_folder::instead_of(&dir, &f))
-    else {
-        return dir;
-    };
-    if dir == clip_core::default_clips_dir() {
-        move_clips_dir(app, &dir, &fallback);
-    } else {
-        tracing::warn!(
-            from = %dir.display(),
-            to = %fallback.display(),
-            "can't write to the clips folder; saving in the fallback"
-        );
-        if !state.fallback_noted.swap(true, Ordering::Relaxed) {
-            notify_later(
-                app,
-                format!("Saved in {}", fallback.display()),
-                format!("Can't write to {}.", dir.display()),
-            );
+    let dir = app.state::<AppState>().clips_dir();
+    match clips_folder::fallback().and_then(|f| clips_folder::instead_of(&dir, &f)) {
+        Some(fallback) => {
+            move_clips_dir(app, &dir, &fallback);
+            fallback
         }
+        None => dir,
     }
-    fallback
 }
 
 /// Start-up: a default clips folder that can't be written to moves now,
-/// not at the first save.
+/// not at the first save. A folder the user picked waits for a save: its
+/// drive may not be there yet.
 fn check_default_clips_dir(app: &AppHandle) {
     let dir = app.state::<AppState>().clips_dir();
     if dir != clip_core::default_clips_dir() {
@@ -128,7 +112,9 @@ fn move_clips_dir(app: &AppHandle, from: &Path, to: &Path) {
     allow_clips_dir(app, to);
     watch_clips_dir(app, to);
     let _ = app.emit(SETTINGS_CHANGED, &settings);
-    let why = if cfg!(windows) {
+    // The default folder failing is Controlled folder access, all but
+    // always; a folder the user picked may as well be a missing drive.
+    let why = if cfg!(windows) && from == clip_core::default_clips_dir() {
         format!("Windows blocked saving in {}.", from.display())
     } else {
         format!("Can't write to {}.", from.display())
@@ -937,7 +923,6 @@ pub fn run() {
                 watcher: Mutex::new(None),
                 meter: tokio::sync::Mutex::new(None),
                 clipboard: Mutex::new(None),
-                fallback_noted: AtomicBool::new(false),
                 discord,
             });
             {
