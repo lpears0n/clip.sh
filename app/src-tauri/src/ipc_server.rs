@@ -199,8 +199,8 @@ async fn handle<S: AsyncRead + AsyncWrite + Unpin>(app: AppHandle, sock: S) -> a
 async fn respond(app: &AppHandle, req: Request) -> Response {
     let state = app.state::<AppState>();
     match req {
-        Request::Save => saved(state.service.save(state.clips_dir()).await),
-        Request::Screenshot => saved(state.service.screenshot(state.clips_dir()).await),
+        Request::Save => saved(state.service.save(crate::save_dir(app)).await),
+        Request::Screenshot => saved(state.service.screenshot(crate::save_dir(app)).await),
         Request::Mark => match state.service.mark().await {
             Ok(at) => Response::ok(format!("marked {at:.1}s into the replay")),
             Err(e) => Response::err(e),

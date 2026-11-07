@@ -312,9 +312,13 @@ Ad slots: AdSlot component, off unless `"ads": true` in settings.json (728×90 u
   one short sentence for side effects only, no reassurance or "so that"
   tails, toasts say what happened). Settings descriptions went from ~820
   words to ~217. Follow §2.8 for any new text.
-- Updates: the first check runs 20 s after start; its result has
-  `prompt: true` and opens `UpdatePrompt.svelte` once per launch ("Later"
-  closes it until the next). Any found update also shows a download icon
+- Updates: the first check runs as the app starts (it waited 20 s until
+  1.1.3, and the owner kept checking by hand first); a failed one is
+  retried after 1, 2, 4… min, up to the 6 h interval. The first answer
+  since launch has `prompt: true` and opens `UpdatePrompt.svelte` once per
+  launch ("Later" closes it until the next). The backend keeps what it
+  found (`updates::Found`) and the page asks for it (`found_update`) once
+  it listens, since the check can finish before the page has loaded. Any found update also shows a download icon
   in the header with a breathing halo (`::before`, so the button itself
   stays still; off with reduced motion). 1.0.0 still shows its old text
   button: the prompt only exists from 1.1.0 on.
@@ -533,7 +537,62 @@ Fortnite sessions on 1.0.0–1.1.2. Only bugs reproduced there were fixed:
   the version bump and `docs/release-notes/v1.1.3.md` are on
   `release-1.1.3`. After that merges: tag `v1.1.3` on `main`, check the
   Windows build log says all required elements load from the bundle,
-  then publish the draft.
+  then publish the draft. Published 2026-11-07.
+
+## After 1.1.3 (2026-11-07, branch `startup-update-check`, uncommitted)
+
+- **NVENC "Failed to open session" root cause (verified):** loading
+  Media Foundation's hardware encoder (an `mfh264enc` test frame) leaves
+  every *new* NVENC session in the process failing with
+  `NV_ENC_ERR_INVALID_VERSION`; running ones keep going. Settings'
+  capability list test-encoded every encoder at window load, so NVENC
+  worked only when Reruns started after the game (owner's and a friend's
+  logs both show it; restart fixed it). AMF and x264 probes don't do it.
+  Fix: `Encoder::offered` lists MF from its factory without a test
+  frame. Regression test `tests/nvenc_after_listing.rs` (own binary;
+  skips without NVIDIA) fails with the old probe. Still true: if the
+  per-game probe falls through to MF (no AMF/QSV), NVENC can't come back
+  until restart, though the status says "next game".
+- **Clips folder fallback:** Controlled folder access (Windows
+  ransomware protection) blocks unknown apps from creating anything in
+  Videos and reports "file not found"; a friend lost every clip. Now
+  `clips_folder.rs` checks writability (a `create_new` check file of its
+  own, never an existing one) before each save, and for the default
+  folder at start-up too. A blocked folder moves to `~/Reruns` for good
+  (saves settings, emits `settings-changed`, notifies naming the old
+  folder), the user's own pick included: the library lists one folder,
+  so fallback saves for a kept setting stayed invisible (review on #31).
+- **Discord Rich Presence** (`discord.rs`), owner's pick of layouts:
+  title "<game> with Reruns", "Clipping <game>", "Ready to clip" / "N clips
+  saved" (this play session), timer. Picture: Discord's own icon for the
+  game (what Medal shows) with Reruns' app icon as the badge
+  (`discord_icons.rs`). Source: Discord's public detectable-apps list
+  (12.6 MB, ~25k games with `icon_hash`, Steam ids in
+  `third_party_skus`, executables), fetched at most weekly and only while
+  the status shows, condensed to `%LOCALAPPDATA%\gg.reruns.app\
+  discord-games.json` (2.7 MB). Match by Steam id, then name key, then a
+  unique exe (`Status.exe`). Badge URL from `/applications/{id}/rpc`, so
+  it follows the portal's icon. Unknown game: no images, Discord shows
+  the app icon. Tried and dropped: Steam `library_600x900` art (bad
+  square crop), repo `icon.png` as badge (transparent margin). Network
+  use, otherwise only the updater. No buttons until
+  the owner's site exists. Discord shows one "Playing" card per PC, from
+  the last app to set one, so this replaces Discord's own "Playing
+  <game>" like Medal's does (owner's screenshot); hence the game in the
+  title. Updates at most every 4 s (Discord takes ~5 per 20 s). A tokio
+  task: every pipe read/write has a 5 s limit (a hung Discord drops the
+  connection), and icon lookups run in their own tasks and come back as
+  messages, so turning off or a game change never waits on the network.
+  List loads take turns (`ListCache.loading`): a lookup during the first
+  download waits for it instead of reading no copy and caching "unknown".
+  Over the local IPC pipe (`\\.\pipe\discord-ipc-N`, Linux sockets incl.
+  Flatpak/Snap). Toggle
+  "Show on Discord" in General, on by default. `APP_ID`
+  1568480492167233636 is the owner's "Reruns" Discord application (icon:
+  a full-bleed 1024 render of `icons/icon.svg`). Checked live: Discord
+  accepted SET_ACTIVITY and echoed name, details, timer and button.
+- Start-up update check runs at once (was 20 s), retries 1/2/4… min after
+  a failure, and the page asks `found_update` once listening.
 
 ## Next, in order
 1. v1.0.0: owner adds the updater key secrets (`docs/RELEASING.md`), then

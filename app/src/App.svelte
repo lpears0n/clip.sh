@@ -16,6 +16,7 @@
     onMarked,
     onUpdateAvailable,
     onLibraryChanged,
+    onSettingsChanged,
     onRenderProgress,
     onStatusChanged,
     onThumbnailReady,
@@ -58,6 +59,10 @@
   let newRelease = $state<UpdateInfo | null>(null)
   /** The update dialog: opened by the start-up check, or the header icon. */
   let updatePrompt = $state(false)
+  function announceUpdate(u: UpdateInfo) {
+    newRelease = u
+    if (u.prompt) updatePrompt = true
+  }
   let usage = $state<Usage | null>(null)
   let caps = $state<Capabilities | null>(null)
   let innerWidth = $state(1280)
@@ -379,7 +384,12 @@
       const recording = status?.state === 'recording'
       if (recording || Date.now() - now >= 60_000) now = Date.now()
     }, 1000)
+    const updates = onUpdateAvailable(announceUpdate)
+    // The first check runs as the app starts, maybe before this page
+    // listened: once listening, ask what it found.
+    updates.then(() => api.foundUpdate()).then((u) => u && announceUpdate(u))
     const unlisten = [
+      updates,
       onStatusChanged((s) => {
         status = s
         // A game started or stopped: "playing now" and play time changed.
@@ -396,11 +406,12 @@
         notify(`Screenshot saved as ${path.split(/[\\/]/).pop()}`)
       }),
       onMarked(() => notify('Moment marked')),
-      onUpdateAvailable((u) => {
-        newRelease = u
-        if (u.prompt) updatePrompt = true
-      }),
       onLibraryChanged(() => {
+        refreshLibrary()
+        refreshUsage()
+      }),
+      onSettingsChanged((s) => {
+        settings = s
         refreshLibrary()
         refreshUsage()
       }),

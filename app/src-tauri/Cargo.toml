@@ -33,6 +33,10 @@ tauri-plugin-updater = "2"
 tauri-plugin-drag = "2.1.1"
 # Copy a clip as a file (Ctrl+C, then paste it into a chat). Images not needed.
 arboard = { version = "3.7", default-features = false, features = ["wayland-data-control"] }
+# Fetching Discord's game icons: the same HTTP client and TLS (rustls with
+# ring) the updater brings, so nothing new is built.
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 rustix = { version = "1", features = ["fs"] }

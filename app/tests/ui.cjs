@@ -58,7 +58,7 @@ function fixtures(scenario) {
       : { state: 'recording', game: 'ELDEN RING', steam_app_id: 1245620, session_start_ms: now - h, buffered_seconds: 30, replay_seconds: 30, encoder: 'nvenc', capture_path: 'zerocopy', error: null, backend: 'kwin', needs_screen: false, hdr: { sdr_white_nits: 240, peak_nits: 1000 }, hdr_tonemapped: false },
     get_settings: {
       replay_seconds: 30, mic: true, clips_dir: '/home/u/Videos/Reruns', hotkey: 'F8', screenshot_hotkey: 'F9', marker_hotkey: 'F7', capture_backend: null,
-      launch_at_login: false, start_in_tray: true, close_to_tray: true, notify_on_save: true, sound_on_save: true, sound_volume: 100, clip_sound: { kind: 'builtin' }, screenshot_sound: null, overlay: true, check_for_updates: true,
+      launch_at_login: false, start_in_tray: true, close_to_tray: true, notify_on_save: true, sound_on_save: true, sound_volume: 100, clip_sound: { kind: 'builtin' }, screenshot_sound: null, overlay: true, check_for_updates: true, discord_presence: true,
       fps: 60, bitrate_kbps: 20000, codec: 'h264', encoder: null, cursor: true, zero_copy: true, hdr_compatibility: false, hdr_window_capture: false, ignored_games: [], desktop_audio: true, desktop_device: 'out-headset',
       mic_device: null, audio_bitrate_kbps: 160, storage_limit_gb: 25, protect_edits: true, protect_favorites: true, use_trash: true, ads: false,
     },
@@ -94,6 +94,8 @@ function mockBridge(data) {
     transformCallback: (cb) => { const id = ++n; window[`_${id}`] = cb; return id },
     convertFileSrc: (p) => 'http://127.0.0.1:2/' + encodeURIComponent(p),
     invoke: async (cmd, args) => {
+      // In order, so a test can check what the page did first.
+      (window.__calls ||= []).push(cmd === 'plugin:event|listen' ? `listen ${args.event}` : cmd)
       if (cmd === 'open_for_edit') return data.list_clips.find((c) => c.path === args.path) || { ...data.list_clips[0], path: args.path }
       if (cmd === 'update_clip') {
         const c = data.list_clips.find((c) => c.path === args.path)
@@ -131,6 +133,11 @@ function mockBridge(data) {
       if (cmd === 'plugin:dialog|open') return '/home/u/Music/airhorn.mp3'
       if (cmd === 'import_sound') return { kind: 'custom', path: `/home/u/.config/reruns/sounds/${args.slot}-1.mp3`, name: 'airhorn.mp3' }
       if (cmd === 'preview_sound') { (window.__previews ||= []).push(args); return null }
+      if (cmd === 'open_log_folder') {
+        window.__logOpens = (window.__logOpens || 0) + 1
+        if (window.__logError) throw window.__logError
+        return null
+      }
       if (cmd.startsWith('plugin:')) return 1
       if (cmd in data) return data[cmd]
       return null
@@ -473,6 +480,17 @@ async function runScenario(scenario, browser) {
   assert.equal(await page.locator('header').getByRole('button', { name: 'Update to 0.2.0' }).count(), 1, 'top bar shows the update')
   await page.getByRole('heading', { name: 'Updates' }).scrollIntoViewIfNeeded()
   await shot('settings-updates')
+  // Logs: the button asks the backend to open the folder; a failure shows
+  // the message, which names the folder.
+  await page.getByRole('button', { name: 'Open the log folder' }).click()
+  await page.waitForFunction(() => window.__logOpens === 1)
+  await page.evaluate(() => (window.__logError = "Can't open /home/u/.local/share/reruns/logs: no file manager"))
+  await page.getByRole('button', { name: 'Open the log folder' }).click()
+  await page.getByText("Can't open /home/u/.local/share/reruns/logs: no file manager").waitFor()
+  assert.equal(await page.evaluate(() => window.__logOpens), 2, 'each click opens the folder')
+  await page.evaluate(() => (window.__logError = null))
+  await page.locator('main > div').evaluate((el) => el.scrollTo(0, el.scrollHeight))
+  await shot('settings-logs')
   // An update found at start-up: the prompt opens once; "Later" leaves a
   // pulsing icon in the header that opens it again.
   await page.evaluate(
@@ -554,6 +572,26 @@ async function overlayScenario(browser) {
   await page.close()
 }
 
+// The check at start-up can finish before the page listens for its event:
+// the page asks for what it found, and offers it as if the event came.
+async function startupUpdateScenario(browser) {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 800 }, colorScheme: 'dark' })
+  page.on('pageerror', (e) => { throw new Error(`page error in startup update: ${e.message}`) })
+  const data = fixtures('full')
+  data.found_update = { version: '1.2.0', current_version: '1.1.0', notes: null, prompt: true }
+  await page.addInitScript(mockBridge, data)
+  await page.goto(`http://localhost:${PORT}/`)
+  await page.getByRole('dialog', { name: 'Reruns 1.2.0' }).waitFor()
+  const calls = await page.evaluate(() => window.__calls)
+  assert.ok(
+    calls.indexOf('listen update-available') < calls.indexOf('found_update'),
+    'asks for the found update only once listening for it',
+  )
+  await page.getByRole('button', { name: 'Later' }).click()
+  assert.equal(await page.locator('header').getByRole('button', { name: 'Update to 1.2.0' }).count(), 1, 'top bar shows the update')
+  await page.close()
+}
+
 async function waitForServer() {
   for (let i = 0; i < 100; i++) {
     try {
@@ -588,6 +626,8 @@ async function waitForServer() {
     if (!process.argv[2]) {
       await overlayScenario(browser)
       console.log('ok  overlay')
+      await startupUpdateScenario(browser)
+      console.log('ok  startup update')
     }
   } finally {
     await browser.close()

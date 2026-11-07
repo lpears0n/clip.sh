@@ -66,6 +66,8 @@ pub struct Status {
     pub hdr: Option<clip_core::HdrDisplay>,
     /// While recording: HDR is tone-mapped into the clips.
     pub hdr_tonemapped: bool,
+    /// The recorded game's executable (lower-case file stem), when known.
+    pub exe: Option<String>,
 }
 
 enum Cmd {
@@ -178,6 +180,7 @@ async fn run(
                 needs_screen: false,
                 hdr: None,
                 hdr_tonemapped: false,
+                exe: None,
             };
             while let Some(cmd) = cmds.recv().await {
                 match cmd {
@@ -388,5 +391,6 @@ fn status(
         needs_screen: auto.needs_screen(),
         hdr: auto.hdr(),
         hdr_tonemapped: auto.hdr_tonemapped(),
+        exe: auto.ignore_entry().and_then(|g| g.exe),
     }
 }

@@ -5,15 +5,16 @@
 //! builds once the owner has set it up; see docs/RELEASING.md). Other
 //! builds report updates as not set up, and nothing is ever checked.
 //!
-//! Only the check runs by itself: one small request shortly after start
+//! Only the check runs by itself: one small request as the app starts
 //! (whose result the app offers in a prompt) and then every six hours, so
 //! nothing is downloaded while a game is being played. Downloading and
 //! installing happen when the user asks, and end with a restart.
 
+use std::sync::Mutex;
 use std::time::Duration;
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_updater::UpdaterExt;
 
 use crate::AppState;
@@ -24,9 +25,16 @@ pub const UPDATE_AVAILABLE: &str = "update-available";
 /// unknown).
 pub const UPDATE_PROGRESS: &str = "update-progress";
 
-/// Long enough for start-up (and a login's other apps) to settle.
-const FIRST_CHECK: Duration = Duration::from_secs(20);
 const CHECK_EVERY: Duration = Duration::from_secs(6 * 60 * 60);
+/// After a failed check, as at login before the network is up: try again
+/// this soon, then twice as long each time, up to [`CHECK_EVERY`].
+const RETRY_FIRST: Duration = Duration::from_secs(60);
+
+/// The newest update the timed checks found. The first check runs as the
+/// app starts and can finish before the page listens for
+/// [`UPDATE_AVAILABLE`], so the page also asks for it ([`found_update`]).
+#[derive(Default)]
+pub struct Found(Mutex<Option<UpdateInfo>>);
 
 #[derive(Debug, Clone, Serialize)]
 pub struct UpdateInfo {
@@ -63,17 +71,18 @@ pub fn plugin(
     configured(config).then(|| tauri_plugin_updater::Builder::new().build())
 }
 
-/// Check by itself on a timer, when this build can update and the user
-/// hasn't turned it off.
+/// Check by itself, at once and then on a timer, when this build can update
+/// and the user hasn't turned it off.
 pub fn spawn_checks(app: &AppHandle) {
+    app.manage(Found::default());
     if !configured(app.config()) {
         return;
     }
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
-        tokio::time::sleep(FIRST_CHECK).await;
-        let mut announced: Option<String> = None;
-        let mut first = true;
+        // Until a check answers: what it finds is offered in a prompt.
+        let mut starting = true;
+        let mut failures = 0;
         loop {
             let enabled = app
                 .state::<AppState>()
@@ -81,22 +90,49 @@ pub fn spawn_checks(app: &AppHandle) {
                 .lock()
                 .unwrap()
                 .check_for_updates;
-            if enabled {
+            let mut wait = CHECK_EVERY;
+            if !enabled {
+                starting = false;
+            } else {
                 match check(&app).await {
-                    Ok(Some(mut info)) if announced.as_deref() != Some(info.version.as_str()) => {
-                        tracing::info!(version = %info.version, "update available");
-                        info.prompt = first;
-                        let _ = app.emit(UPDATE_AVAILABLE, &info);
-                        announced = Some(info.version);
+                    Ok(update) => {
+                        if let Some(mut info) = update {
+                            info.prompt = starting;
+                            announce(&app, info);
+                        }
+                        starting = false;
+                        failures = 0;
                     }
-                    Ok(_) => {}
-                    Err(e) => tracing::info!("update check: {e}"),
+                    Err(e) => {
+                        tracing::info!("update check: {e}");
+                        wait = retry_after(failures);
+                        failures += 1;
+                    }
                 }
             }
-            first = false;
-            tokio::time::sleep(CHECK_EVERY).await;
+            tokio::time::sleep(wait).await;
         }
     });
+}
+
+/// Keep `info` for the page and tell it, unless that version was already
+/// announced.
+fn announce(app: &AppHandle, info: UpdateInfo) {
+    let found = app.state::<Found>();
+    let mut found = found.0.lock().unwrap();
+    if found.as_ref().is_some_and(|f| f.version == info.version) {
+        return;
+    }
+    tracing::info!(version = %info.version, "update available");
+    let _ = app.emit(UPDATE_AVAILABLE, &info);
+    *found = Some(info);
+}
+
+/// How long to wait after the `failures`-th failed check in a row (from 0).
+fn retry_after(failures: u32) -> Duration {
+    RETRY_FIRST
+        .saturating_mul(1 << failures.min(16))
+        .min(CHECK_EVERY)
 }
 
 async fn check(app: &AppHandle) -> Result<Option<UpdateInfo>, String> {
@@ -123,6 +159,12 @@ pub fn update_support(app: AppHandle) -> UpdateSupport {
         configured: configured(app.config()),
         version: app.package_info().version.to_string(),
     }
+}
+
+/// The update the timed checks found, if any.
+#[tauri::command]
+pub fn found_update(found: State<Found>) -> Option<UpdateInfo> {
+    found.0.lock().unwrap().clone()
 }
 
 /// Look for a newer release now.
@@ -164,7 +206,19 @@ pub async fn install_update(app: AppHandle) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::configured;
+    use super::{CHECK_EVERY, configured, retry_after};
+    use std::time::Duration;
+
+    /// A failed check (no network yet at login) is tried again within a
+    /// minute, then less often, never later than the usual check.
+    #[test]
+    fn a_failed_check_is_retried_soon() {
+        let minutes = |f| retry_after(f).as_secs() / 60;
+        assert_eq!([0, 1, 2, 3].map(minutes), [1, 2, 4, 8]);
+        assert_eq!(retry_after(9), CHECK_EVERY);
+        assert_eq!(retry_after(u32::MAX), CHECK_EVERY);
+        assert!(retry_after(0) <= Duration::from_secs(60));
+    }
 
     fn config(plugins: serde_json::Value) -> tauri::Config {
         let mut c: tauri::Config = serde_json::from_value(serde_json::json!({
