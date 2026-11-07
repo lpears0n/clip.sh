@@ -497,6 +497,31 @@ fn open_clips_folder(app: AppHandle, state: State<'_, AppState>) -> CmdResult<()
         .map_err(err)
 }
 
+/// Show `reruns.log` in the file manager, for attaching to a bug report.
+/// The error names the folder, so it can still be found by hand.
+fn open_logs(app: &AppHandle) -> CmdResult<()> {
+    let log = logging::log_path();
+    if app.opener().reveal_item_in_dir(&log).is_ok() {
+        return Ok(());
+    }
+    // No log file yet, or a Linux desktop with neither FileManager1 nor the
+    // portal to select it: open the folder instead.
+    let dir = log.parent().unwrap_or(&log);
+    std::fs::create_dir_all(dir)
+        .map_err(err)
+        .and_then(|()| {
+            app.opener()
+                .open_path(dir.to_string_lossy(), None::<&str>)
+                .map_err(err)
+        })
+        .map_err(|e| format!("Can't open {}: {e}", dir.display()))
+}
+
+#[tauri::command]
+fn open_log_folder(app: AppHandle) -> CmdResult<()> {
+    open_logs(&app)
+}
+
 #[tauri::command]
 fn get_settings(state: State<'_, AppState>) -> Settings {
     state.settings.lock().unwrap().clone()
@@ -767,8 +792,9 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
     let save = MenuItem::with_id(app, "save", "Save clip", true, None::<&str>)?;
     let shot = MenuItem::with_id(app, "screenshot", "Save screenshot", true, None::<&str>)?;
     let mark = MenuItem::with_id(app, "mark", "Mark a moment", true, None::<&str>)?;
+    let logs = MenuItem::with_id(app, "logs", "Open log folder", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open, &save, &shot, &mark, &quit])?;
+    let menu = Menu::with_items(app, &[&open, &save, &shot, &mark, &logs, &quit])?;
     TrayIconBuilder::with_id("main")
         .icon(app.default_window_icon().unwrap().clone())
         .tooltip("Reruns")
@@ -784,6 +810,11 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
                 };
                 let app = app.clone();
                 tauri::async_runtime::spawn(async move { hotkeys::fire(&app, action).await });
+            }
+            "logs" => {
+                if let Err(e) = open_logs(app) {
+                    tracing::warn!("{e}");
+                }
             }
             "quit" => app.exit(0),
             _ => {}
@@ -1061,6 +1092,7 @@ pub fn run() {
             log_playback,
             reveal_clip,
             open_clips_folder,
+            open_log_folder,
             get_settings,
             set_settings,
             open_for_edit,

@@ -133,6 +133,11 @@ function mockBridge(data) {
       if (cmd === 'plugin:dialog|open') return '/home/u/Music/airhorn.mp3'
       if (cmd === 'import_sound') return { kind: 'custom', path: `/home/u/.config/reruns/sounds/${args.slot}-1.mp3`, name: 'airhorn.mp3' }
       if (cmd === 'preview_sound') { (window.__previews ||= []).push(args); return null }
+      if (cmd === 'open_log_folder') {
+        window.__logOpens = (window.__logOpens || 0) + 1
+        if (window.__logError) throw window.__logError
+        return null
+      }
       if (cmd.startsWith('plugin:')) return 1
       if (cmd in data) return data[cmd]
       return null
@@ -475,6 +480,17 @@ async function runScenario(scenario, browser) {
   assert.equal(await page.locator('header').getByRole('button', { name: 'Update to 0.2.0' }).count(), 1, 'top bar shows the update')
   await page.getByRole('heading', { name: 'Updates' }).scrollIntoViewIfNeeded()
   await shot('settings-updates')
+  // Logs: the button asks the backend to open the folder; a failure shows
+  // the message, which names the folder.
+  await page.getByRole('button', { name: 'Open the log folder' }).click()
+  await page.waitForFunction(() => window.__logOpens === 1)
+  await page.evaluate(() => (window.__logError = "Can't open /home/u/.local/share/reruns/logs: no file manager"))
+  await page.getByRole('button', { name: 'Open the log folder' }).click()
+  await page.getByText("Can't open /home/u/.local/share/reruns/logs: no file manager").waitFor()
+  assert.equal(await page.evaluate(() => window.__logOpens), 2, 'each click opens the folder')
+  await page.evaluate(() => (window.__logError = null))
+  await page.locator('main > div').evaluate((el) => el.scrollTo(0, el.scrollHeight))
+  await shot('settings-logs')
   // An update found at start-up: the prompt opens once; "Later" leaves a
   // pulsing icon in the header that opens it again.
   await page.evaluate(

@@ -192,6 +192,8 @@ export const api = {
   updateClip: (path: string, patch: ClipPatch) => invoke<Clip>('update_clip', { path, patch }),
   reveal: (path: string) => invoke<void>('reveal_clip', { path }),
   openFolder: () => invoke<void>('open_clips_folder'),
+  /** Rejects with a message naming the folder when it can't be opened. */
+  openLogFolder: () => invoke<void>('open_log_folder'),
   settings: () => invoke<Settings>('get_settings'),
   setSettings: (settings: Settings) => invoke<void>('set_settings', { settings }),
   openForEdit: (path: string) => invoke<Clip>('open_for_edit', { path }),

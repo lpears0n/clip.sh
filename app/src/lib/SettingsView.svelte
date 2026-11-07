@@ -195,6 +195,17 @@
               : '',
   )
 
+  // Logs: the error names the folder, so it can be found by hand.
+  let logError = $state<string | null>(null)
+  async function openLogs() {
+    logError = null
+    try {
+      await api.openLogFolder()
+    } catch (e) {
+      logError = String(e)
+    }
+  }
+
   // Save sounds
   const SOUND_FILES = ['wav', 'mp3', 'ogg', 'oga', 'opus', 'flac', 'm4a']
   let soundError = $state<string | null>(null)
@@ -384,6 +395,14 @@
               disabled={!support?.configured}
               onchange={(check_for_updates) => update({ check_for_updates })}
             />
+          </Row>
+        </div>
+      </section>
+      <section class="space-y-2">
+        <h3 class="section-title px-1">Troubleshooting</h3>
+        <div class="card divide-y divide-line">
+          <Row title="Logs" description={logError ?? undefined}>
+            <button class="btn h-9" onclick={openLogs} aria-label="Open the log folder">Open folder</button>
           </Row>
         </div>
       </section>
