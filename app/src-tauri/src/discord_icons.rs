@@ -109,42 +109,75 @@ fn cache_file() -> Option<PathBuf> {
     Some(dirs::cache_dir()?.join(app_dir).join("discord-games.json"))
 }
 
-/// The list: from disk while under a week old, else downloaded (once per
-/// run at most); a stale copy beats none. Parsing runs off the async
-/// threads.
-async fn known() -> Option<Vec<Known>> {
-    static TRIED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-    let path = cache_file()?;
-    let fresh = tokio::fs::metadata(&path)
+/// Discord's list, downloaded and condensed.
+async fn download() -> Result<Vec<Known>, String> {
+    let body = get(LIST).await?;
+    tokio::task::spawn_blocking(move || parse(&body))
         .await
-        .and_then(|m| m.modified())
-        .is_ok_and(|t| t.elapsed().is_ok_and(|age| age < MAX_AGE));
-    if !fresh && !TRIED.swap(true, std::sync::atomic::Ordering::Relaxed) {
-        let downloaded = match get(LIST).await {
-            Ok(body) => tokio::task::spawn_blocking(move || parse(&body))
-                .await
-                .map_err(|e| e.to_string())
-                .and_then(|r| r),
-            Err(e) => Err(e),
-        };
-        match downloaded {
-            Ok(list) => {
-                if let Some(dir) = path.parent() {
-                    let _ = tokio::fs::create_dir_all(dir).await;
-                }
-                if let Ok(json) = serde_json::to_vec(&list) {
-                    let _ = tokio::fs::write(&path, json).await;
-                }
-                return Some(list);
-            }
-            Err(e) => tracing::info!("discord game list: {e}"),
+        .map_err(|e| e.to_string())?
+}
+
+async fn known() -> Option<Vec<Known>> {
+    static CACHE: std::sync::OnceLock<Option<ListCache>> = std::sync::OnceLock::new();
+    let cache = CACHE
+        .get_or_init(|| cache_file().map(ListCache::new))
+        .as_ref()?;
+    cache.get(download).await
+}
+
+/// The list on disk.
+struct ListCache {
+    path: PathBuf,
+    /// A download was attempted this run (at most one).
+    tried: std::sync::atomic::AtomicBool,
+    /// One load at a time: a lookup that comes while another downloads
+    /// (the user switched games) waits for it and reads what it wrote,
+    /// rather than finding no copy yet and calling the game unknown.
+    loading: tokio::sync::Mutex<()>,
+}
+
+impl ListCache {
+    fn new(path: PathBuf) -> Self {
+        Self {
+            path,
+            tried: std::sync::atomic::AtomicBool::new(false),
+            loading: tokio::sync::Mutex::new(()),
         }
     }
-    let bytes = tokio::fs::read(&path).await.ok()?;
-    tokio::task::spawn_blocking(move || serde_json::from_slice(&bytes).ok())
-        .await
-        .ok()
-        .flatten()
+
+    /// The list: from disk while under a week old, else from `fetch`
+    /// (once per run at most); a stale copy beats none. Parsing runs off
+    /// the async threads.
+    async fn get<F, Fut>(&self, fetch: F) -> Option<Vec<Known>>
+    where
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = Result<Vec<Known>, String>>,
+    {
+        let _one_at_a_time = self.loading.lock().await;
+        let fresh = tokio::fs::metadata(&self.path)
+            .await
+            .and_then(|m| m.modified())
+            .is_ok_and(|t| t.elapsed().is_ok_and(|age| age < MAX_AGE));
+        if !fresh && !self.tried.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            match fetch().await {
+                Ok(list) => {
+                    if let Some(dir) = self.path.parent() {
+                        let _ = tokio::fs::create_dir_all(dir).await;
+                    }
+                    if let Ok(json) = serde_json::to_vec(&list) {
+                        let _ = tokio::fs::write(&self.path, json).await;
+                    }
+                    return Some(list);
+                }
+                Err(e) => tracing::info!("discord game list: {e}"),
+            }
+        }
+        let bytes = tokio::fs::read(&self.path).await.ok()?;
+        tokio::task::spawn_blocking(move || serde_json::from_slice(&bytes).ok())
+            .await
+            .ok()
+            .flatten()
+    }
 }
 
 /// Discord's list, down to the games with an icon and what finds them.
@@ -287,6 +320,34 @@ mod tests {
             "a generic exe matches nothing"
         );
         assert_eq!(found("Mystery", None, None), None);
+    }
+
+    /// A second lookup while the first downloads (the user switched games)
+    /// waits for that download and gets the list, rather than no list.
+    #[tokio::test]
+    async fn a_lookup_during_the_download_waits_for_it() {
+        let dir = std::env::temp_dir().join(format!("reruns-list-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let cache = ListCache::new(dir.join("discord-games.json"));
+        let first = cache.get(|| async {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            Ok(list())
+        });
+        let second = async {
+            // Starts once the first has begun downloading.
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            cache
+                .get(|| async { panic!("downloaded twice in one run") })
+                .await
+        };
+        let (a, b) = tokio::join!(first, second);
+        assert_eq!(a.map(|l| l.len()), Some(list().len()));
+        assert_eq!(
+            b.map(|l| l.len()),
+            Some(list().len()),
+            "read what the first wrote"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

@@ -583,6 +583,8 @@ Fortnite sessions on 1.0.0–1.1.2. Only bugs reproduced there were fixed:
   task: every pipe read/write has a 5 s limit (a hung Discord drops the
   connection), and icon lookups run in their own tasks and come back as
   messages, so turning off or a game change never waits on the network.
+  List loads take turns (`ListCache.loading`): a lookup during the first
+  download waits for it instead of reading no copy and caching "unknown".
   Over the local IPC pipe (`\\.\pipe\discord-ipc-N`, Linux sockets incl.
   Flatpak/Snap). Toggle
   "Show on Discord" in General, on by default. `APP_ID`
