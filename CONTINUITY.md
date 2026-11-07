@@ -539,7 +539,14 @@ Fortnite sessions on 1.0.0–1.1.2. Only bugs reproduced there were fixed:
   Windows build log says all required elements load from the bundle,
   then publish the draft. Published 2026-11-07.
 
-## After 1.1.3 (2026-11-07, branch `startup-update-check`, uncommitted)
+## After 1.1.3 (2026-11-07, branch `startup-update-check`, PR #31)
+
+**v1.1.4 prepared** on `release-1.1.4` (#31 merged first, as #29 did
+before 1.1.3): version bumped (workspace, `app/package.json`,
+`tauri.conf.json`, both `clip-ipc` pins, lock) and
+`docs/release-notes/v1.1.4.md` written. After that merges: tag `v1.1.4`
+on `main`'s merge commit, check the Windows build log says all required
+elements load from the bundle, then publish the draft.
 
 - **NVENC "Failed to open session" root cause (verified):** loading
   Media Foundation's hardware encoder (an `mfh264enc` test frame) leaves
