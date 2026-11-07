@@ -111,6 +111,8 @@ export interface Settings {
   overlay: boolean
   /** Look for new releases now and then (builds that can update only). */
   check_for_updates: boolean
+  /** "Clipping <game>" on the user's Discord profile while recording. */
+  discord_presence: boolean
   fps: number
   bitrate_kbps: number
   codec: Codec
@@ -216,6 +218,8 @@ export const api = {
   previewSound: (sound: Sound, volume: number) => invoke<void>('preview_sound', { sound, volume }),
   /** Whether this build can update itself, and its version. */
   updateSupport: () => invoke<{ configured: boolean; version: string }>('update_support'),
+  /** What the automatic checks found so far (also sent as `update-available`). */
+  foundUpdate: () => invoke<UpdateInfo | null>('found_update'),
   checkUpdate: () => invoke<UpdateInfo | null>('check_update'),
   /** Downloads, installs and restarts; resolves only on failure. */
   installUpdate: () => invoke<void>('install_update'),
@@ -235,6 +239,10 @@ export const onStatusChanged = (f: (s: Status) => void): Promise<UnlistenFn> =>
 
 export const onLibraryChanged = (f: () => void): Promise<UnlistenFn> =>
   listen('library-changed', () => f())
+
+/** The backend changed the settings itself (the clips folder moved). */
+export const onSettingsChanged = (f: (s: Settings) => void): Promise<UnlistenFn> =>
+  listen<Settings>('settings-changed', (e) => f(e.payload))
 
 export const onClipSaved = (f: (path: string) => void): Promise<UnlistenFn> =>
   listen<string>('clip-saved', (e) => f(e.payload))

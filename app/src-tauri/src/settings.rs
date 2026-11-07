@@ -31,6 +31,8 @@ pub struct Settings {
     pub overlay: bool,
     /// Look for a new release now and then (builds that can update only).
     pub check_for_updates: bool,
+    /// "Clipping <game>" on the user's Discord profile while recording.
+    pub discord_presence: bool,
 
     // Recording
     pub replay_seconds: u32,
@@ -110,6 +112,7 @@ impl Default for Settings {
             close_to_tray: true,
             notify_on_save: true,
             check_for_updates: true,
+            discord_presence: true,
             sound_on_save: true,
             sound_volume: 100,
             clip_sound: Sound::Builtin,

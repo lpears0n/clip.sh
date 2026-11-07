@@ -272,6 +272,13 @@
               <option value="quit">Quits Reruns</option>
             </select>
           </Row>
+          <Row title="Show on Discord" description={'“Clipping <game>” on your profile while recording.'}>
+            <Toggle
+              label="Show on Discord"
+              checked={settings.discord_presence}
+              onchange={(discord_presence) => update({ discord_presence })}
+            />
+          </Row>
         </div>
       </section>
       <section class="space-y-2">

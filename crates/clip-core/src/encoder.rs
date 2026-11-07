@@ -320,6 +320,21 @@ impl Encoder {
         matches!(self.check(codec), Some(Ok(())))
     }
 
+    /// Whether to list this encoder for `codec` in Settings: like
+    /// [`works`](Self::works), except that Media Foundation is listed when
+    /// installed without a test frame. Loading its hardware encoder leaves
+    /// NVENC unable to open a new session in this process
+    /// (`NV_ENC_ERR_INVALID_VERSION`, shown as "Failed to open session")
+    /// until Reruns restarts, so it is only loaded when chosen.
+    pub fn offered(self, codec: Codec) -> bool {
+        match self {
+            Encoder::Mf => self
+                .element(codec)
+                .is_some_and(|name| gst::ElementFactory::find(name).is_some()),
+            _ => self.works(codec),
+        }
+    }
+
     /// `None` when this encoder isn't available here (no element for the
     /// codec, or not installed); otherwise whether a test frame encoded,
     /// and the error if not.

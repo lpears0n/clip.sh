@@ -1,3 +1,6 @@
+mod clips_folder;
+mod discord;
+mod discord_icons;
 mod games;
 mod hotkeys;
 mod ipc_server;
@@ -54,6 +57,92 @@ pub(crate) struct AppState {
     /// Kept open: on Linux the copied file list is served by this process
     /// for as long as the clipboard object lives.
     clipboard: Mutex<Option<arboard::Clipboard>>,
+    /// The user has been told that saves go to the fallback folder, because
+    /// the clips folder they chose can't be written to (once per run).
+    fallback_noted: AtomicBool,
+    discord: discord::Presence,
+}
+
+/// Settings the backend changed by itself (the clips folder moving); the
+/// window replaces its copy with the payload.
+pub const SETTINGS_CHANGED: &str = "settings-changed";
+
+/// The folder to save a new clip or screenshot in: the clips folder, or
+/// `~/Reruns` when it can't be written to ([`clips_folder`]). That is for
+/// good when the clips folder is still the default (the user never picked
+/// it), else for this save; either way the user is told.
+pub(crate) fn save_dir(app: &AppHandle) -> PathBuf {
+    let state = app.state::<AppState>();
+    let dir = state.clips_dir();
+    let Some(fallback) = clips_folder::fallback().and_then(|f| clips_folder::instead_of(&dir, &f))
+    else {
+        return dir;
+    };
+    if dir == clip_core::default_clips_dir() {
+        move_clips_dir(app, &dir, &fallback);
+    } else {
+        tracing::warn!(
+            from = %dir.display(),
+            to = %fallback.display(),
+            "can't write to the clips folder; saving in the fallback"
+        );
+        if !state.fallback_noted.swap(true, Ordering::Relaxed) {
+            notify_later(
+                app,
+                format!("Saved in {}", fallback.display()),
+                format!("Can't write to {}.", dir.display()),
+            );
+        }
+    }
+    fallback
+}
+
+/// Start-up: a default clips folder that can't be written to moves now,
+/// not at the first save.
+fn check_default_clips_dir(app: &AppHandle) {
+    let dir = app.state::<AppState>().clips_dir();
+    if dir != clip_core::default_clips_dir() {
+        return;
+    }
+    if let Some(to) = clips_folder::fallback().and_then(|f| clips_folder::instead_of(&dir, &f)) {
+        move_clips_dir(app, &dir, &to);
+    }
+}
+
+/// The clips folder can't be written to: use `to` from now on.
+fn move_clips_dir(app: &AppHandle, from: &Path, to: &Path) {
+    let state = app.state::<AppState>();
+    let settings = {
+        let mut s = state.settings.lock().unwrap();
+        s.clips_dir = to.to_owned();
+        s.clone()
+    };
+    if let Err(e) = settings.save() {
+        tracing::warn!("saving settings: {e:#}");
+    }
+    tracing::warn!(
+        from = %from.display(),
+        to = %to.display(),
+        "can't write to the clips folder; moved it"
+    );
+    allow_clips_dir(app, to);
+    watch_clips_dir(app, to);
+    let _ = app.emit(SETTINGS_CHANGED, &settings);
+    let why = if cfg!(windows) {
+        format!("Windows blocked saving in {}.", from.display())
+    } else {
+        format!("Can't write to {}.", from.display())
+    };
+    notify_later(app, format!("Clips now save in {}", to.display()), why);
+}
+
+fn notify_later(app: &AppHandle, summary: String, body: String) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Err(e) = system::notify(&app, &summary, &body).await {
+            tracing::debug!("notify: {e:#}");
+        }
+    });
 }
 
 /// Put a clip on the clipboard as a file, so pasting into Discord, a chat
@@ -232,7 +321,7 @@ async fn get_capabilities(state: State<'_, AppState>) -> CmdResult<Capabilities>
                         encoder,
                         codecs: Codec::ALL
                             .into_iter()
-                            .filter(|&c| encoder.works(c))
+                            .filter(|&c| encoder.offered(c))
                             .collect(),
                     })
                     .collect()
@@ -277,8 +366,8 @@ async fn get_status(state: State<'_, AppState>) -> CmdResult<Status> {
 }
 
 #[tauri::command]
-async fn save_clip(state: State<'_, AppState>) -> CmdResult<PathBuf> {
-    state.service.save(state.clips_dir()).await
+async fn save_clip(app: AppHandle, state: State<'_, AppState>) -> CmdResult<PathBuf> {
+    state.service.save(save_dir(&app)).await
 }
 
 /// "Not a game": stop recording the current game and never detect it
@@ -327,8 +416,8 @@ fn preview_sound(sound: settings::Sound, volume: u32) {
 }
 
 #[tauri::command]
-async fn save_screenshot(state: State<'_, AppState>) -> CmdResult<PathBuf> {
-    state.service.screenshot(state.clips_dir()).await
+async fn save_screenshot(app: AppHandle, state: State<'_, AppState>) -> CmdResult<PathBuf> {
+    state.service.screenshot(save_dir(&app)).await
 }
 
 #[tauri::command]
@@ -437,6 +526,7 @@ async fn set_settings(
         watch_clips_dir(&app, &settings.clips_dir);
     }
     state.service.configure(settings.recorder_config())?;
+    state.discord.set_enabled(settings.discord_presence);
     *state.settings.lock().unwrap() = settings;
     enforce_storage(&app);
     Ok(())
@@ -803,6 +893,7 @@ pub fn run() {
                 token_path,
             );
             let bindings = settings.hotkey_bindings();
+            let discord = discord::Presence::start(settings.discord_presence);
             app.manage(AppState {
                 service,
                 settings: Mutex::new(settings),
@@ -815,7 +906,29 @@ pub fn run() {
                 watcher: Mutex::new(None),
                 meter: tokio::sync::Mutex::new(None),
                 clipboard: Mutex::new(None),
+                fallback_noted: AtomicBool::new(false),
+                discord,
             });
+            {
+                let handle = app.handle().clone();
+                app.listen_any(service::STATUS_CHANGED, move |event| {
+                    let status: serde_json::Value =
+                        serde_json::from_str(event.payload()).unwrap_or_default();
+                    let playing = (status["state"] == "recording")
+                        .then(|| status["game"].as_str())
+                        .flatten()
+                        .map(|game| discord::Activity {
+                            game: game.to_owned(),
+                            steam_app_id: status["steam_app_id"]
+                                .as_u64()
+                                .and_then(|id| u32::try_from(id).ok()),
+                            exe: status["exe"].as_str().map(str::to_owned),
+                            since_ms: status["session_start_ms"].as_u64(),
+                        });
+                    handle.state::<AppState>().discord.set_playing(playing);
+                });
+            }
+            check_default_clips_dir(app.handle());
             // Windows: the app's header is the title bar (its own minimize,
             // maximize and close), so the system frame goes before the
             // window is first shown. Windows 11 keeps the rounded corners,
@@ -843,6 +956,7 @@ pub fn run() {
                     let saved = if library::is_edit(&path) {
                         Saved::Edit
                     } else {
+                        handle.state::<AppState>().discord.clip_saved();
                         Saved::Clip
                     };
                     announce_saved(&handle, saved, &path);
@@ -931,6 +1045,7 @@ pub fn run() {
             import_sound,
             preview_sound,
             updates::update_support,
+            updates::found_update,
             updates::check_update,
             updates::install_update,
             ignore_current_game,

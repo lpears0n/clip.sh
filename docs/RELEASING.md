@@ -22,8 +22,9 @@ before: unsigned installers, and apps that never look for updates.
 4. The Release workflow builds the Windows and Linux installers and puts
    them in a **draft** release. Write the notes and publish it.
 
-Installed copies find a published release within six hours, or straight
-away with Settings → General → Check now. A tag with a dash
+Installed copies find a published release the next time they start, or
+within six hours while running, or straight away with Settings → General
+→ Check now. A tag with a dash
 (`v0.2.0-beta.1`) is published as a pre-release. Apps don't update to
 pre-releases, because they only read the latest full release.
 
@@ -62,8 +63,10 @@ from before it can't update.
 
 How the app uses it:
 
-- **Checks:** one small request three minutes after it starts, then every
-  six hours. "Check automatically" in Settings turns this off.
+- **Checks:** one small request as it starts, then every six hours. A check
+  that fails, such as at login before the network is up, is tried again a
+  minute later, then less often. "Check automatically" in Settings turns
+  this off.
 - **Downloads:** nothing downloads until you press **Update and restart**,
   so an update never competes with a game for bandwidth.
 - **Installing:** Windows runs the installer in passive mode, which shows

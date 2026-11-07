@@ -22,8 +22,12 @@ pub enum Backend {
 pub async fn fire(app: &AppHandle, action: Action) {
     let state = app.state::<crate::AppState>();
     let result = match action {
-        Action::SaveClip => state.service.save(state.clips_dir()).await.map(drop),
-        Action::Screenshot => state.service.screenshot(state.clips_dir()).await.map(drop),
+        Action::SaveClip => state.service.save(crate::save_dir(app)).await.map(drop),
+        Action::Screenshot => state
+            .service
+            .screenshot(crate::save_dir(app))
+            .await
+            .map(drop),
         Action::Marker => state.service.mark().await.map(drop),
     };
     if let Err(e) = result {
